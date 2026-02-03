@@ -1,0 +1,31 @@
+[package]
+name = "task_reminder_app"
+version = "1.4.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "1.5", features = [] }
+
+[dependencies]
+tauri = { version = "1.5", features = [ "api-all", "custom-protocol", "system-tray", "notification", "dialog" ] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.31", features = ["bundled", "chrono"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.24"
+reqwest = { version = "0.11", features = ["json", "rustls-tls", "blocking"] }
+base64 = "0.21"
+fs2 = "0.4"
+thiserror = "1.0"
+uuid = { version = "1", features = ["v4"] }
+dirs-next = "2.0"
+tokio = { version = "1", features = ["time"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.10"
+windows = { version = "0.52", features = ["UI_ViewManagement", "Win32_Graphics_Gdi"] }
+
+[features]
+# 使用 Tauri 的自定义协议功能（生产构建或 devPath 指向远程 URL 时需要）
+custom-protocol = ["tauri/custom-protocol"]

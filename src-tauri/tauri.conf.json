@@ -1,0 +1,50 @@
+{
+  "build": {
+    "beforeDevCommand": "pnpm dev -- --host 127.0.0.1 --port 5173 --strictPort",
+    "beforeBuildCommand": "pnpm build",
+    "devPath": "http://127.0.0.1:5173",
+    "distDir": "../dist"
+  },
+  "package": {
+    "productName": "TaskReminderApp",
+    "version": "1.4.0"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": true
+    },
+    "bundle": {
+      "active": true,
+      "targets": [
+        "msi"
+      ],
+      "identifier": "ylfty.top",
+      "icon": [
+        "icons/icon.ico",
+        "icons/icon.png"
+      ],
+      "windows": {
+        "wix": {
+          "language": "zh-CN"
+        }
+      }
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "任务提醒应用",
+        "width": 1000,
+        "height": 650,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "decorations": false,
+        "transparent": false
+      }
+    ],
+    "systemTray": {
+      "iconPath": "icons/icon.png",
+      "iconAsTemplate": false
+    }
+  }
+}
