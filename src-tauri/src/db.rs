@@ -425,22 +425,33 @@ impl DbManager {
                    FROM settings WHERE id = 1";
         let mut stmt = conn.prepare(sql)?;
         let row = stmt.query_row([], |row| {
+            let webdav_url: String = row.get::<_, Option<String>>(4)?.unwrap_or_default();
+            let webdav_username: String = row.get::<_, Option<String>>(5)?.unwrap_or_default();
+            let webdav_password: String = row.get::<_, Option<String>>(6)?.unwrap_or_default();
+            let webdav_root_path: String = row.get::<_, Option<String>>(7)?.unwrap_or_default();
+            let webdav_device_id: String = row
+                .get::<_, Option<String>>(13)?
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
+            let notification_theme: String = row
+                .get::<_, Option<String>>(14)?
+                .unwrap_or_else(|| "app".to_string());
             Ok(AppSettings {
                 auto_start_enabled: row.get::<_, i64>(0)? == 1,
                 sound_enabled: row.get::<_, i64>(1)? == 1,
                 snooze_minutes: row.get(2)?,
                 webdav_enabled: row.get::<_, i64>(3)? == 1,
-                webdav_url: row.get(4)?,
-                webdav_username: row.get(5)?,
-                webdav_password: row.get(6)?,
-                webdav_root_path: row.get(7)?,
+                webdav_url,
+                webdav_username,
+                webdav_password,
+                webdav_root_path,
                 webdav_sync_interval_minutes: row.get(8)?,
                 webdav_last_sync_time: row.get(9)?,
                 webdav_last_local_change_time: row.get(10)?,
                 webdav_last_sync_status: row.get(11)?,
                 webdav_last_sync_error: row.get(12)?,
-                webdav_device_id: row.get(13)?,
-                notification_theme: row.get(14)?,
+                webdav_device_id,
+                notification_theme,
             })
         })?;
         Ok(row)

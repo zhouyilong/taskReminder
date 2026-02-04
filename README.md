@@ -7,6 +7,43 @@
 - 安装 Rust 工具链
 - 安装 Tauri 构建依赖（不同操作系统依赖略有差异）
 
+## Ubuntu 24.04 开发准备（推荐）
+1. 安装系统依赖：
+```
+sudo apt-get update
+sudo apt-get install -y build-essential pkg-config libssl-dev \
+  libgtk-3-dev libsoup2.4-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev \
+  libappindicator3-dev librsvg2-dev
+```
+
+2. 安装 Node.js 与 pnpm（任选其一方式）：
+```
+corepack enable
+```
+或：
+```
+npm i -g pnpm
+```
+
+3. 安装 Rust 工具链到项目本地（避免 home 不可写或污染系统环境）：
+```
+export RUSTUP_HOME="$PWD/.dev/rustup"
+export CARGO_HOME="$PWD/.dev/cargo"
+export PATH="$CARGO_HOME/bin:$PATH"
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+rustup default stable
+```
+说明：本项目已在 `package.json` 的 `tauri` 脚本中自动注入上述变量，后续直接运行 `pnpm tauri dev` 即可。
+如果你之前用 sudo 安装过 rustup，建议执行：
+```
+sudo chown -R $USER:$USER .dev
+```
+
+4. 如果遇到 `ENOSPC`（inotify 监听数不足），可提高系统上限：
+```
+sudo sysctl -w fs.inotify.max_user_watches=524288
+```
+
 ## 启动开发
 1) 安装依赖：
 ```
