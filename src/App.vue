@@ -1,5 +1,5 @@
 <template>
-  <div class="app" :class="{ 'light-theme': isLightTheme }">
+  <div class="app" :class="{ 'light-theme': isLightTheme, 'is-linux': isLinuxPlatform }">
     <div class="titlebar" data-tauri-drag-region @dblclick="toggleMaximize">
       <div class="titlebar-left" data-tauri-drag-region>
         <span class="app-title">任务提醒 {{ appVersion }}</span>
@@ -287,14 +287,14 @@
           </div>
           <div class="table-card">
             <div class="table-scroll">
-              <table class="table">
+              <table class="table records-table">
                 <thead>
                   <tr>
                     <th>选择</th>
                     <th class="col-desc">描述</th>
                     <th>类型</th>
-                    <th>触发时间</th>
-                    <th>关闭时间</th>
+                    <th class="col-datetime">触发时间</th>
+                    <th class="col-datetime">关闭时间</th>
                     <th>操作</th>
                   </tr>
                 </thead>
@@ -311,8 +311,8 @@
                     </td>
                     <td class="col-desc">{{ record.description }}</td>
                     <td>{{ record.type === 'TASK' ? '任务' : '循环' }}</td>
-                    <td>{{ formatDateTime(record.triggerTime) }}</td>
-                    <td>{{ formatDateTime(record.closeTime) }}</td>
+                    <td class="col-datetime">{{ formatDateTime(record.triggerTime) }}</td>
+                    <td class="col-datetime">{{ formatDateTime(record.closeTime) }}</td>
                     <td>{{ formatAction(record.action) }}</td>
                   </tr>
                 </tbody>
@@ -340,7 +340,13 @@
         <input class="input" v-model="editTaskDescription" placeholder="任务描述" style="flex: 1" />
       </div>
       <div class="form-row">
-        <input class="input" type="datetime-local" v-model="editTaskReminder" />
+        <input
+          ref="editTaskReminderInput"
+          class="input"
+          type="datetime-local"
+          v-model="editTaskReminder"
+          @change="handleTaskReminderPicked"
+        />
         <button class="button secondary" @click="clearTaskReminder">清除提醒</button>
       </div>
     </Modal>
@@ -498,6 +504,10 @@ const editTaskOpen = ref(false);
 const editTaskId = ref("");
 const editTaskDescription = ref("");
 const editTaskReminder = ref("");
+const editTaskReminderInput = ref<HTMLInputElement | null>(null);
+const isLinuxPlatform =
+  typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent);
+const shouldAutoCloseDateTimePicker = !isLinuxPlatform;
 
 const editRecurringOpen = ref(false);
 const editRecurringId = ref("");
@@ -782,6 +792,19 @@ const openEditTask = (task: Task) => {
 
 const clearTaskReminder = () => {
   editTaskReminder.value = "";
+};
+
+const closeTaskReminderPicker = () => {
+  requestAnimationFrame(() => {
+    editTaskReminderInput.value?.blur();
+  });
+};
+
+const handleTaskReminderPicked = () => {
+  if (!shouldAutoCloseDateTimePicker) {
+    return;
+  }
+  closeTaskReminderPicker();
 };
 
 const saveTaskEdit = async () => {
