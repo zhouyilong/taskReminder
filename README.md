@@ -33,7 +33,7 @@ export PATH="$CARGO_HOME/bin:$PATH"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
 rustup default stable
 ```
-说明：本项目已在 `package.json` 的 `tauri` 脚本中自动注入上述变量，后续直接运行 `pnpm tauri dev` 即可。
+说明：本项目已在 `package.json` 的 `tauri` 脚本中自动注入上述变量（仅 Linux/macOS 生效）；Windows 不会注入这组变量，会使用系统默认的 Rust 环境。
 如果你之前用 sudo 安装过 rustup，建议执行：
 ```
 sudo chown -R $USER:$USER .dev

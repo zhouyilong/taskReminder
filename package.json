@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "tauri": "RUSTUP_HOME=$PWD/.dev/rustup CARGO_HOME=$PWD/.dev/cargo PATH=$PWD/.dev/cargo/bin:$PATH tauri"
+    "tauri": "node scripts/tauri.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^1.5.0",
