@@ -64,7 +64,22 @@ pnpm tauri dev
 pnpm build
 ```
 再执行 `pnpm tauri dev`，确保 Tauri 不会回退到过期的 `dist/`。
+### 开发模式与生产实例共存
+应用通过 `cfg!(debug_assertions)` 自动区分开发/生产模式:
+- **开发模式** (`pnpm tauri dev`): 编译为 debug 构建,使用独立数据目录 `data-dev`
+- **生产模式** (`pnpm tauri build`): 编译为 release 构建,使用标准数据目录 `data`
 
+两种模式拥有完全独立的:
+- 数据库文件 (`taskreminder.db`)
+- 锁文件 (`.taskreminder.lock`)
+- 应用数据存储
+
+开发实例会在以下位置显示 `[开发]` 标识:
+- 窗口标题栏: "任务提醒 1.4.0 **[开发]**"
+- 系统托盘菜单: "打开 **[开发]**"
+- 任务栏/Alt+Tab 窗口标题
+
+这样你可以同时运行开发实例和已安装的生产实例进行测试对比,互不干扰。
 ## 构建与打包
 ### 前端构建（仅 Web 资源）
 ```
