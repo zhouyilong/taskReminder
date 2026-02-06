@@ -6,6 +6,19 @@ use crate::errors::AppError;
 
 const APP_DIR_NAME: &str = "TaskReminderApp";
 const DATA_DIR_NAME: &str = "data";
+const DATA_DIR_NAME_DEV: &str = "data-dev";
+
+pub fn is_dev_mode() -> bool {
+    cfg!(debug_assertions)
+}
+
+fn data_dir_name() -> &'static str {
+    if is_dev_mode() {
+        DATA_DIR_NAME_DEV
+    } else {
+        DATA_DIR_NAME
+    }
+}
 
 pub fn resolve_data_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
     if let Ok(override_dir) = std::env::var("TASKREMINDER_DATA_DIR") {
@@ -17,7 +30,7 @@ pub fn resolve_data_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
     #[cfg(windows)]
     {
         if let Ok(appdata) = std::env::var("APPDATA") {
-            let path = PathBuf::from(appdata).join(APP_DIR_NAME).join(DATA_DIR_NAME);
+            let path = PathBuf::from(appdata).join(APP_DIR_NAME).join(data_dir_name());
             std::fs::create_dir_all(&path)?;
             return Ok(path);
         }
@@ -26,14 +39,14 @@ pub fn resolve_data_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
                 .join("AppData")
                 .join("Roaming")
                 .join(APP_DIR_NAME)
-                .join(DATA_DIR_NAME);
+                .join(data_dir_name());
             std::fs::create_dir_all(&path)?;
             return Ok(path);
         }
     }
 
     if let Some(base) = tauri::api::path::app_data_dir(&app.config()) {
-        let path = base.join(APP_DIR_NAME).join(DATA_DIR_NAME);
+        let path = base.join(APP_DIR_NAME).join(data_dir_name());
         std::fs::create_dir_all(&path)?;
         return Ok(path);
     }

@@ -2,7 +2,7 @@
   <div class="app" :class="{ 'light-theme': isLightTheme, 'is-linux': isLinuxPlatform }">
     <div class="titlebar" data-tauri-drag-region @dblclick="toggleMaximize">
       <div class="titlebar-left" data-tauri-drag-region>
-        <span class="app-title">任务提醒 {{ appVersion }}</span>
+        <span class="app-title">任务提醒 {{ appVersion }}<span v-if="isDevMode" class="dev-tag"> [开发]</span></span>
         <span class="tag">{{ syncStatusLabel }}</span>
       </div>
       <div class="titlebar-actions">
@@ -484,6 +484,7 @@ import type {
 const activeTab = ref("tasks");
 const isLightTheme = ref(localStorage.getItem("appTheme") === "light");
 const appVersion = ref("");
+const isDevMode = ref(false);
 const isWindowMaximized = ref(false);
 const uiScale = ref(Number(localStorage.getItem("uiScale") ?? "1"));
 const isSidebarCollapsed = ref(localStorage.getItem("sidebarCollapsed") === "1");
@@ -1050,6 +1051,7 @@ onMounted(async () => {
   try {
     const { getVersion } = await import("@tauri-apps/api/app");
     appVersion.value = await getVersion();
+    isDevMode.value = await api.isDevMode();
   } catch {
     // 浏览器直接访问 http://127.0.0.1:5173/ 时没有 Tauri API，忽略即可。
   }

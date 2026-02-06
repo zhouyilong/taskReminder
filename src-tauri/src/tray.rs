@@ -2,10 +2,12 @@ use tauri::{
     AppHandle, CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, WindowBuilder,
 };
 
+use crate::paths;
 use crate::state::AppState;
 
 pub fn build_tray() -> SystemTray {
-    let open = CustomMenuItem::new("open".to_string(), "打开");
+    let dev_tag = if paths::is_dev_mode() { " [开发]" } else { "" };
+    let open = CustomMenuItem::new("open".to_string(), format!("打开{}", dev_tag));
     let cloud = CustomMenuItem::new("cloud".to_string(), "云同步（WebDAV）...");
     let sync_now = CustomMenuItem::new("sync_now".to_string(), "立即同步");
     let quit = CustomMenuItem::new("quit".to_string(), "退出");
@@ -26,8 +28,13 @@ fn show_main(app: &AppHandle) {
         let _ = window.unminimize();
         let _ = window.set_focus();
     } else {
+        let title = if paths::is_dev_mode() {
+            "任务提醒应用 [开发]"
+        } else {
+            "任务提醒应用"
+        };
         let _ = WindowBuilder::new(app, "main", tauri::WindowUrl::App("index.html".into()))
-            .title("任务提醒应用")
+            .title(title)
             .inner_size(1000.0, 650.0)
             .min_inner_size(800.0, 600.0)
             .decorations(false)

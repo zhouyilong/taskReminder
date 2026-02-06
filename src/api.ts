@@ -97,4 +97,7 @@ export const api = {
   async getNotificationSnapshot(): Promise<NotificationPayload | null> {
     return invoke("get_notification_snapshot");
   },
+  async isDevMode(): Promise<boolean> {
+    return invoke("is_dev_mode");
+  },
 };

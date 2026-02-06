@@ -349,6 +349,11 @@ fn read_syscolor_theme() -> Option<String> {
 }
 
 #[tauri::command]
+fn is_dev_mode() -> bool {
+    paths::is_dev_mode()
+}
+
+#[tauri::command]
 fn get_current_theme(window: tauri::Window) -> ApiResult<String> {
     #[cfg(target_os = "windows")]
     {
@@ -447,24 +452,31 @@ fn main() {
             get_sync_status,
             get_notification_snapshot,
             get_current_theme,
-            get_debug_info
+            get_debug_info,
+            is_dev_mode
         ])
         .setup(|app| {
             let result: Result<(), AppError> = (|| {
                 let app_handle = app.handle();
                 let data_dir = paths::resolve_data_dir(&app_handle)?;
                 let lock_path = paths::lock_path(&data_dir);
-                let dev_mode = std::env::args().any(|arg| arg == "--dev");
-                if !dev_mode {
-                    match InstanceLock::try_lock(&lock_path)? {
-                        Some(lock) => {
-                            app.manage(lock);
-                        }
-                        None => {
-                            tauri::api::dialog::message::<tauri::Wry>(None, "任务提醒", "应用已经在运行");
-                            app_handle.exit(0);
-                            return Ok(());
-                        }
+                let dev_mode = paths::is_dev_mode();
+                let dialog_title = if dev_mode { "任务提醒 [开发]" } else { "任务提醒" };
+                match InstanceLock::try_lock(&lock_path)? {
+                    Some(lock) => {
+                        app.manage(lock);
+                    }
+                    None => {
+                        tauri::api::dialog::message::<tauri::Wry>(None, dialog_title, "应用已经在运行");
+                        app_handle.exit(0);
+                        return Ok(());
+                    }
+                }
+
+                // 开发模式：窗口标题加 [开发] 标识
+                if dev_mode {
+                    if let Some(window) = app.get_window("main") {
+                        let _ = window.set_title("任务提醒应用 [开发]");
                     }
                 }
 

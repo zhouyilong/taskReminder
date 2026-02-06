@@ -27,7 +27,7 @@ const tauriCommand = existsSync(localTauriBin) ? localTauriBin : "tauri";
 const child = spawn(tauriCommand, args, {
   env,
   stdio: "inherit",
-  shell: false,
+  shell: process.platform === "win32",
 });
 
 child.on("error", (error) => {
