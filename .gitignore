@@ -27,3 +27,4 @@ src-tauri/Cargo.lock
 Thumbs.db
 
 .github/
+src-tauri/gen/schemas/windows-schema.json
