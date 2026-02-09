@@ -41,6 +41,13 @@ rustup default stable
 sudo chown -R $USER:$USER .dev
 ```
 
+**⚠️ 关于 .dev 文件夹的重要说明**：
+- `.dev/` 文件夹被 `.gitignore` 忽略，不会被 Git 跟踪
+- 这是正确的设计，因为该文件夹包含特定于你本地环境的 Rust 工具链
+- **切换分支后 `.dev/` 文件夹不会消失**，它会保留在你的工作目录中
+- 如果 `.dev/` 确实不存在了，只需重新运行上述安装命令即可恢复
+- 不同开发者的 `.dev/` 内容可能不同（取决于系统架构、Rust 版本等），因此不应提交到版本控制
+
 4. 如果遇到 `ENOSPC`（inotify 监听数不足），可提高系统上限：
 ```
 sudo sysctl -w fs.inotify.max_user_watches=524288
@@ -119,6 +126,36 @@ Tauri 的打包通常需要在目标操作系统上执行：
 pnpm tauri build --bundles msi
 ```
 产物在 `src-tauri/target/release/bundle/msi/`。
+
+## 常见问题与故障排除
+
+### 为何切换分支后 .dev 文件夹就消失了？
+`.dev/` 文件夹**不会**因为切换分支而消失。它被 `.gitignore` 忽略，所以：
+- Git 不会跟踪或删除它
+- 它应该始终保留在你的工作目录中
+- 切换分支不会影响被忽略的文件和文件夹
+
+如果你发现 `.dev/` 确实不存在了，可能的原因：
+1. **首次克隆仓库**：`.dev/` 从未被创建过，需要按照"环境准备"部分的步骤 3 安装 Rust 工具链
+2. **手动清理**：可能被误删或通过 `git clean -fdx` 等命令清理掉了
+3. **不同的工作目录**：确认你在正确的项目根目录下
+
+**解决方法**：重新运行 Rust 安装命令即可：
+```bash
+export RUSTUP_HOME="$PWD/.dev/rustup"
+export CARGO_HOME="$PWD/.dev/cargo"
+export PATH="$CARGO_HOME/bin:$PATH"
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+rustup default stable
+```
+
+### 项目是否需要 .dev 文件夹？
+对于 Linux/macOS 用户：
+- **推荐使用**：避免污染系统环境，保持项目独立
+- **也可以使用系统 Rust**：如果你已安装系统级 Rust，`scripts/tauri.mjs` 会自动回退到系统 Rust
+
+对于 Windows 用户：
+- 项目不使用 `.dev/`，始终使用系统级 Rust 环境
 
 ## 分发打包后的文件
 打包后在 `src-tauri/target/release/bundle/` 中按平台生成安装包或可执行文件，常见形式：
