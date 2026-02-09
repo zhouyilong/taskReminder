@@ -1,29 +1,14 @@
 use tauri::{
-    AppHandle, CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, WindowBuilder,
+    menu::MenuBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 
 use crate::paths;
 use crate::state::AppState;
 
-pub fn build_tray() -> SystemTray {
-    let dev_tag = if paths::is_dev_mode() { " [开发]" } else { "" };
-    let open = CustomMenuItem::new("open".to_string(), format!("打开{}", dev_tag));
-    let cloud = CustomMenuItem::new("cloud".to_string(), "云同步（WebDAV）...");
-    let sync_now = CustomMenuItem::new("sync_now".to_string(), "立即同步");
-    let quit = CustomMenuItem::new("quit".to_string(), "退出");
-
-    let menu = SystemTrayMenu::new()
-        .add_item(open)
-        .add_item(cloud)
-        .add_item(sync_now)
-        .add_native_item(tauri::SystemTrayMenuItem::Separator)
-        .add_item(quit);
-
-    SystemTray::new().with_menu(menu)
-}
-
 fn show_main(app: &AppHandle) {
-    if let Some(window) = app.get_window("main") {
+    if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -33,7 +18,7 @@ fn show_main(app: &AppHandle) {
         } else {
             "任务提醒应用"
         };
-        let _ = WindowBuilder::new(app, "main", tauri::WindowUrl::App("index.html".into()))
+        let _ = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
             .title(title)
             .inner_size(1000.0, 650.0)
             .min_inner_size(800.0, 600.0)
@@ -44,14 +29,29 @@ fn show_main(app: &AppHandle) {
     }
 }
 
-pub fn handle_event(app: &AppHandle, event: SystemTrayEvent) {
-    match event {
-        SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
+pub fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
+    let dev_tag = if paths::is_dev_mode() {
+        " [开发]"
+    } else {
+        ""
+    };
+    let menu = MenuBuilder::new(app)
+        .text("open", format!("打开{}", dev_tag))
+        .text("cloud", "云同步（WebDAV）...")
+        .text("sync_now", "立即同步")
+        .separator()
+        .text("quit", "退出")
+        .build()?;
+
+    let mut tray_builder = TrayIconBuilder::with_id("main-tray")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => {
                 show_main(app);
             }
             "cloud" => {
-                let _ = app.emit_all("open-sync-settings", ());
+                let _ = app.emit("open-sync-settings", ());
                 show_main(app);
             }
             "sync_now" => {
@@ -63,10 +63,22 @@ pub fn handle_event(app: &AppHandle, event: SystemTrayEvent) {
                 app.exit(0);
             }
             _ => {}
-        },
-        SystemTrayEvent::DoubleClick { .. } | SystemTrayEvent::LeftClick { .. } => {
-            show_main(app);
-        }
-        _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main(&tray.app_handle());
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon() {
+        tray_builder = tray_builder.icon(icon.clone());
     }
+
+    let _ = tray_builder.build(app)?;
+    Ok(())
 }

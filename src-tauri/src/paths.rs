@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::errors::AppError;
 
@@ -30,7 +30,9 @@ pub fn resolve_data_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
     #[cfg(windows)]
     {
         if let Ok(appdata) = std::env::var("APPDATA") {
-            let path = PathBuf::from(appdata).join(APP_DIR_NAME).join(data_dir_name());
+            let path = PathBuf::from(appdata)
+                .join(APP_DIR_NAME)
+                .join(data_dir_name());
             std::fs::create_dir_all(&path)?;
             return Ok(path);
         }
@@ -45,13 +47,13 @@ pub fn resolve_data_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
         }
     }
 
-    if let Some(base) = tauri::api::path::app_data_dir(&app.config()) {
-        let path = base.join(APP_DIR_NAME).join(data_dir_name());
-        std::fs::create_dir_all(&path)?;
-        return Ok(path);
-    }
-
-    Err(AppError::System("无法确定数据目录".to_string()))
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::System(e.to_string()))?;
+    let path = base.join(APP_DIR_NAME).join(data_dir_name());
+    std::fs::create_dir_all(&path)?;
+    Ok(path)
 }
 
 pub fn db_path(data_dir: &PathBuf) -> PathBuf {

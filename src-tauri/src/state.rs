@@ -1,7 +1,5 @@
 use std::sync::{Arc, Mutex};
 
-use tauri::AppHandle;
-
 use crate::db::DbManager;
 use crate::models::NotificationPayload;
 use crate::scheduler::ReminderScheduler;
@@ -13,5 +11,4 @@ pub struct AppState {
     pub scheduler: ReminderScheduler,
     pub sync: CloudSyncService,
     pub notification_snapshot: Arc<Mutex<Option<NotificationPayload>>>,
-    pub app_handle: AppHandle,
 }

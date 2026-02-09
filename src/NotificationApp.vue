@@ -17,8 +17,8 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { listen, TauriEvent } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/tauri";
-import { appWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import type { NotificationPayload } from "./types";
 
@@ -28,6 +28,7 @@ const payload = ref<NotificationPayload | null>(null);
 const visible = ref(false);
 const isLightTheme = ref(false);
 const notificationTheme = ref<NotificationThemeMode>("app");
+const appWindow = getCurrentWindow();
 let timer: number | null = null;
 let unlistenTheme: (() => void) | null = null;
 let unlistenThemeEvent: (() => void) | null = null;
@@ -243,7 +244,6 @@ onMounted(async () => {
   await listen<NotificationPayload>("notification", async event => {
     await show(event.payload);
     appWindow.show();
-    appWindow.setFocus();
   });
   unlistenDataUpdated = await listen("data-updated", async () => {
     await loadNotificationTheme();

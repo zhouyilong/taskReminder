@@ -1,34 +1,15 @@
 {
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TaskReminderApp",
+  "version": "1.4.0",
+  "identifier": "ylfty.top",
   "build": {
     "beforeDevCommand": "pnpm dev -- --host 127.0.0.1 --port 5173 --strictPort",
     "beforeBuildCommand": "pnpm build",
-    "devPath": "http://127.0.0.1:5173",
-    "distDir": "../dist"
+    "devUrl": "http://127.0.0.1:5173",
+    "frontendDist": "../dist"
   },
-  "package": {
-    "productName": "TaskReminderApp",
-    "version": "1.4.0"
-  },
-  "tauri": {
-    "allowlist": {
-      "all": true
-    },
-    "bundle": {
-      "active": true,
-      "targets": [
-        "msi"
-      ],
-      "identifier": "ylfty.top",
-      "icon": [
-        "icons/icon.ico",
-        "icons/icon.png"
-      ],
-      "windows": {
-        "wix": {
-          "language": "zh-CN"
-        }
-      }
-    },
+  "app": {
     "windows": [
       {
         "label": "main",
@@ -42,9 +23,24 @@
         "transparent": false
       }
     ],
-    "systemTray": {
+    "trayIcon": {
       "iconPath": "icons/icon.png",
       "iconAsTemplate": false
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "msi"
+    ],
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "windows": {
+      "wix": {
+        "language": "zh-CN"
+      }
     }
   }
 }

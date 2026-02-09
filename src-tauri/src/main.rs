@@ -20,7 +20,9 @@ use tauri::{Manager, State, WindowEvent};
 
 use crate::db::DbManager;
 use crate::errors::AppError;
-use crate::models::{AppSettings, NotificationPayload, RecurringTask, ReminderRecord, SyncStatus, Task};
+use crate::models::{
+    AppSettings, NotificationPayload, RecurringTask, ReminderRecord, SyncStatus, Task,
+};
 use crate::scheduler::ReminderScheduler;
 use crate::single_instance::InstanceLock;
 use crate::state::AppState;
@@ -106,7 +108,11 @@ fn create_task(state: State<AppState>, description: String) -> ApiResult<Task> {
 
 #[tauri::command]
 fn update_task(state: State<AppState>, task: TaskUpdatePayload) -> ApiResult<()> {
-    into_api(state.db.update_task(&task.id, task.description.trim(), task.reminder_time.clone()))?;
+    into_api(state.db.update_task(
+        &task.id,
+        task.description.trim(),
+        task.reminder_time.clone(),
+    ))?;
     state.scheduler.cancel_task(&task.id);
     if let Some(reminder_time) = task.reminder_time {
         if scheduler::is_future(&reminder_time).unwrap_or(false) {
@@ -150,7 +156,10 @@ fn delete_task(state: State<AppState>, id: String) -> ApiResult<()> {
 }
 
 #[tauri::command]
-fn create_recurring_task(state: State<AppState>, payload: CreateRecurringPayload) -> ApiResult<RecurringTask> {
+fn create_recurring_task(
+    state: State<AppState>,
+    payload: CreateRecurringPayload,
+) -> ApiResult<RecurringTask> {
     let interval = payload.interval_minutes.max(1);
     let task = into_api(state.db.create_recurring_task(
         payload.description.trim(),
@@ -278,7 +287,11 @@ fn set_autostart(state: State<AppState>, enabled: bool) -> ApiResult<()> {
 #[tauri::command]
 fn ack_notification(state: State<AppState>, payload: AckPayload) -> ApiResult<()> {
     if let Some(record) = into_api(state.db.get_reminder_record(&payload.record_id))? {
-        into_api(state.db.update_reminder_record_action(&payload.record_id, &payload.action))?;
+        into_api(
+            state
+                .db
+                .update_reminder_record_action(&payload.record_id, &payload.action),
+        )?;
         if payload.action == "COMPLETED" && record.reminder_type == "TASK" {
             into_api(state.db.complete_task(&record.reminder_id))?;
             state.scheduler.cancel_task(&record.reminder_id);
@@ -292,12 +305,20 @@ fn ack_notification(state: State<AppState>, payload: AckPayload) -> ApiResult<()
 #[tauri::command]
 fn snooze_notification(state: State<AppState>, payload: SnoozePayload) -> ApiResult<()> {
     let minutes = payload.minutes.max(1);
-    into_api(state.db.update_reminder_record_action(&payload.record_id, "SNOOZED"))?;
+    into_api(
+        state
+            .db
+            .update_reminder_record_action(&payload.record_id, "SNOOZED"),
+    )?;
     match payload.reminder_type.as_str() {
         "TASK" => {
             if let Some(mut task) = into_api(state.db.get_task(&payload.reminder_id))? {
                 let reminder_time = add_minutes(minutes);
-                into_api(state.db.update_task(&task.id, &task.description, Some(reminder_time.clone())))?;
+                into_api(state.db.update_task(
+                    &task.id,
+                    &task.description,
+                    Some(reminder_time.clone()),
+                ))?;
                 task.reminder_time = Some(reminder_time);
                 state.scheduler.cancel_task(&task.id);
                 into_api(state.scheduler.schedule_task(task))?;
@@ -330,10 +351,11 @@ fn get_notification_snapshot(state: State<AppState>) -> ApiResult<Option<Notific
 
 #[cfg(target_os = "windows")]
 fn read_winrt_theme() -> Option<String> {
-    use windows::UI::ViewManagement::{UISettings, UIColorType};
+    use windows::UI::ViewManagement::{UIColorType, UISettings};
     let settings = UISettings::new().ok()?;
     let color = settings.GetColorValue(UIColorType::Background).ok()?;
-    let luminance = (0.299 * color.R as f32 + 0.587 * color.G as f32 + 0.114 * color.B as f32) / 255.0;
+    let luminance =
+        (0.299 * color.R as f32 + 0.587 * color.G as f32 + 0.114 * color.B as f32) / 255.0;
     Some(if luminance < 0.5 { "dark" } else { "light" }.to_string())
 }
 
@@ -388,9 +410,11 @@ fn get_debug_info(state: State<AppState>) -> ApiResult<DebugInfo> {
     let db_path = state.db.db_path();
     let metadata = std::fs::metadata(&db_path).ok();
     let db_size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
-    let db_last_modified = metadata
-        .and_then(|m| m.modified().ok())
-        .map(|time| chrono::DateTime::<Local>::from(time).format("%Y-%m-%d %H:%M:%S").to_string());
+    let db_last_modified = metadata.and_then(|m| m.modified().ok()).map(|time| {
+        chrono::DateTime::<Local>::from(time)
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string()
+    });
 
     let active_tasks = into_api(state.db.list_active_tasks())?.len();
     let completed_tasks = into_api(state.db.list_completed_tasks())?.len();
@@ -415,13 +439,11 @@ fn add_minutes(minutes: i64) -> String {
 
 fn main() {
     tauri::Builder::default()
-        .system_tray(tray::build_tray())
-        .on_system_tray_event(tray::handle_event)
-        .on_window_event(|event| {
-            if event.window().label() == "main" {
-                if let WindowEvent::CloseRequested { api, .. } = event.event() {
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
-                    let _ = event.window().hide();
+                    let _ = window.hide();
                 }
             }
         })
@@ -461,21 +483,27 @@ fn main() {
                 let data_dir = paths::resolve_data_dir(&app_handle)?;
                 let lock_path = paths::lock_path(&data_dir);
                 let dev_mode = paths::is_dev_mode();
-                let dialog_title = if dev_mode { "任务提醒 [开发]" } else { "任务提醒" };
+                let dialog_title = if dev_mode {
+                    "任务提醒 [开发]"
+                } else {
+                    "任务提醒"
+                };
                 match InstanceLock::try_lock(&lock_path)? {
                     Some(lock) => {
                         app.manage(lock);
                     }
                     None => {
-                        tauri::api::dialog::message::<tauri::Wry>(None, dialog_title, "应用已经在运行");
+                        eprintln!("{}: 应用已经在运行", dialog_title);
                         app_handle.exit(0);
                         return Ok(());
                     }
                 }
 
+                tray::setup_tray(&app_handle).map_err(|e| AppError::System(e.to_string()))?;
+
                 // 开发模式：窗口标题加 [开发] 标识
                 if dev_mode {
-                    if let Some(window) = app.get_window("main") {
+                    if let Some(window) = app.get_webview_window("main") {
                         let _ = window.set_title("任务提醒应用 [开发]");
                     }
                 }
@@ -483,7 +511,12 @@ fn main() {
                 let db = DbManager::new(paths::db_path(&data_dir))?;
                 let snapshot = Arc::new(Mutex::new(None));
                 let sync = CloudSyncService::new(app_handle.clone(), db.clone());
-                let scheduler = ReminderScheduler::new(app_handle.clone(), db.clone(), sync.clone(), snapshot.clone());
+                let scheduler = ReminderScheduler::new(
+                    app_handle.clone(),
+                    db.clone(),
+                    sync.clone(),
+                    snapshot.clone(),
+                );
                 scheduler.schedule_existing()?;
                 sync.start()?;
                 maintenance::start_maintenance(db.clone());
@@ -498,7 +531,6 @@ fn main() {
                     scheduler,
                     sync,
                     notification_snapshot: snapshot,
-                    app_handle,
                 };
                 app.manage(state);
                 Ok(())

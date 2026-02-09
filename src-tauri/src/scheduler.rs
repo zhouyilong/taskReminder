@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime};
-use tauri::{AppHandle, Manager, WindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tokio::time::sleep;
 
 use crate::db::DbManager;
@@ -113,14 +113,14 @@ impl ReminderScheduler {
         if let Some(start) = task.start_time.clone() {
             let start_time = parse_time(&start)?;
             if current_time < start_time {
-            let next = combine_date_time(now.date_naive(), start_time)?;
-            task.next_trigger = next;
-            self.db.update_recurring_task(&task)?;
-            self.sync.notify_local_change()?;
-            self.schedule_recurring(task)?;
-            return Ok(());
+                let next = combine_date_time(now.date_naive(), start_time)?;
+                task.next_trigger = next;
+                self.db.update_recurring_task(&task)?;
+                self.sync.notify_local_change()?;
+                self.schedule_recurring(task)?;
+                return Ok(());
+            }
         }
-    }
 
         if let Some(end) = task.end_time.clone() {
             let end_time = parse_time(&end)?;
@@ -162,7 +162,9 @@ impl ReminderScheduler {
         task.next_trigger = next_trigger.format("%Y-%m-%dT%H:%M:%S").to_string();
         self.db.update_recurring_task(&task)?;
 
-        let record = self.db.create_reminder_record(&task.id, &task.description, "RECURRING")?;
+        let record = self
+            .db
+            .create_reminder_record(&task.id, &task.description, "RECURRING")?;
         self.sync.notify_local_change()?;
         let settings = self.db.load_settings()?;
         let payload = NotificationPayload {
@@ -192,7 +194,9 @@ impl ReminderScheduler {
             }
         }
 
-        let record = self.db.create_reminder_record(&task.id, &task.description, "TASK")?;
+        let record = self
+            .db
+            .create_reminder_record(&task.id, &task.description, "TASK")?;
         self.sync.notify_local_change()?;
         let settings = self.db.load_settings()?;
         let payload = NotificationPayload {
@@ -209,13 +213,13 @@ impl ReminderScheduler {
 }
 
 fn emit_notification(app: &AppHandle, payload: &NotificationPayload) -> Result<(), AppError> {
-    let window = if let Some(existing) = app.get_window("notification") {
+    let window = if let Some(existing) = app.get_webview_window("notification") {
         existing
     } else {
-        WindowBuilder::new(
+        WebviewWindowBuilder::new(
             app,
             "notification",
-            tauri::WindowUrl::App("notification.html".into()),
+            WebviewUrl::App("notification.html".into()),
         )
         .title("提醒通知")
         .decorations(false)

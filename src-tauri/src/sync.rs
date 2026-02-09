@@ -9,7 +9,7 @@ use chrono::{Local, NaiveDateTime};
 use reqwest::StatusCode;
 use rusqlite::{params_from_iter, types::Value, Connection};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter};
 use tokio::time::sleep;
 
 use crate::db::DbManager;
@@ -298,7 +298,7 @@ impl CloudSyncService {
             client.upload(REMOTE_DB_NAME, &local_snapshot)?;
             snapshot = Some(local_snapshot);
             let _ = self.update_sync_status("同步成功", None);
-            let _ = self.app.emit_all("data-updated", ());
+            let _ = self.app.emit("data-updated", ());
             Ok(SyncOutcome::Success)
         })();
 
@@ -327,7 +327,7 @@ impl CloudSyncService {
             error: settings.webdav_last_sync_error.clone(),
             time: settings.webdav_last_sync_time.clone(),
         };
-        let _ = self.app.emit_all("sync-status", payload);
+        let _ = self.app.emit("sync-status", payload);
         Ok(())
     }
 }

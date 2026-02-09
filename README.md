@@ -2,6 +2,8 @@
 
 一个基于 Tauri + Vue 3 + TypeScript 的桌面任务提醒应用，包含主窗口与通知窗口。
 
+当前技术栈：**Tauri 2 + Vue 3 + TypeScript**。
+
 ## 环境准备
 - 安装 Node.js 与 pnpm
 - 安装 Rust 工具链
@@ -12,8 +14,8 @@
 ```
 sudo apt-get update
 sudo apt-get install -y build-essential pkg-config libssl-dev \
-  libgtk-3-dev libsoup2.4-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev \
-  libappindicator3-dev librsvg2-dev
+  libgtk-3-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev \
+  libayatana-appindicator3-dev librsvg2-dev
 ```
 
 2. 安装 Node.js 与 pnpm（任选其一方式）：
@@ -59,11 +61,7 @@ pnpm dev
 ```
 pnpm tauri dev
 ```
-若运行后界面仍是旧版本或未更新，可先执行：
-```
-pnpm build
-```
-再执行 `pnpm tauri dev`，确保 Tauri 不会回退到过期的 `dist/`。
+
 ### 开发模式与生产实例共存
 应用通过 `cfg!(debug_assertions)` 自动区分开发/生产模式:
 - **开发模式** (`pnpm tauri dev`): 编译为 debug 构建,使用独立数据目录 `data-dev`
@@ -75,11 +73,16 @@ pnpm build
 - 应用数据存储
 
 开发实例会在以下位置显示 `[开发]` 标识:
-- 窗口标题栏: "任务提醒 1.4.0 **[开发]**"
+- 窗口标题栏: "任务提醒应用 **[开发]**"
 - 系统托盘菜单: "打开 **[开发]**"
 - 任务栏/Alt+Tab 窗口标题
 
 这样你可以同时运行开发实例和已安装的生产实例进行测试对比,互不干扰。
+
+### Tauri 2 权限说明
+- 项目使用 capability 文件：`src-tauri/capabilities/default.json`
+- 已为主窗口和通知窗口配置基础窗口权限（包含标题栏拖拽）
+
 ## 构建与打包
 ### 前端构建（仅 Web 资源）
 ```
@@ -102,13 +105,13 @@ Tauri 的打包通常需要在目标操作系统上执行：
 如需跨平台分发，建议在对应操作系统或 CI 中分别打包。
 
 ### Windows 打包 MSI
-1) 安装 WiX Toolset（Tauri v1 生成 MSI 需要 WiX 3.11）。
+1) 安装 WiX Toolset（生成 MSI 需要 WiX 工具链）。
 2) 配置 `src-tauri/tauri.conf.json`：
 ```
+"identifier": "ylfty.top",
 "bundle": {
   "active": true,
-  "targets": ["msi"],
-  "identifier": "ylfty.top"
+  "targets": ["msi"]
 }
 ```
 3) 执行打包：

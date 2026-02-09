@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability for main and notification windows",
+  "windows": [
+    "main",
+    "notification"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-start-dragging"
+  ]
+}

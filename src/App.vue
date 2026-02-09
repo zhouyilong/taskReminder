@@ -470,7 +470,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { listen } from "@tauri-apps/api/event";
-import { appWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import Modal from "./components/Modal.vue";
 import { api } from "./api";
 import type {
@@ -486,6 +486,7 @@ const isLightTheme = ref(localStorage.getItem("appTheme") === "light");
 const appVersion = ref("");
 const isDevMode = ref(false);
 const isWindowMaximized = ref(false);
+const appWindow = getCurrentWindow();
 const uiScale = ref(Number(localStorage.getItem("uiScale") ?? "1"));
 const isSidebarCollapsed = ref(localStorage.getItem("sidebarCollapsed") === "1");
 
