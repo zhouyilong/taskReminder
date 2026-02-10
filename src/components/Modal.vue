@@ -17,7 +17,7 @@
       <div class="modal-body">
         <slot />
       </div>
-      <div class="modal-actions" style="margin-top: 16px; display: flex; justify-content: flex-end; gap: 8px;">
+      <div class="modal-actions">
         <button class="button secondary" type="button" @click="onClose">取消</button>
         <button class="button" type="button" @click="onConfirm">确认</button>
       </div>

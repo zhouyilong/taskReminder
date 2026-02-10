@@ -117,7 +117,10 @@
       <section class="content">
         <Transition name="fade" mode="out-in">
           <div v-if="activeTab === 'tasks'" key="tasks" class="tab-panel">
-          <div class="section-title">待办事项</div>
+          <div class="section-heading">
+            <div class="section-title">待办事项</div>
+            <span class="section-meta">共 {{ tasks.length }} 条任务</span>
+          </div>
           <div class="form-row compact">
             <label class="field-label">描述</label>
             <input class="input" v-model="newTaskDescription" placeholder="输入任务描述" style="flex: 1" />
@@ -166,7 +169,10 @@
           </div>
           </div>
           <div v-else-if="activeTab === 'completed'" key="completed" class="tab-panel">
-          <div class="section-title">已办事项</div>
+          <div class="section-heading">
+            <div class="section-title">已办事项</div>
+            <span class="section-meta">筛选后 {{ filteredCompleted.length }} 条</span>
+          </div>
           <div class="form-row compact">
             <label class="field-label">描述</label>
             <input class="input" v-model="completedFilter" placeholder="按描述过滤" style="flex: 1" />
@@ -214,7 +220,10 @@
           </div>
           </div>
           <div v-else-if="activeTab === 'recurring'" key="recurring" class="tab-panel">
-          <div class="section-title">循环提醒</div>
+          <div class="section-heading">
+            <div class="section-title">循环提醒</div>
+            <span class="section-meta">共 {{ recurringTasks.length }} 条配置</span>
+          </div>
           <div class="form-row compact">
             <label class="field-label">描述</label>
             <input class="input" v-model="newRecurringDescription" placeholder="输入提醒描述" style="flex: 1" />
@@ -269,7 +278,10 @@
           </div>
           </div>
           <div v-else-if="activeTab === 'records'" key="records" class="tab-panel">
-          <div class="section-title">提醒记录</div>
+          <div class="section-heading">
+            <div class="section-title">提醒记录</div>
+            <span class="section-meta">筛选后 {{ filteredRecords.length }} 条</span>
+          </div>
           <div class="form-row compact">
             <label class="field-label">开始</label>
             <input class="input" type="date" v-model="recordFilterStart" />
