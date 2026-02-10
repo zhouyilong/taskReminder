@@ -1,11 +1,23 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { accessSync, constants, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const args = process.argv.slice(2);
 const projectRoot = process.cwd();
 const env = { ...process.env };
-const isDevCommand = args[0] === "dev";
+
+if (process.platform === "linux") {
+  const driRenderNode = "/dev/dri/renderD128";
+  try {
+    accessSync(driRenderNode, constants.R_OK | constants.W_OK);
+  } catch {
+    env.WEBKIT_DISABLE_DMABUF_RENDERER ??= "1";
+    env.LIBGL_ALWAYS_SOFTWARE ??= "1";
+    console.warn(
+      "[tauri-runner] /dev/dri/renderD128 cannot be accessed; using software rendering. Add user to 'render' group and re-login to restore GPU rendering.",
+    );
+  }
+}
 
 const localTauriBin =
   process.platform === "win32"

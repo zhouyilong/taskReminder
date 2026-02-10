@@ -40,6 +40,13 @@ rustup default stable
 sudo sysctl -w fs.inotify.max_user_watches=524288
 ```
 
+5. 如果启动时出现 `libEGL warning: failed to open /dev/dri/renderD128: 权限不够`：
+```
+sudo usermod -aG render $USER
+```
+执行后重新登录系统（或重启）使组权限生效。  
+项目的 `scripts/tauri.mjs` 已在检测到该权限问题时自动降级为软件渲染，用于避免开发期反复刷警告。
+
 ## 启动开发
 1) 安装依赖：
 ```
