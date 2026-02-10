@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 const args = process.argv.slice(2);
 const projectRoot = process.cwd();
 const env = { ...process.env };
+const isDevCommand = args[0] === "dev";
 
 const localTauriBin =
   process.platform === "win32"
