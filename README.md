@@ -27,19 +27,13 @@ corepack enable
 npm i -g pnpm
 ```
 
-3. 安装 Rust 工具链到项目本地（避免 home 不可写或污染系统环境）：
+3. 安装 Rust 工具链（全局用户级，推荐）：
 ```
-export RUSTUP_HOME="$PWD/.dev/rustup"
-export CARGO_HOME="$PWD/.dev/cargo"
-export PATH="$CARGO_HOME/bin:$PATH"
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
 rustup default stable
 ```
-说明：本项目已在 `package.json` 的 `tauri` 脚本中自动注入上述变量（仅 Linux/macOS 生效）；Windows 不会注入这组变量，会使用系统默认的 Rust 环境。
-如果你之前用 sudo 安装过 rustup，建议执行：
-```
-sudo chown -R $USER:$USER .dev
-```
+说明：项目默认使用系统环境中的 `rustup` / `cargo`
 
 4. 如果遇到 `ENOSPC`（inotify 监听数不足），可提高系统上限：
 ```
