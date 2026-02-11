@@ -22,11 +22,7 @@
         "decorations": false,
         "transparent": false
       }
-    ],
-    "trayIcon": {
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": false
-    }
+    ]
   },
   "bundle": {
     "active": true,
