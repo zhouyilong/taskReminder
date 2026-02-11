@@ -482,7 +482,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
 import Modal from "./components/Modal.vue";
 import { api } from "./api";
 import type {
@@ -498,7 +498,14 @@ const isLightTheme = ref(localStorage.getItem("appTheme") === "light");
 const appVersion = ref("");
 const isDevMode = ref(false);
 const isWindowMaximized = ref(false);
-const appWindow = getCurrentWindow();
+const resolveCurrentWindow = (): TauriWindow | null => {
+  try {
+    return getCurrentWindow();
+  } catch {
+    return null;
+  }
+};
+const appWindow = resolveCurrentWindow();
 const uiScale = ref(Number(localStorage.getItem("uiScale") ?? "1"));
 const isSidebarCollapsed = ref(localStorage.getItem("sidebarCollapsed") === "1");
 
@@ -956,10 +963,16 @@ const toggleTheme = () => {
 };
 
 const handleMinimize = async () => {
+  if (!appWindow) {
+    return;
+  }
   await appWindow.minimize();
 };
 
 const handleMaximize = async () => {
+  if (!appWindow) {
+    return;
+  }
   const isMax = await appWindow.isMaximized();
   isWindowMaximized.value = !isMax;
   if (isMax) {
@@ -975,6 +988,9 @@ const toggleMaximize = async () => {
 
 const handleClose = async () => {
   // 默认“关闭”改为最小化到托盘：隐藏主窗口，保留后台运行（托盘可重新打开/退出）。
+  if (!appWindow) {
+    return;
+  }
   await appWindow.hide();
 };
 
@@ -1068,25 +1084,47 @@ onMounted(async () => {
   } catch {
     // 浏览器直接访问 http://127.0.0.1:5173/ 时没有 Tauri API，忽略即可。
   }
-  await refreshAll();
-  await loadSettings();
-  syncStatus.value = await api.getSyncStatus();
-  isWindowMaximized.value = await appWindow.isMaximized();
-  appWindow.onResized(async () => {
-    isWindowMaximized.value = await appWindow.isMaximized();
-  });
-  window.addEventListener("click", hideContextMenu);
-  await listen<SyncStatus>("sync-status", event => {
-    syncStatus.value = event.payload;
-  });
-  await listen("data-updated", async () => {
+  try {
     await refreshAll();
     await loadSettings();
     syncStatus.value = await api.getSyncStatus();
-  });
-  await listen("open-sync-settings", () => {
-    openWebdav();
-  });
+  } catch (error) {
+    console.error("[main] 初始化数据失败", error);
+  }
+  if (appWindow) {
+    try {
+      isWindowMaximized.value = await appWindow.isMaximized();
+      appWindow.onResized(async () => {
+        isWindowMaximized.value = await appWindow.isMaximized();
+      });
+    } catch (error) {
+      console.error("[main] 初始化窗口状态失败", error);
+    }
+  }
+  window.addEventListener("click", hideContextMenu);
+  try {
+    await listen<SyncStatus>("sync-status", event => {
+      syncStatus.value = event.payload;
+    });
+  } catch (error) {
+    console.error("[main] 监听 sync-status 失败", error);
+  }
+  try {
+    await listen("data-updated", async () => {
+      await refreshAll();
+      await loadSettings();
+      syncStatus.value = await api.getSyncStatus();
+    });
+  } catch (error) {
+    console.error("[main] 监听 data-updated 失败", error);
+  }
+  try {
+    await listen("open-sync-settings", () => {
+      openWebdav();
+    });
+  } catch (error) {
+    console.error("[main] 监听 open-sync-settings 失败", error);
+  }
 });
 
 onBeforeUnmount(() => {

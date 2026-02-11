@@ -4,6 +4,8 @@ import { resolve } from "path";
 
 // 使用多入口以支持通知窗口
 export default defineConfig({
+  // Use relative asset paths so packaged desktop builds can always resolve JS/CSS.
+  base: "./",
   plugins: [vue()],
   server: {
     host: "127.0.0.1",
@@ -15,6 +17,7 @@ export default defineConfig({
     }
   },
   build: {
+    target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
