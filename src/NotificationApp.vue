@@ -18,7 +18,7 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { listen, TauriEvent } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import type { NotificationPayload } from "./types";
 
@@ -28,7 +28,14 @@ const payload = ref<NotificationPayload | null>(null);
 const visible = ref(false);
 const isLightTheme = ref(false);
 const notificationTheme = ref<NotificationThemeMode>("app");
-const appWindow = getCurrentWindow();
+const resolveCurrentWindow = (): TauriWindow | null => {
+  try {
+    return getCurrentWindow();
+  } catch {
+    return null;
+  }
+};
+const appWindow = resolveCurrentWindow();
 let timer: number | null = null;
 let unlistenTheme: (() => void) | null = null;
 let unlistenThemeEvent: (() => void) | null = null;
@@ -61,6 +68,12 @@ const applyTheme = (theme?: string | null) => {
 };
 
 const readSystemTheme = async () => {
+  if (!appWindow) {
+    if (mediaQuery) {
+      setThemeClass(mediaQuery.matches);
+    }
+    return;
+  }
   try {
     const theme = await appWindow.theme();
     if (theme) {
@@ -147,14 +160,16 @@ const setupThemeListeners = async () => {
     }
   }
 
-  try {
-    unlistenTheme = await appWindow.onThemeChanged(theme => {
-      if (notificationTheme.value === "system") {
-        applyTheme(theme);
-      }
-    });
-  } catch {
-    // 忽略主题监听失败
+  if (appWindow) {
+    try {
+      unlistenTheme = await appWindow.onThemeChanged(theme => {
+        if (notificationTheme.value === "system") {
+          applyTheme(theme);
+        }
+      });
+    } catch {
+      // 忽略主题监听失败
+    }
   }
 
   try {
@@ -195,7 +210,9 @@ const show = async (data: NotificationPayload) => {
 const hide = async () => {
   visible.value = false;
   stopThemePolling();
-  await appWindow.hide();
+  if (appWindow) {
+    await appWindow.hide();
+  }
 };
 
 const handleDismiss = async () => {
@@ -237,18 +254,32 @@ onMounted(async () => {
   await setupThemeListeners();
   await loadNotificationTheme();
   await applyThemeByMode();
-  const snapshot = await api.getNotificationSnapshot();
-  if (snapshot) {
-    await show(snapshot);
+  try {
+    const snapshot = await api.getNotificationSnapshot();
+    if (snapshot) {
+      await show(snapshot);
+    }
+  } catch (error) {
+    console.error("[notification] 读取通知快照失败", error);
   }
-  await listen<NotificationPayload>("notification", async event => {
-    await show(event.payload);
-    appWindow.show();
-  });
-  unlistenDataUpdated = await listen("data-updated", async () => {
-    await loadNotificationTheme();
-    await applyThemeByMode();
-  });
+  try {
+    await listen<NotificationPayload>("notification", async event => {
+      await show(event.payload);
+      if (appWindow) {
+        await appWindow.show();
+      }
+    });
+  } catch (error) {
+    console.error("[notification] 监听 notification 失败", error);
+  }
+  try {
+    unlistenDataUpdated = await listen("data-updated", async () => {
+      await loadNotificationTheme();
+      await applyThemeByMode();
+    });
+  } catch (error) {
+    console.error("[notification] 监听 data-updated 失败", error);
+  }
   storageHandler = event => {
     if (event.key === "appTheme" && notificationTheme.value === "app") {
       void applyThemeByMode();
