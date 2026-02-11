@@ -521,7 +521,7 @@ const editTaskReminder = ref("");
 const editTaskReminderInput = ref<HTMLInputElement | null>(null);
 const isLinuxPlatform =
   typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent);
-const shouldAutoCloseDateTimePicker = true;
+const shouldAutoCloseDateTimePicker = !isLinuxPlatform;
 
 const editRecurringOpen = ref(false);
 const editRecurringId = ref("");
