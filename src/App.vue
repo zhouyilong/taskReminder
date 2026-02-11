@@ -284,9 +284,9 @@
           </div>
           <div class="form-row compact">
             <label class="field-label">开始</label>
-            <input class="input" type="date" v-model="recordFilterStart" />
+            <input class="input" type="date" v-model="recordFilterStart" @change="handleRecordDatePicked" />
             <label class="field-label">结束</label>
-            <input class="input" type="date" v-model="recordFilterEnd" />
+            <input class="input" type="date" v-model="recordFilterEnd" @change="handleRecordDatePicked" />
             <label class="field-label">类型</label>
             <select class="select" v-model="recordFilterType">
               <option value="all">全部</option>
@@ -521,7 +521,7 @@ const editTaskReminder = ref("");
 const editTaskReminderInput = ref<HTMLInputElement | null>(null);
 const isLinuxPlatform =
   typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent);
-const shouldAutoCloseDateTimePicker = !isLinuxPlatform;
+const shouldAutoCloseDateTimePicker = true;
 
 const editRecurringOpen = ref(false);
 const editRecurringId = ref("");
@@ -819,6 +819,19 @@ const handleTaskReminderPicked = () => {
     return;
   }
   closeTaskReminderPicker();
+};
+
+const handleRecordDatePicked = (event: Event) => {
+  if (!isLinuxPlatform) {
+    return;
+  }
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) {
+    return;
+  }
+  requestAnimationFrame(() => {
+    target.blur();
+  });
 };
 
 const saveTaskEdit = async () => {
