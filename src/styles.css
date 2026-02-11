@@ -763,6 +763,34 @@ input[type="checkbox"] {
   color: var(--text-base);
 }
 
+.sync-status-panel {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.sync-status-row {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-base);
+}
+
+.sync-status-label {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.sync-status-value {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-base);
+  word-break: break-word;
+}
+
 .modal-actions {
   margin-top: 16px;
   display: flex;

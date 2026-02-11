@@ -464,11 +464,23 @@
         </div>
       </div>
       <div class="modal-section">
-        <div class="form-row compact" style="flex-direction: column; align-items: flex-start;">
-          <span>上次同步: {{ formatDateTime(settingsDraft.webdavLastSyncTime) }}</span>
-          <span>上次本地变更: {{ formatDateTime(settingsDraft.webdavLastLocalChangeTime) }}</span>
-          <span>同步状态: {{ settingsDraft.webdavLastSyncStatus || "未同步" }}</span>
-          <span>最近错误: {{ settingsDraft.webdavLastSyncError || "无" }}</span>
+        <div class="form-row compact sync-status-panel">
+          <div class="sync-status-row">
+            <span class="sync-status-label">上次同步:</span>
+            <span class="sync-status-value">{{ formatDateTime(settingsDraft.webdavLastSyncTime) }}</span>
+          </div>
+          <div class="sync-status-row">
+            <span class="sync-status-label">上次本地变更:</span>
+            <span class="sync-status-value">{{ formatDateTime(settingsDraft.webdavLastLocalChangeTime) }}</span>
+          </div>
+          <div class="sync-status-row">
+            <span class="sync-status-label">同步状态:</span>
+            <span class="sync-status-value">{{ settingsDraft.webdavLastSyncStatus || "未同步" }}</span>
+          </div>
+          <div class="sync-status-row">
+            <span class="sync-status-label">最近错误:</span>
+            <span class="sync-status-value">{{ settingsDraft.webdavLastSyncError || "无" }}</span>
+          </div>
         </div>
       </div>
     </Modal>
@@ -485,6 +497,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
 import Modal from "./components/Modal.vue";
 import { api } from "./api";
+import { safeStorage } from "./safeStorage";
 import type {
   Task,
   RecurringTask,
@@ -494,7 +507,7 @@ import type {
 } from "./types";
 
 const activeTab = ref("tasks");
-const isLightTheme = ref(localStorage.getItem("appTheme") === "light");
+const isLightTheme = ref(safeStorage.getItem("appTheme") === "light");
 const appVersion = ref("");
 const isDevMode = ref(false);
 const isWindowMaximized = ref(false);
@@ -506,8 +519,8 @@ const resolveCurrentWindow = (): TauriWindow | null => {
   }
 };
 const appWindow = resolveCurrentWindow();
-const uiScale = ref(Number(localStorage.getItem("uiScale") ?? "1"));
-const isSidebarCollapsed = ref(localStorage.getItem("sidebarCollapsed") === "1");
+const uiScale = ref(Number(safeStorage.getItem("uiScale") ?? "1"));
+const isSidebarCollapsed = ref(safeStorage.getItem("sidebarCollapsed") === "1");
 
 const tasks = ref<Task[]>([]);
 const completedTasks = ref<Task[]>([]);
@@ -972,7 +985,7 @@ const handleSyncNow = async () => {
 
 const toggleTheme = () => {
   isLightTheme.value = !isLightTheme.value;
-  localStorage.setItem("appTheme", isLightTheme.value ? "light" : "dark");
+  safeStorage.setItem("appTheme", isLightTheme.value ? "light" : "dark");
 };
 
 const handleMinimize = async () => {
@@ -1009,7 +1022,7 @@ const handleClose = async () => {
 
 const toggleSidebar = () => {
   isSidebarCollapsed.value = !isSidebarCollapsed.value;
-  localStorage.setItem("sidebarCollapsed", isSidebarCollapsed.value ? "1" : "0");
+  safeStorage.setItem("sidebarCollapsed", isSidebarCollapsed.value ? "1" : "0");
 };
 
 const showContextMenu = (event: MouseEvent, items: ContextMenuItem[]) => {
@@ -1149,6 +1162,6 @@ watch(uiScale, value => {
   if (normalized !== uiScale.value) {
     uiScale.value = normalized;
   }
-  localStorage.setItem("uiScale", normalized.toString());
+  safeStorage.setItem("uiScale", normalized.toString());
 });
 </script>

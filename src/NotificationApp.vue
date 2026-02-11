@@ -20,6 +20,7 @@ import { listen, TauriEvent } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
+import { safeStorage } from "./safeStorage";
 import type { NotificationPayload } from "./types";
 
 type NotificationThemeMode = "system" | "app" | "light" | "dark";
@@ -107,7 +108,7 @@ const loadNotificationTheme = async () => {
 };
 
 const applyAppTheme = () => {
-  const stored = localStorage.getItem("appTheme");
+  const stored = safeStorage.getItem("appTheme");
   if (stored === "light") {
     setThemeClass(true);
     return true;
