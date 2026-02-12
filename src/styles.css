@@ -599,15 +599,55 @@ textarea:focus {
   width: 40%;
 }
 
+.col-datetime {
+  width: 172px;
+}
+
+.recurring-table {
+  min-width: 860px;
+}
+
+.recurring-table .col-desc {
+  width: 22%;
+}
+
+.recurring-table .col-mode {
+  width: 120px;
+  min-width: 120px;
+  max-width: 120px;
+}
+
+.recurring-table .col-rule {
+  width: 24%;
+}
+
+.recurring-table .col-next-trigger {
+  width: 162px;
+}
+
+.recurring-table .col-status {
+  width: 80px;
+}
+
 .records-table {
-  min-width: 980px;
-  table-layout: auto;
+  min-width: 860px;
+  table-layout: fixed;
+}
+
+.records-table .col-desc {
+  width: 28%;
+}
+
+.records-table .col-type {
+  width: 74px;
 }
 
 .records-table .col-datetime {
-  min-width: 168px;
-  overflow: visible;
-  text-overflow: clip;
+  width: 148px;
+}
+
+.records-table .col-action {
+  width: 88px;
 }
 
 .pagination {
@@ -877,6 +917,20 @@ input[type="checkbox"] {
   background: transparent;
 }
 
+.notification-shell.linux-platform {
+  min-height: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  align-items: stretch;
+  justify-content: stretch;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+}
+
 .notification-window {
   min-width: 320px;
   max-width: 420px;
@@ -885,6 +939,39 @@ input[type="checkbox"] {
   background: var(--bg-surface);
   padding: 14px 16px;
   box-shadow: var(--shadow-soft);
+}
+
+.notification-shell.linux-platform .notification-window {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.notification-shell.linux-platform .notification-title {
+  font-size: 15px;
+}
+
+.notification-shell.linux-platform .notification-body {
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+.notification-shell.linux-platform .notification-actions {
+  margin-top: 10px;
+}
+
+.notification-shell.linux-platform .notification-close {
+  width: 24px;
+  height: 24px;
 }
 
 .notification-header {

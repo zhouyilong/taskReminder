@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use chrono::{Local, NaiveDateTime};
+use chrono::Local;
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::errors::AppError;
 use crate::models::{AppSettings, RecurringTask, ReminderRecord, Task};
+use crate::recurrence::REPEAT_MODE_INTERVAL_RANGE;
 
 #[derive(Clone)]
 pub struct DbManager {
@@ -29,7 +30,9 @@ impl DbManager {
     }
 
     fn get_conn(&self) -> Result<PooledConnection<SqliteConnectionManager>, AppError> {
-        self.pool.get().map_err(|e| AppError::Database(e.to_string()))
+        self.pool
+            .get()
+            .map_err(|e| AppError::Database(e.to_string()))
     }
 
     fn init(&self) -> Result<(), AppError> {
@@ -99,7 +102,11 @@ impl DbManager {
 
     fn get_current_version(&self, conn: &Connection) -> Result<String, AppError> {
         let version: Option<String> = conn
-            .query_row("SELECT version FROM schema_version WHERE id = 1", [], |row| row.get(0))
+            .query_row(
+                "SELECT version FROM schema_version WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
             .optional()?;
         Ok(version.unwrap_or_else(|| "0.0.0".to_string()))
     }
@@ -154,6 +161,7 @@ impl DbManager {
         let mut stmt = conn.prepare(
             "SELECT id, description, type, status, created_at, completed_at,
                     interval_minutes, last_triggered, next_trigger, is_paused, start_time, end_time,
+                    repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
                     updated_at, deleted_at
              FROM recurring_tasks
              WHERE deleted_at IS NULL
@@ -168,6 +176,7 @@ impl DbManager {
         let mut stmt = conn.prepare(
             "SELECT id, description, type, status, created_at, completed_at,
                     interval_minutes, last_triggered, next_trigger, is_paused, start_time, end_time,
+                    repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
                     updated_at, deleted_at
              FROM recurring_tasks WHERE id = ?",
         )?;
@@ -223,7 +232,12 @@ impl DbManager {
         })
     }
 
-    pub fn update_task(&self, task_id: &str, description: &str, reminder_time: Option<String>) -> Result<(), AppError> {
+    pub fn update_task(
+        &self,
+        task_id: &str,
+        description: &str,
+        reminder_time: Option<String>,
+    ) -> Result<(), AppError> {
         let conn = self.get_conn()?;
         let now = now_string();
         conn.execute(
@@ -263,25 +277,38 @@ impl DbManager {
         Ok(())
     }
 
-    pub fn create_recurring_task(
-        &self,
-        description: &str,
-        interval_minutes: i64,
-        start_time: Option<String>,
-        end_time: Option<String>,
-    ) -> Result<RecurringTask, AppError> {
+    pub fn create_recurring_task(&self, task: &RecurringTask) -> Result<RecurringTask, AppError> {
         let conn = self.get_conn()?;
         let id = Uuid::new_v4().to_string();
         let now = now_string();
-        let next_trigger = add_minutes(&now, interval_minutes)?;
         conn.execute(
-            "INSERT INTO recurring_tasks (id, description, type, status, created_at, completed_at, interval_minutes, last_triggered, next_trigger, is_paused, start_time, end_time, updated_at, deleted_at)
-             VALUES (?, ?, 'RECURRING', 'PENDING', ?, NULL, ?, NULL, ?, 0, ?, ?, ?, NULL)",
-            params![id, description, now, interval_minutes, next_trigger, start_time, end_time, now],
+            "INSERT INTO recurring_tasks (
+                id, description, type, status, created_at, completed_at, interval_minutes,
+                last_triggered, next_trigger, is_paused, start_time, end_time,
+                repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
+                updated_at, deleted_at
+            )
+             VALUES (?, ?, 'RECURRING', 'PENDING', ?, NULL, ?, NULL, ?, 0, ?, ?,
+                     ?, ?, ?, ?, ?, ?, NULL)",
+            params![
+                id,
+                task.description.as_str(),
+                now,
+                task.interval_minutes,
+                task.next_trigger.as_str(),
+                task.start_time.as_deref(),
+                task.end_time.as_deref(),
+                task.repeat_mode.as_str(),
+                task.schedule_time.as_deref(),
+                task.schedule_weekday,
+                task.schedule_day,
+                task.cron_expression.as_deref(),
+                now
+            ],
         )?;
         Ok(RecurringTask {
             id,
-            description: description.to_string(),
+            description: task.description.clone(),
             task_type: "RECURRING".to_string(),
             status: "PENDING".to_string(),
             created_at: now.clone(),
@@ -289,12 +316,17 @@ impl DbManager {
             reminder_time: None,
             updated_at: Some(now),
             deleted_at: None,
-            interval_minutes,
+            interval_minutes: task.interval_minutes,
             last_triggered: None,
-            next_trigger,
+            next_trigger: task.next_trigger.clone(),
             is_paused: false,
-            start_time,
-            end_time,
+            start_time: task.start_time.clone(),
+            end_time: task.end_time.clone(),
+            repeat_mode: task.repeat_mode.clone(),
+            schedule_time: task.schedule_time.clone(),
+            schedule_weekday: task.schedule_weekday,
+            schedule_day: task.schedule_day,
+            cron_expression: task.cron_expression.clone(),
         })
     }
 
@@ -303,18 +335,25 @@ impl DbManager {
         let now = now_string();
         conn.execute(
             "UPDATE recurring_tasks
-             SET description = ?, interval_minutes = ?, start_time = ?, end_time = ?, is_paused = ?, next_trigger = ?, last_triggered = ?, updated_at = ?
+             SET description = ?, interval_minutes = ?, start_time = ?, end_time = ?,
+                 repeat_mode = ?, schedule_time = ?, schedule_weekday = ?, schedule_day = ?, cron_expression = ?,
+                 is_paused = ?, next_trigger = ?, last_triggered = ?, updated_at = ?
              WHERE id = ?",
             params![
-                task.description,
+                task.description.as_str(),
                 task.interval_minutes,
-                task.start_time,
-                task.end_time,
+                task.start_time.as_deref(),
+                task.end_time.as_deref(),
+                task.repeat_mode.as_str(),
+                task.schedule_time.as_deref(),
+                task.schedule_weekday,
+                task.schedule_day,
+                task.cron_expression.as_deref(),
                 if task.is_paused { 1 } else { 0 },
-                task.next_trigger,
-                task.last_triggered,
+                task.next_trigger.as_str(),
+                task.last_triggered.as_deref(),
                 now,
-                task.id
+                task.id.as_str()
             ],
         )?;
         Ok(())
@@ -488,7 +527,11 @@ impl DbManager {
         Ok(())
     }
 
-    pub fn update_sync_status(&self, status: &str, error: Option<String>) -> Result<AppSettings, AppError> {
+    pub fn update_sync_status(
+        &self,
+        status: &str,
+        error: Option<String>,
+    ) -> Result<AppSettings, AppError> {
         let mut settings = self.load_settings()?;
         let now = now_string();
         settings.webdav_last_sync_time = Some(now.clone());
@@ -508,8 +551,12 @@ impl DbManager {
     pub fn cleanup_data(&self) -> Result<(), AppError> {
         let conn = self.get_conn()?;
         let now = Local::now().naive_local();
-        let completed_cutoff = (now - chrono::Duration::days(30)).format("%Y-%m-%dT%H:%M:%S").to_string();
-        let deleted_cutoff = (now - chrono::Duration::days(7)).format("%Y-%m-%dT%H:%M:%S").to_string();
+        let completed_cutoff = (now - chrono::Duration::days(30))
+            .format("%Y-%m-%dT%H:%M:%S")
+            .to_string();
+        let deleted_cutoff = (now - chrono::Duration::days(7))
+            .format("%Y-%m-%dT%H:%M:%S")
+            .to_string();
 
         conn.execute(
             "DELETE FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < ?",
@@ -568,8 +615,16 @@ fn recurring_from_row(row: &rusqlite::Row<'_>) -> Result<RecurringTask, rusqlite
         is_paused: row.get::<_, i64>(9)? == 1,
         start_time: row.get(10)?,
         end_time: row.get(11)?,
-        updated_at: row.get(12)?,
-        deleted_at: row.get(13)?,
+        repeat_mode: row
+            .get::<_, Option<String>>(12)?
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| REPEAT_MODE_INTERVAL_RANGE.to_string()),
+        schedule_time: row.get(13)?,
+        schedule_weekday: row.get(14)?,
+        schedule_day: row.get(15)?,
+        cron_expression: row.get(16)?,
+        updated_at: row.get(17)?,
+        deleted_at: row.get(18)?,
     })
 }
 
@@ -589,29 +644,6 @@ fn record_from_row(row: &rusqlite::Row<'_>) -> Result<ReminderRecord, rusqlite::
 
 fn now_string() -> String {
     Local::now().format("%Y-%m-%dT%H:%M:%S").to_string()
-}
-
-fn parse_datetime(value: &str) -> Result<NaiveDateTime, AppError> {
-    parse_datetime_any(value).ok_or_else(|| AppError::Invalid(format!("无法解析时间: {}", value)))
-}
-
-fn add_minutes(base: &str, minutes: i64) -> Result<String, AppError> {
-    let dt = parse_datetime(base)? + chrono::Duration::minutes(minutes);
-    Ok(dt.format("%Y-%m-%dT%H:%M:%S").to_string())
-}
-
-fn parse_datetime_any(value: &str) -> Option<NaiveDateTime> {
-    let candidates = [
-        "%Y-%m-%dT%H:%M:%S%.f",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M",
-    ];
-    for fmt in candidates {
-        if let Ok(dt) = NaiveDateTime::parse_from_str(value, fmt) {
-            return Some(dt);
-        }
-    }
-    None
 }
 
 struct MigrationScript {
@@ -641,6 +673,11 @@ fn migration_scripts() -> Vec<MigrationScript> {
             version: "1.4.0".to_string(),
             description: "add notification theme".to_string(),
             sql: include_str!("../migrations/V1.4.0__add_notification_theme.sql"),
+        },
+        MigrationScript {
+            version: "1.4.1".to_string(),
+            description: "add recurring modes".to_string(),
+            sql: include_str!("../migrations/V1.4.1__add_recurring_modes.sql"),
         },
     ]
 }

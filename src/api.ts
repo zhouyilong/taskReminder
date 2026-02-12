@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   Task,
   RecurringTask,
+  RecurringMode,
   ReminderRecord,
   AppSettings,
   SyncStatus,
@@ -41,6 +42,11 @@ export const api = {
     intervalMinutes: number;
     startTime?: string | null;
     endTime?: string | null;
+    repeatMode?: RecurringMode;
+    scheduleTime?: string | null;
+    scheduleWeekday?: number | null;
+    scheduleDay?: number | null;
+    cronExpression?: string | null;
   }): Promise<RecurringTask> {
     return invoke("create_recurring_task", { payload });
   },

@@ -1,5 +1,5 @@
 <template>
-  <div class="notification-shell" :class="{ 'light-theme': isLightTheme }">
+  <div class="notification-shell" :class="{ 'light-theme': isLightTheme, 'linux-platform': isLinuxPlatform }">
     <div class="notification-window" v-if="visible">
       <div class="notification-header">
         <div class="notification-title">任务提醒</div>
@@ -29,6 +29,8 @@ const payload = ref<NotificationPayload | null>(null);
 const visible = ref(false);
 const isLightTheme = ref(false);
 const notificationTheme = ref<NotificationThemeMode>("app");
+const isLinuxPlatform =
+  typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent);
 const resolveCurrentWindow = (): TauriWindow | null => {
   try {
     return getCurrentWindow();
@@ -205,6 +207,9 @@ const show = async (data: NotificationPayload) => {
   visible.value = true;
   await loadNotificationTheme();
   await applyThemeByMode();
+  if (appWindow) {
+    await appWindow.show();
+  }
   startAutoClose();
 };
 
@@ -266,9 +271,6 @@ onMounted(async () => {
   try {
     await listen<NotificationPayload>("notification", async event => {
       await show(event.payload);
-      if (appWindow) {
-        await appWindow.show();
-      }
     });
   } catch (error) {
     console.error("[notification] 监听 notification 失败", error);

@@ -133,8 +133,8 @@
                   <tr>
                     <th>完成</th>
                     <th class="col-desc">描述</th>
-                    <th>提醒时间</th>
-                    <th>创建时间</th>
+                    <th class="col-datetime">提醒时间</th>
+                    <th class="col-datetime">创建时间</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -148,9 +148,9 @@
                     <td>
                       <input type="checkbox" :checked="task.status === 'COMPLETED'" @change="toggleTask(task)" />
                     </td>
-                    <td class="col-desc">{{ task.description }}</td>
-                    <td>{{ formatDateTime(task.reminderTime) }}</td>
-                    <td>{{ formatDateTime(task.createdAt) }}</td>
+                    <td class="col-desc" :title="task.description">{{ task.description }}</td>
+                    <td class="col-datetime" :title="formatDateTime(task.reminderTime)">{{ formatDateTime(task.reminderTime) }}</td>
+                    <td class="col-datetime" :title="formatDateTime(task.createdAt)">{{ formatDateTime(task.createdAt) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -184,8 +184,8 @@
                   <tr>
                     <th>取消完成</th>
                     <th class="col-desc">描述</th>
-                    <th>创建时间</th>
-                    <th>完成时间</th>
+                    <th class="col-datetime">创建时间</th>
+                    <th class="col-datetime">完成时间</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -199,9 +199,9 @@
                     <td>
                       <input type="checkbox" checked @change="toggleTask(task)" />
                     </td>
-                    <td class="col-desc">{{ task.description }}</td>
-                    <td>{{ formatDateTime(task.createdAt) }}</td>
-                    <td>{{ formatDateTime(task.completedAt) }}</td>
+                    <td class="col-desc" :title="task.description">{{ task.description }}</td>
+                    <td class="col-datetime" :title="formatDateTime(task.createdAt)">{{ formatDateTime(task.createdAt) }}</td>
+                    <td class="col-datetime" :title="formatDateTime(task.completedAt)">{{ formatDateTime(task.completedAt) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -227,24 +227,54 @@
           <div class="form-row compact">
             <label class="field-label">描述</label>
             <input class="input" v-model="newRecurringDescription" placeholder="输入提醒描述" style="flex: 1" />
-            <label class="field-label">间隔</label>
-            <input class="input" type="number" v-model.number="newRecurringInterval" min="1" placeholder="分钟" style="width: 90px" />
-            <label class="field-label">开始</label>
-            <input class="input" type="time" v-model="newRecurringStart" style="width: 110px" />
-            <label class="field-label">结束</label>
-            <input class="input" type="time" v-model="newRecurringEnd" style="width: 110px" />
+            <label class="field-label">模式</label>
+            <select class="select" v-model="newRecurringMode" style="width: 140px">
+              <option v-for="mode in recurringModeOptions" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
+            </select>
             <button class="button" @click="handleAddRecurring">添加提醒</button>
+          </div>
+          <div class="form-row compact">
+            <template v-if="newRecurringMode === 'INTERVAL_RANGE'">
+              <label class="field-label">间隔</label>
+              <input class="input" type="number" v-model.number="newRecurringInterval" min="1" placeholder="分钟" style="width: 100px" />
+              <label class="field-label">开始</label>
+              <input class="input" type="time" v-model="newRecurringStart" style="width: 120px" />
+              <label class="field-label">结束</label>
+              <input class="input" type="time" v-model="newRecurringEnd" style="width: 120px" />
+            </template>
+            <template v-else-if="newRecurringMode === 'DAILY'">
+              <label class="field-label">每天</label>
+              <input class="input" type="time" v-model="newRecurringScheduleTime" style="width: 140px" />
+            </template>
+            <template v-else-if="newRecurringMode === 'WEEKLY'">
+              <label class="field-label">周几</label>
+              <select class="select" v-model.number="newRecurringWeekday" style="width: 120px">
+                <option v-for="item in weekdayOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+              </select>
+              <label class="field-label">时间</label>
+              <input class="input" type="time" v-model="newRecurringScheduleTime" style="width: 140px" />
+            </template>
+            <template v-else-if="newRecurringMode === 'MONTHLY'">
+              <label class="field-label">每月几号</label>
+              <input class="input" type="number" min="1" max="31" v-model.number="newRecurringDayOfMonth" style="width: 120px" />
+              <label class="field-label">时间</label>
+              <input class="input" type="time" v-model="newRecurringScheduleTime" style="width: 140px" />
+            </template>
+            <template v-else>
+              <label class="field-label">Cron</label>
+              <input class="input" v-model="newRecurringCronExpression" placeholder="如: 0 9 * * *" style="flex: 1" />
+            </template>
           </div>
           <div class="table-card">
             <div class="table-scroll">
-              <table class="table">
+              <table class="table recurring-table">
                 <thead>
                   <tr>
                     <th class="col-desc">描述</th>
-                    <th>间隔(分钟)</th>
-                    <th>生效开始</th>
-                    <th>生效结束</th>
-                    <th>状态</th>
+                    <th class="col-mode">模式</th>
+                    <th class="col-rule">规则</th>
+                    <th class="col-datetime col-next-trigger">下次触发</th>
+                    <th class="col-status">状态</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -255,11 +285,11 @@
                     @dblclick="openEditRecurring(task)"
                     @contextmenu.prevent.stop="openRecurringMenu($event, task)"
                   >
-                    <td class="col-desc">{{ task.description }}</td>
-                    <td>{{ task.intervalMinutes }}</td>
-                    <td>{{ task.startTime || '-' }}</td>
-                    <td>{{ task.endTime || '-' }}</td>
-                    <td>{{ task.isPaused ? "已暂停" : "运行中" }}</td>
+                    <td class="col-desc" :title="task.description">{{ task.description }}</td>
+                    <td class="col-mode" :title="formatRecurringMode(task.repeatMode)">{{ formatRecurringMode(task.repeatMode) }}</td>
+                    <td class="col-rule" :title="formatRecurringRule(task)">{{ formatRecurringRule(task) }}</td>
+                    <td class="col-datetime col-next-trigger" :title="formatDateTime(task.nextTrigger)">{{ formatDateTime(task.nextTrigger) }}</td>
+                    <td class="col-status" :title="task.isPaused ? '已暂停' : '运行中'">{{ task.isPaused ? "已暂停" : "运行中" }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -304,10 +334,10 @@
                   <tr>
                     <th>选择</th>
                     <th class="col-desc">描述</th>
-                    <th>类型</th>
+                    <th class="col-type">类型</th>
                     <th class="col-datetime">触发时间</th>
                     <th class="col-datetime">关闭时间</th>
-                    <th>操作</th>
+                    <th class="col-action">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -321,11 +351,11 @@
                     <td>
                       <input type="checkbox" v-model="selectedRecords" :value="record.id" />
                     </td>
-                    <td class="col-desc">{{ record.description }}</td>
-                    <td>{{ record.type === 'TASK' ? '任务' : '循环' }}</td>
-                    <td class="col-datetime">{{ formatDateTime(record.triggerTime) }}</td>
-                    <td class="col-datetime">{{ formatDateTime(record.closeTime) }}</td>
-                    <td>{{ formatAction(record.action) }}</td>
+                    <td class="col-desc" :title="record.description">{{ record.description }}</td>
+                    <td class="col-type" :title="record.type === 'TASK' ? '任务' : '循环'">{{ record.type === 'TASK' ? '任务' : '循环' }}</td>
+                    <td class="col-datetime" :title="formatDateTime(record.triggerTime)">{{ formatDateTime(record.triggerTime) }}</td>
+                    <td class="col-datetime" :title="formatDateTime(record.closeTime)">{{ formatDateTime(record.closeTime) }}</td>
+                    <td class="col-action" :title="formatAction(record.action)">{{ formatAction(record.action) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -368,9 +398,33 @@
         <input class="input" v-model="editRecurringDescription" placeholder="提醒描述" style="flex: 1" />
       </div>
       <div class="form-row">
-        <input class="input" type="number" min="1" v-model.number="editRecurringInterval" style="width: 140px" />
-        <input class="input" type="time" v-model="editRecurringStart" style="width: 140px" />
-        <input class="input" type="time" v-model="editRecurringEnd" style="width: 140px" />
+        <label class="field-label">模式</label>
+        <select class="select" v-model="editRecurringMode" style="width: 180px">
+          <option v-for="mode in recurringModeOptions" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <template v-if="editRecurringMode === 'INTERVAL_RANGE'">
+          <input class="input" type="number" min="1" v-model.number="editRecurringInterval" style="width: 120px" />
+          <input class="input" type="time" v-model="editRecurringStart" style="width: 140px" />
+          <input class="input" type="time" v-model="editRecurringEnd" style="width: 140px" />
+        </template>
+        <template v-else-if="editRecurringMode === 'DAILY'">
+          <input class="input" type="time" v-model="editRecurringScheduleTime" style="width: 160px" />
+        </template>
+        <template v-else-if="editRecurringMode === 'WEEKLY'">
+          <select class="select" v-model.number="editRecurringWeekday" style="width: 120px">
+            <option v-for="item in weekdayOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+          </select>
+          <input class="input" type="time" v-model="editRecurringScheduleTime" style="width: 160px" />
+        </template>
+        <template v-else-if="editRecurringMode === 'MONTHLY'">
+          <input class="input" type="number" min="1" max="31" v-model.number="editRecurringDayOfMonth" style="width: 120px" />
+          <input class="input" type="time" v-model="editRecurringScheduleTime" style="width: 160px" />
+        </template>
+        <template v-else>
+          <input class="input" v-model="editRecurringCronExpression" placeholder="如: 0 9 * * *" style="flex: 1" />
+        </template>
       </div>
     </Modal>
 
@@ -450,7 +504,16 @@
         </div>
         <div class="form-row compact">
           <input class="input" v-model="settingsDraft.webdavUsername" placeholder="用户名" style="flex: 1" />
-          <input class="input" v-model="settingsDraft.webdavPassword" placeholder="密码" style="flex: 1" />
+          <input
+            class="input"
+            :type="webdavPasswordVisible ? 'text' : 'password'"
+            v-model="settingsDraft.webdavPassword"
+            placeholder="密码"
+            style="flex: 1"
+          />
+          <button class="button secondary" type="button" @click="webdavPasswordVisible = !webdavPasswordVisible">
+            {{ webdavPasswordVisible ? "隐藏" : "显示" }}
+          </button>
         </div>
         <div class="form-row compact">
           <input class="input" v-model="settingsDraft.webdavRootPath" placeholder="远端路径" style="flex: 1" />
@@ -501,6 +564,7 @@ import { safeStorage } from "./safeStorage";
 import type {
   Task,
   RecurringTask,
+  RecurringMode,
   ReminderRecord,
   AppSettings,
   SyncStatus
@@ -528,11 +592,34 @@ const recurringTasks = ref<RecurringTask[]>([]);
 const reminderRecords = ref<ReminderRecord[]>([]);
 const syncStatus = ref<SyncStatus | null>(null);
 
+const recurringModeOptions: { value: RecurringMode; label: string }[] = [
+  { value: "INTERVAL_RANGE", label: "区间间隔" },
+  { value: "DAILY", label: "每天固定时间" },
+  { value: "WEEKLY", label: "每周固定时间" },
+  { value: "MONTHLY", label: "每月固定时间" },
+  { value: "CRON", label: "Cron 表达式" },
+];
+
+const weekdayOptions: { value: number; label: string }[] = [
+  { value: 1, label: "周一" },
+  { value: 2, label: "周二" },
+  { value: 3, label: "周三" },
+  { value: 4, label: "周四" },
+  { value: 5, label: "周五" },
+  { value: 6, label: "周六" },
+  { value: 7, label: "周日" },
+];
+
 const newTaskDescription = ref("");
 const newRecurringDescription = ref("");
 const newRecurringInterval = ref(60);
 const newRecurringStart = ref("08:00");
 const newRecurringEnd = ref("17:30");
+const newRecurringMode = ref<RecurringMode>("INTERVAL_RANGE");
+const newRecurringScheduleTime = ref("09:00");
+const newRecurringWeekday = ref(1);
+const newRecurringDayOfMonth = ref(1);
+const newRecurringCronExpression = ref("0 9 * * *");
 
 const editTaskOpen = ref(false);
 const editTaskId = ref("");
@@ -549,9 +636,15 @@ const editRecurringDescription = ref("");
 const editRecurringInterval = ref(60);
 const editRecurringStart = ref("");
 const editRecurringEnd = ref("");
+const editRecurringMode = ref<RecurringMode>("INTERVAL_RANGE");
+const editRecurringScheduleTime = ref("09:00");
+const editRecurringWeekday = ref(1);
+const editRecurringDayOfMonth = ref(1);
+const editRecurringCronExpression = ref("");
 
 const settingsOpen = ref(false);
 const webdavOpen = ref(false);
+const webdavPasswordVisible = ref(false);
 const settingsDraft = reactive<AppSettings>({
   autoStartEnabled: false,
   soundEnabled: true,
@@ -725,6 +818,142 @@ const formatAction = (action: string) => {
   }
 };
 
+const weekdayLabel = (value?: number | null) => {
+  return weekdayOptions.find(item => item.value === value)?.label ?? "-";
+};
+
+const formatRecurringMode = (mode?: RecurringMode | string | null) => {
+  const resolved = recurringModeOptions.find(item => item.value === mode);
+  return resolved ? resolved.label : "区间间隔";
+};
+
+const formatRecurringRule = (task: RecurringTask) => {
+  switch (task.repeatMode) {
+    case "DAILY":
+      return `每天 ${task.scheduleTime || "-"}`;
+    case "WEEKLY":
+      return `${weekdayLabel(task.scheduleWeekday)} ${task.scheduleTime || "-"}`;
+    case "MONTHLY":
+      return `每月 ${task.scheduleDay || "-"} 日 ${task.scheduleTime || "-"}`;
+    case "CRON":
+      return task.cronExpression || "-";
+    case "INTERVAL_RANGE":
+    default: {
+      const start = task.startTime || "00:00";
+      const end = task.endTime || "23:59";
+      return `每 ${task.intervalMinutes} 分钟（${start} - ${end}）`;
+    }
+  }
+};
+
+type RecurringDraft = {
+  mode: RecurringMode;
+  intervalMinutes: number;
+  startTime: string;
+  endTime: string;
+  scheduleTime: string;
+  scheduleWeekday: number;
+  scheduleDay: number;
+  cronExpression: string;
+};
+
+const validateRecurringDraft = (draft: RecurringDraft) => {
+  switch (draft.mode) {
+    case "INTERVAL_RANGE":
+      if (!Number.isFinite(draft.intervalMinutes) || draft.intervalMinutes < 1) {
+        alert("间隔分钟数必须大于 0");
+        return false;
+      }
+      if (draft.startTime && draft.endTime && draft.startTime > draft.endTime) {
+        alert("开始时间不能晚于结束时间");
+        return false;
+      }
+      return true;
+    case "DAILY":
+      if (!draft.scheduleTime) {
+        alert("每日模式需要选择触发时间");
+        return false;
+      }
+      return true;
+    case "WEEKLY":
+      if (!draft.scheduleTime) {
+        alert("每周模式需要选择触发时间");
+        return false;
+      }
+      if (draft.scheduleWeekday < 1 || draft.scheduleWeekday > 7) {
+        alert("每周模式中的周几必须在 1 到 7 之间");
+        return false;
+      }
+      return true;
+    case "MONTHLY":
+      if (!draft.scheduleTime) {
+        alert("每月模式需要选择触发时间");
+        return false;
+      }
+      if (draft.scheduleDay < 1 || draft.scheduleDay > 31) {
+        alert("每月模式中的几号必须在 1 到 31 之间");
+        return false;
+      }
+      return true;
+    case "CRON":
+      if (!draft.cronExpression.trim()) {
+        alert("Cron 表达式不能为空");
+        return false;
+      }
+      return true;
+    default:
+      return false;
+  }
+};
+
+const buildRecurringPayload = (draft: RecurringDraft) => {
+  const payload = {
+    intervalMinutes: Math.max(1, draft.intervalMinutes || 1),
+    startTime: null as string | null,
+    endTime: null as string | null,
+    repeatMode: draft.mode,
+    scheduleTime: null as string | null,
+    scheduleWeekday: null as number | null,
+    scheduleDay: null as number | null,
+    cronExpression: null as string | null,
+  };
+  switch (draft.mode) {
+    case "INTERVAL_RANGE":
+      payload.startTime = draft.startTime || null;
+      payload.endTime = draft.endTime || null;
+      break;
+    case "DAILY":
+      payload.scheduleTime = draft.scheduleTime || null;
+      break;
+    case "WEEKLY":
+      payload.scheduleTime = draft.scheduleTime || null;
+      payload.scheduleWeekday = draft.scheduleWeekday;
+      break;
+    case "MONTHLY":
+      payload.scheduleTime = draft.scheduleTime || null;
+      payload.scheduleDay = draft.scheduleDay;
+      break;
+    case "CRON":
+      payload.cronExpression = draft.cronExpression.trim() || null;
+      break;
+    default:
+      break;
+  }
+  return payload;
+};
+
+const resetNewRecurringForm = () => {
+  newRecurringDescription.value = "";
+  newRecurringInterval.value = 60;
+  newRecurringStart.value = "08:00";
+  newRecurringEnd.value = "17:30";
+  newRecurringMode.value = "INTERVAL_RANGE";
+  newRecurringScheduleTime.value = "09:00";
+  newRecurringWeekday.value = 1;
+  newRecurringDayOfMonth.value = 1;
+  newRecurringCronExpression.value = "0 9 * * *";
+};
+
 const openDeleteConfirm = (message: string, payload: PendingDelete) => {
   confirmDeleteMessage.value = message;
   pendingDelete.value = payload;
@@ -877,13 +1106,24 @@ const handleAddRecurring = async () => {
   if (!newRecurringDescription.value.trim()) {
     return;
   }
+  const draft: RecurringDraft = {
+    mode: newRecurringMode.value,
+    intervalMinutes: newRecurringInterval.value,
+    startTime: newRecurringStart.value,
+    endTime: newRecurringEnd.value,
+    scheduleTime: newRecurringScheduleTime.value,
+    scheduleWeekday: newRecurringWeekday.value,
+    scheduleDay: newRecurringDayOfMonth.value,
+    cronExpression: newRecurringCronExpression.value,
+  };
+  if (!validateRecurringDraft(draft)) {
+    return;
+  }
   await api.createRecurringTask({
     description: newRecurringDescription.value.trim(),
-    intervalMinutes: newRecurringInterval.value,
-    startTime: newRecurringStart.value || null,
-    endTime: newRecurringEnd.value || null
+    ...buildRecurringPayload(draft)
   });
-  newRecurringDescription.value = "";
+  resetNewRecurringForm();
   await refreshAll();
 };
 
@@ -893,6 +1133,11 @@ const openEditRecurring = (task: RecurringTask) => {
   editRecurringInterval.value = task.intervalMinutes;
   editRecurringStart.value = task.startTime ?? "";
   editRecurringEnd.value = task.endTime ?? "";
+  editRecurringMode.value = (task.repeatMode || "INTERVAL_RANGE") as RecurringMode;
+  editRecurringScheduleTime.value = task.scheduleTime ?? "09:00";
+  editRecurringWeekday.value = task.scheduleWeekday ?? 1;
+  editRecurringDayOfMonth.value = task.scheduleDay ?? 1;
+  editRecurringCronExpression.value = task.cronExpression ?? "";
   editRecurringOpen.value = true;
 };
 
@@ -901,12 +1146,23 @@ const saveRecurringEdit = async () => {
   if (!target) {
     return;
   }
+  const draft: RecurringDraft = {
+    mode: editRecurringMode.value,
+    intervalMinutes: editRecurringInterval.value,
+    startTime: editRecurringStart.value,
+    endTime: editRecurringEnd.value,
+    scheduleTime: editRecurringScheduleTime.value,
+    scheduleWeekday: editRecurringWeekday.value,
+    scheduleDay: editRecurringDayOfMonth.value,
+    cronExpression: editRecurringCronExpression.value,
+  };
+  if (!validateRecurringDraft(draft)) {
+    return;
+  }
   await api.updateRecurringTask({
     ...target,
     description: editRecurringDescription.value,
-    intervalMinutes: editRecurringInterval.value,
-    startTime: editRecurringStart.value || null,
-    endTime: editRecurringEnd.value || null
+    ...buildRecurringPayload(draft)
   });
   editRecurringOpen.value = false;
   await refreshAll();
@@ -956,6 +1212,7 @@ const openSettings = async () => {
 
 const openWebdav = async () => {
   await loadSettings();
+  webdavPasswordVisible.value = false;
   webdavOpen.value = true;
 };
 
@@ -969,6 +1226,7 @@ const saveSettings = async () => {
 const saveWebdavSettings = async () => {
   await api.saveSettings({ ...settingsDraft });
   await api.setAutoStart(settingsDraft.autoStartEnabled);
+  webdavPasswordVisible.value = false;
   webdavOpen.value = false;
   syncStatus.value = await api.getSyncStatus();
 };
