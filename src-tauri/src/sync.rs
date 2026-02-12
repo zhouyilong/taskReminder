@@ -155,6 +155,7 @@ impl CloudSyncService {
         self.db.mark_local_change()?;
         self.local_change_seq.fetch_add(1, Ordering::SeqCst);
         self.dirty.store(true, Ordering::SeqCst);
+        let _ = self.app.emit("data-updated", ());
         self.schedule_debounced_sync()?;
         Ok(())
     }

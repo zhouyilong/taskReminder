@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
+use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike};
 use cron::Schedule;
 
 use crate::errors::AppError;
@@ -137,12 +137,12 @@ pub fn should_trigger_now(task: &RecurringTask, now: NaiveDateTime) -> Result<bo
     }
     let now_time = now.time();
     if let Some(start) = normalized.start_time.as_deref() {
-        if now_time < parse_time(start)? {
+        if minute_of_day(now_time) < minute_of_day(parse_time(start)?) {
             return Ok(false);
         }
     }
     if let Some(end) = normalized.end_time.as_deref() {
-        if now_time > parse_time(end)? {
+        if minute_of_day(now_time) > minute_of_day(parse_time(end)?) {
             return Ok(false);
         }
     }
@@ -156,14 +156,14 @@ fn compute_interval_next(
     let current_time = base.time();
     if let Some(start) = task.start_time.as_deref() {
         let start_time = parse_time(start)?;
-        if current_time < start_time {
+        if minute_of_day(current_time) < minute_of_day(start_time) {
             return Ok(NaiveDateTime::new(base.date(), start_time));
         }
     }
 
     if let Some(end) = task.end_time.as_deref() {
         let end_time = parse_time(end)?;
-        if current_time > end_time {
+        if minute_of_day(current_time) > minute_of_day(end_time) {
             let next_date = next_date(base.date());
             let next_time = task
                 .start_time
@@ -178,7 +178,7 @@ fn compute_interval_next(
     let mut next = base + Duration::minutes(task.interval_minutes.max(1));
     if let Some(end) = task.end_time.as_deref() {
         let end_time = parse_time(end)?;
-        if next.time() > end_time {
+        if minute_of_day(next.time()) > minute_of_day(end_time) {
             let next_date = next_date(base.date());
             let start_time = task
                 .start_time
@@ -191,7 +191,7 @@ fn compute_interval_next(
     }
     if let Some(start) = task.start_time.as_deref() {
         let start_time = parse_time(start)?;
-        if next.time() < start_time {
+        if minute_of_day(next.time()) < minute_of_day(start_time) {
             next = NaiveDateTime::new(next.date(), start_time);
         }
     }
@@ -378,4 +378,8 @@ fn next_date(date: NaiveDate) -> NaiveDate {
 
 fn midnight_time() -> NaiveTime {
     NaiveTime::from_hms_opt(0, 0, 0).unwrap_or(NaiveTime::MIN)
+}
+
+fn minute_of_day(time: NaiveTime) -> i32 {
+    (time.hour() as i32) * 60 + (time.minute() as i32)
 }
