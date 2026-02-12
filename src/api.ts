@@ -118,6 +118,9 @@ export const api = {
   async closeStickyNote(taskId: string): Promise<void> {
     return invoke("close_sticky_note", { taskId });
   },
+  async closeStickyNoteByWindowLabel(label: string): Promise<void> {
+    return invoke("close_sticky_note_by_window_label", { label });
+  },
   async isStickyNoteWindowVisible(): Promise<boolean> {
     return invoke("is_sticky_note_window_visible");
   },

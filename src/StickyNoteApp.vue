@@ -77,6 +77,7 @@ const allNotes = ref<StickyNote[]>([]);
 const taskKeyword = ref("");
 let storageHandler: ((event: StorageEvent) => void) | null = null;
 let unlistenChanged: UnlistenFn | null = null;
+let unlistenThemeChanged: UnlistenFn | null = null;
 
 const noteEntries = computed<NoteListEntry[]>(() => {
   const noteTitleMap = new Map(allNotes.value.map(note => [note.taskId, note.title]));
@@ -103,10 +104,13 @@ const filteredEntries = computed(() => {
   return noteEntries.value.filter(entry => entry.title.toLowerCase().includes(keyword));
 });
 
-const applyThemeFromStorage = () => {
-  const useLight = safeStorage.getItem("appTheme") === "light";
+const applyTheme = (useLight: boolean) => {
   document.documentElement.classList.toggle("light-theme", useLight);
   document.body.classList.toggle("light-theme", useLight);
+};
+
+const applyThemeFromStorage = () => {
+  applyTheme(safeStorage.getItem("appTheme") === "light");
 };
 
 const refreshData = async () => {
@@ -189,6 +193,9 @@ onMounted(async () => {
   unlistenChanged = await listen("sticky-note-changed", () => {
     void refreshData();
   });
+  unlistenThemeChanged = await listen<string>("app-theme-updated", event => {
+    applyTheme(event.payload === "light");
+  });
 });
 
 onBeforeUnmount(() => {
@@ -197,6 +204,9 @@ onBeforeUnmount(() => {
   }
   if (unlistenChanged) {
     unlistenChanged();
+  }
+  if (unlistenThemeChanged) {
+    unlistenThemeChanged();
   }
 });
 </script>

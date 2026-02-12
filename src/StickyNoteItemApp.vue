@@ -8,17 +8,28 @@
           class="paper-note-title-input"
           type="text"
           placeholder="便签标题"
+          data-tauri-drag-region="false"
+          @mousedown.stop
           @input="handleTitleInput"
         />
-        <button class="paper-note-close" type="button" @click.stop="closeNote">×</button>
+        <button
+          class="paper-note-close"
+          type="button"
+          data-tauri-drag-region="false"
+          @mousedown.stop.prevent
+          @click.stop="closeNote"
+        >
+          ×
+        </button>
       </header>
       <textarea
         v-model="note.content"
         class="paper-note-editor"
         placeholder="在这里写下便签内容..."
+        data-tauri-drag-region="false"
+        @mousedown.stop
         @input="handleContentInput"
       />
-      <div class="paper-note-footer">{{ saveHint }}</div>
     </article>
     <div v-else class="sticky-item-loading">载入便签...</div>
   </div>
@@ -41,11 +52,15 @@ const saveTimers = {
 };
 let storageHandler: ((event: StorageEvent) => void) | null = null;
 let unlistenRefresh: UnlistenFn | null = null;
+let unlistenThemeChanged: UnlistenFn | null = null;
 
-const applyThemeFromStorage = () => {
-  const useLight = safeStorage.getItem("appTheme") === "light";
+const applyTheme = (useLight: boolean) => {
   document.documentElement.classList.toggle("light-theme", useLight);
   document.body.classList.toggle("light-theme", useLight);
+};
+
+const applyThemeFromStorage = () => {
+  applyTheme(safeStorage.getItem("appTheme") === "light");
 };
 
 const scheduleTitleSave = () => {
@@ -104,11 +119,7 @@ const handleContentInput = () => {
 };
 
 const closeNote = async () => {
-  if (!note.value) {
-    await windowRef.hide();
-    return;
-  }
-  await api.closeStickyNote(note.value.taskId);
+  await api.closeStickyNoteByWindowLabel(windowRef.label);
 };
 
 const loadCurrentNote = async () => {
@@ -122,6 +133,9 @@ onMounted(async () => {
   unlistenRefresh = await listen<StickyNote>("sticky-note-item-refresh", event => {
     note.value = event.payload;
     saveHint.value = "自动保存";
+  });
+  unlistenThemeChanged = await listen<string>("app-theme-updated", event => {
+    applyTheme(event.payload === "light");
   });
   storageHandler = event => {
     if (event.key === "appTheme") {
@@ -137,6 +151,9 @@ onBeforeUnmount(() => {
   }
   if (unlistenRefresh) {
     unlistenRefresh();
+  }
+  if (unlistenThemeChanged) {
+    unlistenThemeChanged();
   }
   if (saveTimers.title) {
     window.clearTimeout(saveTimers.title);

@@ -473,6 +473,24 @@ fn close_sticky_note(
 }
 
 #[tauri::command]
+fn close_sticky_note_by_window_label(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    label: String,
+) -> ApiResult<()> {
+    let Some(note_id) = note_id_from_item_label(&label) else {
+        return Ok(());
+    };
+    if let Some(window) = app.get_webview_window(&label) {
+        let _ = window.hide();
+    }
+    into_api(state.db.close_sticky_note(&note_id))?;
+    let _ = app.emit("sticky-note-changed", note_id);
+    into_api(state.sync.notify_local_change())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn is_sticky_note_window_visible(app: tauri::AppHandle) -> ApiResult<bool> {
     if let Some(window) = app.get_webview_window(STICKY_NOTE_LABEL) {
         return window.is_visible().map_err(|err| err.to_string());
@@ -699,6 +717,7 @@ fn show_sticky_note_item_window(app: &tauri::AppHandle, note: &StickyNote) -> Re
             .inner_size(STICKY_NOTE_ITEM_WIDTH, STICKY_NOTE_ITEM_HEIGHT)
             .min_inner_size(220.0, 180.0)
             .resizable(true)
+            .focused(false)
             .decorations(false)
             .transparent(true)
             .always_on_bottom(true)
@@ -752,6 +771,7 @@ fn sync_sticky_note_window(
         .inner_size(width, height)
         .min_inner_size(STICKY_NOTE_MIN_WIDTH as f64, STICKY_NOTE_MIN_HEIGHT as f64)
         .resizable(true)
+        .focused(false)
         .decorations(false)
         .transparent(true)
         .always_on_bottom(true)
@@ -818,6 +838,10 @@ fn main() {
                             let _ = state.db.update_sticky_note_position(logical.x, logical.y);
                         }
                     }
+                    WindowEvent::Focused(_) => {
+                        let _ = window.set_always_on_top(false);
+                        let _ = window.set_always_on_bottom(true);
+                    }
                     _ => {}
                 }
             }
@@ -843,6 +867,10 @@ fn main() {
                             let logical = position.to_logical::<f64>(scale_factor);
                             let _ = state.db.move_sticky_note(&note_id, logical.x, logical.y);
                         }
+                    }
+                    WindowEvent::Focused(_) => {
+                        let _ = window.set_always_on_top(false);
+                        let _ = window.set_always_on_bottom(true);
                     }
                     _ => {}
                 }
@@ -875,6 +903,7 @@ fn main() {
             update_sticky_note_title,
             move_sticky_note,
             close_sticky_note,
+            close_sticky_note_by_window_label,
             is_sticky_note_window_visible,
             set_sticky_note_window_visible,
             test_webdav,

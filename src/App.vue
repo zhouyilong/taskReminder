@@ -567,7 +567,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
 import Modal from "./components/Modal.vue";
 import { api } from "./api";
@@ -1270,7 +1270,9 @@ const handleSyncNow = async () => {
 
 const toggleTheme = () => {
   isLightTheme.value = !isLightTheme.value;
-  safeStorage.setItem("appTheme", isLightTheme.value ? "light" : "dark");
+  const theme = isLightTheme.value ? "light" : "dark";
+  safeStorage.setItem("appTheme", theme);
+  void emit("app-theme-updated", theme);
 };
 
 const handleMinimize = async () => {

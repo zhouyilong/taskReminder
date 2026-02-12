@@ -1066,12 +1066,12 @@ input[type="checkbox"] {
 }
 
 .sticky-topbar {
-  height: 30px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 0 2px 0 4px;
+  padding: 0 1px 0 3px;
   color: rgba(233, 240, 255, 0.94);
 }
 
@@ -1090,13 +1090,13 @@ input[type="checkbox"] {
 
 .sticky-ghost-button,
 .sticky-close-window {
-  height: 22px;
+  height: 20px;
   border-radius: 999px;
   border: 1px solid rgba(189, 209, 246, 0.5);
   background: rgba(11, 20, 46, 0.34);
   color: rgba(235, 242, 255, 0.95);
-  padding: 0 10px;
-  font-size: 11px;
+  padding: 0 9px;
+  font-size: 10px;
   cursor: pointer;
   transition: background 0.18s ease, border-color 0.18s ease;
 }
@@ -1357,25 +1357,16 @@ input[type="checkbox"] {
 }
 
 .paper-note::after {
-  content: "";
-  position: absolute;
-  right: -1px;
-  bottom: -1px;
-  width: 34px;
-  height: 34px;
-  background:
-    linear-gradient(135deg, rgba(225, 205, 151, 0.9), rgba(255, 245, 214, 0.7));
-  clip-path: polygon(100% 0, 0 100%, 100% 100%);
-  box-shadow: -2px -2px 4px rgba(80, 59, 18, 0.18);
+  display: none;
 }
 
 .paper-pin {
   position: absolute;
-  top: 8px;
+  top: 6px;
   left: 50%;
   transform: translateX(-50%);
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border-radius: 999px;
   background: radial-gradient(circle at 35% 30%, #fffcf6, #b53f3f 58%, #7c2525);
   box-shadow: 0 4px 8px rgba(79, 24, 24, 0.4);
@@ -1383,10 +1374,10 @@ input[type="checkbox"] {
 }
 
 .paper-note-header {
-  padding: 14px 10px 6px;
+  padding: 11px 8px 3px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   justify-content: space-between;
   cursor: grab;
   user-select: none;
@@ -1400,7 +1391,7 @@ input[type="checkbox"] {
   border: none;
   background: transparent;
   color: rgba(86, 61, 24, 0.92);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1.2;
   width: 100%;
@@ -1415,14 +1406,14 @@ input[type="checkbox"] {
 }
 
 .paper-note-close {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 999px;
   border: 1px solid rgba(145, 116, 57, 0.34);
   background: rgba(255, 242, 204, 0.58);
   color: rgba(123, 85, 26, 0.92);
   cursor: pointer;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1;
   flex-shrink: 0;
   -webkit-app-region: no-drag;
@@ -1434,21 +1425,15 @@ input[type="checkbox"] {
   resize: none;
   flex: 1;
   min-height: 0;
-  padding: 0 12px;
+  padding: 4px 10px 8px;
   color: rgba(84, 58, 22, 0.93);
   font-size: 15px;
-  line-height: 1.7;
+  line-height: 1.58;
   outline: none;
 }
 
 .paper-note-editor::placeholder {
   color: rgba(126, 99, 60, 0.62);
-}
-
-.paper-note-footer {
-  padding: 6px 12px 10px;
-  font-size: 12px;
-  color: rgba(118, 88, 38, 0.72);
 }
 
 .light-theme .sticky-board {
