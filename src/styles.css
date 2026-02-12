@@ -64,7 +64,11 @@ body.notification-mode {
 #notification {
   width: 100vw;
   height: 100vh;
-  background: transparent;
+  background: var(--bg-surface);
+  box-sizing: border-box;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  overflow: hidden;
 }
 
 .app {
@@ -904,74 +908,62 @@ input[type="checkbox"] {
 }
 
 .notification-shell {
-  min-height: 100vh;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 14px;
-  background: transparent;
-}
-
-.notification-shell.light-theme {
-  background: transparent;
-}
-
-.notification-shell.linux-platform {
   min-height: 100%;
   height: 100%;
-  box-sizing: border-box;
-  padding: 10px 12px;
+  width: 100%;
+  display: flex;
   align-items: stretch;
   justify-content: stretch;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-soft);
+  padding: 0;
+  box-sizing: border-box;
+  background: transparent;
+  box-shadow: none;
   overflow: hidden;
 }
 
-.notification-window {
-  min-width: 320px;
-  max-width: 420px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--bg-surface);
-  padding: 14px 16px;
-  box-shadow: var(--shadow-soft);
+.notification-shell.light-theme {
+  box-shadow: none;
 }
 
-.notification-shell.linux-platform .notification-window {
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  min-width: 0;
-  max-width: none;
-  width: 100%;
-  height: 100%;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
+.notification-shell.linux-platform {
   padding: 0;
 }
 
+.notification-window {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  max-width: none;
+  box-sizing: border-box;
+  border-radius: 0;
+  border: none;
+  background: transparent;
+  padding: 9px 11px;
+  box-shadow: none;
+}
+
+.notification-shell.linux-platform .notification-window {
+  padding: 8px 10px;
+}
+
 .notification-shell.linux-platform .notification-title {
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .notification-shell.linux-platform .notification-body {
-  margin-top: 8px;
+  margin-top: 6px;
   line-height: 1.4;
 }
 
 .notification-shell.linux-platform .notification-actions {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .notification-shell.linux-platform .notification-close {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
 }
 
 .notification-header {
@@ -981,29 +973,60 @@ input[type="checkbox"] {
 }
 
 .notification-title {
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-title);
 }
 
 .notification-body {
-  margin-top: 10px;
+  margin-top: 6px;
   color: var(--text-base);
   font-size: var(--font-body);
-  line-height: 1.5;
+  line-height: 1.4;
 }
 
 .notification-actions {
-  margin-top: 12px;
+  margin-top: auto;
+  padding-top: 8px;
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 6px;
+}
+
+.notification-actions .button {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 9px;
+  box-shadow: none;
+  transition: transform 0.14s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.notification-actions .button:hover {
+  transform: translateY(-1px);
+  box-shadow: none;
+  filter: none;
+}
+
+.notification-actions .button:active {
+  transform: translateY(0);
+  box-shadow: none;
+  filter: none;
+}
+
+.notification-actions .button.secondary {
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.notification-actions .button.secondary:hover {
+  border-color: var(--primary);
+  background: var(--primary-soft);
 }
 
 .notification-close {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
   border: 1px solid var(--border);
   background: var(--bg-muted);
   color: var(--text-base);
