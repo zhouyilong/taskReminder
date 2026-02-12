@@ -580,6 +580,23 @@ impl DbManager {
         Ok(())
     }
 
+    pub fn update_sticky_note_title(&self, task_id: &str, title: &str) -> Result<(), AppError> {
+        let conn = self.get_conn()?;
+        let now = now_string();
+        let resolved_title = if title.trim().is_empty() {
+            "便签".to_string()
+        } else {
+            title.trim().to_string()
+        };
+        conn.execute(
+            "UPDATE sticky_notes
+             SET title = ?, is_open = 1, updated_at = ?
+             WHERE id = ?",
+            params![resolved_title, now, task_id],
+        )?;
+        Ok(())
+    }
+
     pub fn move_sticky_note(&self, task_id: &str, x: f64, y: f64) -> Result<(), AppError> {
         let conn = self.get_conn()?;
         let now = now_string();

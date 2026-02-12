@@ -99,6 +99,12 @@ export const api = {
   }): Promise<void> {
     return invoke("save_sticky_note_content", { payload });
   },
+  async updateStickyNoteTitle(payload: {
+    taskId: string;
+    title: string;
+  }): Promise<void> {
+    return invoke("update_sticky_note_title", { payload });
+  },
   async moveStickyNote(payload: {
     taskId: string;
     x: number;

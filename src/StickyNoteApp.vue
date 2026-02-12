@@ -35,32 +35,41 @@
         </div>
       </aside>
 
-      <section ref="canvasRef" class="sticky-canvas">
+      <section class="sticky-canvas">
         <div v-if="openNotes.length === 0" class="sticky-canvas-empty">
           点击左侧项目即可打开便签
         </div>
-
-        <article
-          v-for="note in sortedOpenNotes"
-          :key="note.taskId"
-          class="paper-note"
-          :style="{ left: note.posX + 'px', top: note.posY + 'px', zIndex: note.zIndex }"
-          @mousedown="bringToFront(note.taskId)"
-        >
-          <div class="paper-pin"></div>
-          <header class="paper-note-header" @mousedown.prevent="startDragging($event, note.taskId)">
-            <div class="paper-note-title">{{ note.title }}</div>
-            <button class="paper-note-close" type="button" @click.stop="closeTaskNote(note.taskId)">×</button>
-          </header>
-          <textarea
-            v-model="note.content"
-            class="paper-note-editor"
-            placeholder="在这里写下便签内容..."
-            @input="handleNoteInput(note.taskId)"
-          />
-          <div class="paper-note-footer">{{ note.saveHint }}</div>
-        </article>
       </section>
+    </div>
+
+    <div class="sticky-notes-layer">
+      <article
+        v-for="note in sortedOpenNotes"
+        :key="note.taskId"
+        class="paper-note"
+        :style="{ left: note.posX + 'px', top: note.posY + 'px', zIndex: note.zIndex }"
+        @mousedown="bringToFront(note.taskId)"
+      >
+        <div class="paper-pin"></div>
+        <header class="paper-note-header" @mousedown.prevent="startDragging($event, note.taskId)">
+          <input
+            v-model="note.title"
+            class="paper-note-title-input"
+            type="text"
+            placeholder="便签标题"
+            @mousedown.stop
+            @input="handleTitleInput(note.taskId)"
+          />
+          <button class="paper-note-close" type="button" @click.stop="closeTaskNote(note.taskId)">×</button>
+        </header>
+        <textarea
+          v-model="note.content"
+          class="paper-note-editor"
+          placeholder="在这里写下便签内容..."
+          @input="handleNoteInput(note.taskId)"
+        />
+        <div class="paper-note-footer">{{ note.saveHint }}</div>
+      </article>
     </div>
   </div>
 </template>
@@ -96,16 +105,17 @@ const tasks = ref<Task[]>([]);
 const allNotes = ref<StickyNote[]>([]);
 const openNotes = ref<BoardNote[]>([]);
 const taskKeyword = ref("");
-const canvasRef = ref<HTMLElement | null>(null);
 const dragging = ref<DraggingState | null>(null);
 const zCounter = ref(100);
 const saveTimers = new Map<string, number>();
+const titleSaveTimers = new Map<string, number>();
 let storageHandler: ((event: StorageEvent) => void) | null = null;
 
 const noteEntries = computed<NoteListEntry[]>(() => {
+  const noteTitleMap = new Map(allNotes.value.map(note => [note.taskId, note.title]));
   const taskEntries = tasks.value.map(task => ({
     id: task.id,
-    title: task.description,
+    title: noteTitleMap.get(task.id)?.trim() || task.description,
     noteType: "TASK" as const
   }));
   const customEntries = allNotes.value
@@ -142,10 +152,7 @@ const syncOpenNotes = () => {
     .filter(note => note.isOpen)
     .map((note, index) => ({
       ...note,
-      title:
-        note.noteType === "CUSTOM"
-          ? note.title || "新便签"
-          : taskTitleMap.get(note.taskId) || note.title || "待办便签",
+      title: note.title?.trim() || taskTitleMap.get(note.taskId) || "待办便签",
       zIndex: 100 + index,
       saveHint: "自动保存"
     }));
@@ -177,9 +184,12 @@ const bringToFront = (taskId: string) => {
 };
 
 const clampPosition = (x: number, y: number) => {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return { x: NOTE_PADDING, y: NOTE_PADDING };
+  }
   return {
-    x: Math.max(NOTE_PADDING, x),
-    y: Math.max(NOTE_PADDING, y)
+    x,
+    y
   };
 };
 
@@ -250,6 +260,52 @@ const closeTaskNote = async (taskId: string) => {
     clearTimeout(timer);
     saveTimers.delete(taskId);
   }
+  const titleTimer = titleSaveTimers.get(taskId);
+  if (titleTimer !== undefined) {
+    clearTimeout(titleTimer);
+    titleSaveTimers.delete(taskId);
+  }
+};
+
+const scheduleTitleSave = (taskId: string) => {
+  const note = openNotes.value.find(item => item.taskId === taskId);
+  if (!note) {
+    return;
+  }
+  const timer = titleSaveTimers.get(taskId);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+  }
+  const nextTimer = window.setTimeout(async () => {
+    const latest = openNotes.value.find(item => item.taskId === taskId);
+    if (!latest) {
+      titleSaveTimers.delete(taskId);
+      return;
+    }
+    try {
+      await api.updateStickyNoteTitle({
+        taskId,
+        title: latest.title
+      });
+    } catch (error) {
+      console.error("[sticky-note] 标题保存失败", error);
+    } finally {
+      titleSaveTimers.delete(taskId);
+    }
+  }, 450);
+  titleSaveTimers.set(taskId, nextTimer);
+};
+
+const handleTitleInput = (taskId: string) => {
+  const note = openNotes.value.find(item => item.taskId === taskId);
+  if (!note) {
+    return;
+  }
+  const shadow = allNotes.value.find(item => item.taskId === taskId);
+  if (shadow) {
+    shadow.title = note.title;
+  }
+  scheduleTitleSave(taskId);
 };
 
 const scheduleSave = (taskId: string) => {
@@ -331,7 +387,10 @@ const onWindowMouseUp = () => {
 };
 
 const startDragging = (event: MouseEvent, taskId: string) => {
-  if ((event.target as HTMLElement).closest(".paper-note-close")) {
+  if (
+    (event.target as HTMLElement).closest(".paper-note-close") ||
+    (event.target as HTMLElement).closest(".paper-note-title-input")
+  ) {
     return;
   }
   const note = openNotes.value.find(item => item.taskId === taskId);
@@ -373,5 +432,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("mouseup", onWindowMouseUp);
   saveTimers.forEach(timer => clearTimeout(timer));
   saveTimers.clear();
+  titleSaveTimers.forEach(timer => clearTimeout(timer));
+  titleSaveTimers.clear();
 });
 </script>

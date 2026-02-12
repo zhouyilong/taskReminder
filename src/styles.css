@@ -1041,13 +1041,14 @@ input[type="checkbox"] {
 }
 
 .sticky-board {
+  position: relative;
   width: 100%;
   height: 100%;
   box-sizing: border-box;
-  padding: 10px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   border-radius: 18px;
   border: 1px solid rgba(138, 168, 226, 0.32);
   background:
@@ -1059,12 +1060,12 @@ input[type="checkbox"] {
 }
 
 .sticky-topbar {
-  height: 34px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 0 4px 0 6px;
+  gap: 8px;
+  padding: 0 2px 0 4px;
   color: rgba(233, 240, 255, 0.94);
 }
 
@@ -1077,19 +1078,19 @@ input[type="checkbox"] {
 .sticky-topbar-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   -webkit-app-region: no-drag;
 }
 
 .sticky-ghost-button,
 .sticky-close-window {
-  height: 26px;
+  height: 22px;
   border-radius: 999px;
   border: 1px solid rgba(189, 209, 246, 0.5);
   background: rgba(11, 20, 46, 0.34);
   color: rgba(235, 242, 255, 0.95);
-  padding: 0 12px;
-  font-size: 12px;
+  padding: 0 10px;
+  font-size: 11px;
   cursor: pointer;
   transition: background 0.18s ease, border-color 0.18s ease;
 }
@@ -1105,7 +1106,7 @@ input[type="checkbox"] {
   flex: 1;
   display: grid;
   grid-template-columns: 240px 1fr;
-  gap: 10px;
+  gap: 8px;
 }
 
 .sticky-task-panel {
@@ -1113,10 +1114,10 @@ input[type="checkbox"] {
   border-radius: 14px;
   border: 1px solid rgba(164, 192, 238, 0.38);
   background: rgba(9, 20, 48, 0.3);
-  padding: 10px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .sticky-task-title {
@@ -1133,7 +1134,7 @@ input[type="checkbox"] {
 }
 
 .sticky-add-note {
-  height: 24px;
+  height: 22px;
   border-radius: 999px;
   border: 1px solid rgba(172, 198, 244, 0.54);
   background: rgba(13, 27, 60, 0.4);
@@ -1149,13 +1150,13 @@ input[type="checkbox"] {
 }
 
 .sticky-task-search {
-  height: 34px;
-  border-radius: 10px;
+  height: 28px;
+  border-radius: 8px;
   border: 1px solid rgba(170, 196, 236, 0.42);
   background: rgba(7, 15, 36, 0.38);
   color: rgba(238, 245, 255, 0.96);
-  padding: 0 10px;
-  font-size: 13px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
 .sticky-task-search::placeholder {
@@ -1168,7 +1169,7 @@ input[type="checkbox"] {
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   padding-right: 2px;
 }
 
@@ -1192,7 +1193,7 @@ input[type="checkbox"] {
   align-items: center;
   gap: 6px;
   border-radius: 8px;
-  padding: 6px 8px;
+  padding: 5px 7px;
 }
 
 .sticky-task-item:hover {
@@ -1253,7 +1254,14 @@ input[type="checkbox"] {
   border-radius: 14px;
   border: 1px dashed rgba(172, 196, 238, 0.35);
   background: rgba(8, 18, 42, 0.24);
-  overflow: hidden;
+  overflow: visible;
+}
+
+.sticky-notes-layer {
+  position: absolute;
+  inset: 42px 8px 8px 8px;
+  pointer-events: none;
+  overflow: visible;
 }
 
 .sticky-canvas-empty {
@@ -1284,6 +1292,7 @@ input[type="checkbox"] {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  pointer-events: auto;
 }
 
 .paper-note::after {
@@ -1313,7 +1322,7 @@ input[type="checkbox"] {
 }
 
 .paper-note-header {
-  padding: 16px 12px 8px;
+  padding: 14px 10px 6px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1326,27 +1335,34 @@ input[type="checkbox"] {
   cursor: grabbing;
 }
 
-.paper-note-title {
-  font-size: 14px;
-  font-weight: 700;
+.paper-note-title-input {
+  border: none;
+  background: transparent;
   color: rgba(86, 61, 24, 0.92);
-  line-height: 1.3;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  width: 100%;
+  outline: none;
+  padding: 0;
+  min-width: 0;
+}
+
+.paper-note-title-input::placeholder {
+  color: rgba(122, 96, 56, 0.7);
 }
 
 .paper-note-close {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   border-radius: 999px;
   border: 1px solid rgba(145, 116, 57, 0.34);
   background: rgba(255, 242, 204, 0.58);
   color: rgba(123, 85, 26, 0.92);
   cursor: pointer;
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1;
+  flex-shrink: 0;
 }
 
 .paper-note-editor {

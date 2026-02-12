@@ -97,6 +97,13 @@ struct SaveStickyNoteContentPayload {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct UpdateStickyNoteTitlePayload {
+    task_id: String,
+    title: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct MoveStickyNotePayload {
     task_id: String,
     x: f64,
@@ -365,6 +372,20 @@ fn save_sticky_note_content(
         state
             .db
             .save_sticky_note_content(&payload.task_id, &payload.content),
+    )?;
+    into_api(state.sync.notify_local_change())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn update_sticky_note_title(
+    state: State<AppState>,
+    payload: UpdateStickyNoteTitlePayload,
+) -> ApiResult<()> {
+    into_api(
+        state
+            .db
+            .update_sticky_note_title(&payload.task_id, &payload.title),
     )?;
     into_api(state.sync.notify_local_change())?;
     Ok(())
@@ -710,6 +731,7 @@ fn main() {
             open_sticky_note,
             create_sticky_note,
             save_sticky_note_content,
+            update_sticky_note_title,
             move_sticky_note,
             close_sticky_note,
             is_sticky_note_window_visible,
