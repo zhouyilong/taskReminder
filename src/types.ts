@@ -51,6 +51,16 @@ export interface ReminderRecord {
   deletedAt?: string | null;
 }
 
+export interface StickyNote {
+  taskId: string;
+  content: string;
+  posX: number;
+  posY: number;
+  isOpen: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AppSettings {
   autoStartEnabled: boolean;
   soundEnabled: boolean;

@@ -4,6 +4,7 @@ import type {
   RecurringTask,
   RecurringMode,
   ReminderRecord,
+  StickyNote,
   AppSettings,
   SyncStatus,
   NotificationPayload
@@ -74,8 +75,31 @@ export const api = {
   async saveSettings(settings: AppSettings): Promise<void> {
     return invoke("save_settings", { settings });
   },
-  async saveStickyNoteContent(content: string): Promise<void> {
-    return invoke("save_sticky_note_content", { content });
+  async listStickyNotes(): Promise<StickyNote[]> {
+    return invoke("list_sticky_notes");
+  },
+  async openStickyNote(payload: {
+    taskId: string;
+    defaultX?: number | null;
+    defaultY?: number | null;
+  }): Promise<StickyNote> {
+    return invoke("open_sticky_note", { payload });
+  },
+  async saveStickyNoteContent(payload: {
+    taskId: string;
+    content: string;
+  }): Promise<void> {
+    return invoke("save_sticky_note_content", { payload });
+  },
+  async moveStickyNote(payload: {
+    taskId: string;
+    x: number;
+    y: number;
+  }): Promise<void> {
+    return invoke("move_sticky_note", { payload });
+  },
+  async closeStickyNote(taskId: string): Promise<void> {
+    return invoke("close_sticky_note", { taskId });
   },
   async testWebDav(settings: AppSettings): Promise<{ ok: boolean; message: string }> {
     return invoke("test_webdav", { settings });

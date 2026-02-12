@@ -68,6 +68,15 @@ const RECORD_COLUMNS: &[&str] = &[
     "updated_at",
     "deleted_at",
 ];
+const STICKY_NOTE_COLUMNS: &[&str] = &[
+    "id",
+    "content",
+    "pos_x",
+    "pos_y",
+    "is_open",
+    "created_at",
+    "updated_at",
+];
 
 #[derive(Clone)]
 pub struct CloudSyncService {
@@ -461,6 +470,13 @@ fn merge_databases(
         RECORD_COLUMNS,
         "trigger_time",
     )?;
+    merge_table(
+        &tx,
+        &remote,
+        "sticky_notes",
+        STICKY_NOTE_COLUMNS,
+        "updated_at",
+    )?;
     tx.commit()?;
     Ok(())
 }
@@ -632,6 +648,24 @@ fn ensure_sync_columns(conn: &Connection) -> Result<(), AppError> {
     ensure_column(conn, "recurring_tasks", "cron_expression", "TEXT")?;
     ensure_column(conn, "reminder_records", "updated_at", "TEXT")?;
     ensure_column(conn, "reminder_records", "deleted_at", "TEXT")?;
+    ensure_sticky_notes_table(conn)?;
+    Ok(())
+}
+
+fn ensure_sticky_notes_table(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS sticky_notes (
+            id TEXT PRIMARY KEY,
+            content TEXT NOT NULL DEFAULT '',
+            pos_x REAL NOT NULL DEFAULT 48,
+            pos_y REAL NOT NULL DEFAULT 76,
+            is_open INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_sticky_notes_updated_at ON sticky_notes(updated_at);
+         CREATE INDEX IF NOT EXISTS idx_sticky_notes_is_open ON sticky_notes(is_open);",
+    )?;
     Ok(())
 }
 

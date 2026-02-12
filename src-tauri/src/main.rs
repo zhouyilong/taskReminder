@@ -25,7 +25,7 @@ use tauri::{
 use crate::db::DbManager;
 use crate::errors::AppError;
 use crate::models::{
-    AppSettings, NotificationPayload, RecurringTask, ReminderRecord, SyncStatus, Task,
+    AppSettings, NotificationPayload, RecurringTask, ReminderRecord, StickyNote, SyncStatus, Task,
 };
 use crate::scheduler::ReminderScheduler;
 use crate::single_instance::InstanceLock;
@@ -77,6 +77,29 @@ struct SnoozePayload {
     reminder_id: String,
     reminder_type: String,
     minutes: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenStickyNotePayload {
+    task_id: String,
+    default_x: Option<f64>,
+    default_y: Option<f64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveStickyNoteContentPayload {
+    task_id: String,
+    content: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MoveStickyNotePayload {
+    task_id: String,
+    x: f64,
+    y: f64,
 }
 
 #[derive(Serialize)]
@@ -291,8 +314,52 @@ fn save_settings(
 }
 
 #[tauri::command]
-fn save_sticky_note_content(state: State<AppState>, content: String) -> ApiResult<()> {
-    into_api(state.db.update_sticky_note_content(&content))?;
+fn list_sticky_notes(state: State<AppState>) -> ApiResult<Vec<StickyNote>> {
+    into_api(state.db.list_sticky_notes())
+}
+
+#[tauri::command]
+fn open_sticky_note(
+    state: State<AppState>,
+    payload: OpenStickyNotePayload,
+) -> ApiResult<StickyNote> {
+    let note = into_api(state.db.open_sticky_note(
+        &payload.task_id,
+        payload.default_x,
+        payload.default_y,
+    ))?;
+    into_api(state.sync.notify_local_change())?;
+    Ok(note)
+}
+
+#[tauri::command]
+fn save_sticky_note_content(
+    state: State<AppState>,
+    payload: SaveStickyNoteContentPayload,
+) -> ApiResult<()> {
+    into_api(
+        state
+            .db
+            .save_sticky_note_content(&payload.task_id, &payload.content),
+    )?;
+    into_api(state.sync.notify_local_change())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn move_sticky_note(state: State<AppState>, payload: MoveStickyNotePayload) -> ApiResult<()> {
+    into_api(
+        state
+            .db
+            .move_sticky_note(&payload.task_id, payload.x, payload.y),
+    )?;
+    into_api(state.sync.notify_local_change())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn close_sticky_note(state: State<AppState>, task_id: String) -> ApiResult<()> {
+    into_api(state.db.close_sticky_note(&task_id))?;
     into_api(state.sync.notify_local_change())?;
     Ok(())
 }
@@ -512,7 +579,7 @@ fn sync_sticky_note_window(app: &tauri::AppHandle, settings: &AppSettings) -> Re
         .resizable(true)
         .decorations(false)
         .transparent(true)
-        .always_on_top(true)
+        .always_on_bottom(true)
         .skip_taskbar(true)
         .visible(false)
         .build()
@@ -520,7 +587,8 @@ fn sync_sticky_note_window(app: &tauri::AppHandle, settings: &AppSettings) -> Re
     };
 
     let _ = window.set_size(LogicalSize::new(width, height));
-    let _ = window.set_always_on_top(true);
+    let _ = window.set_always_on_top(false);
+    let _ = window.set_always_on_bottom(true);
     let _ = window.set_resizable(true);
     if let (Some(x), Some(y)) = (settings.sticky_note_x, settings.sticky_note_y) {
         let _ = window.set_position(LogicalPosition::new(x, y));
@@ -585,7 +653,11 @@ fn main() {
             delete_reminder_records,
             get_settings,
             save_settings,
+            list_sticky_notes,
+            open_sticky_note,
             save_sticky_note_content,
+            move_sticky_note,
+            close_sticky_note,
             test_webdav,
             sync_now,
             set_autostart,

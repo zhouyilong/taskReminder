@@ -56,6 +56,18 @@ pub struct ReminderRecord {
     pub deleted_at: Option<String>,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StickyNote {
+    pub task_id: String,
+    pub content: String,
+    pub pos_x: f64,
+    pub pos_y: f64,
+    pub is_open: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
