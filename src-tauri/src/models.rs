@@ -56,12 +56,32 @@ pub struct ReminderRecord {
     pub deleted_at: Option<String>,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StickyNote {
+    pub task_id: String,
+    pub title: String,
+    pub note_type: String,
+    pub content: String,
+    pub pos_x: f64,
+    pub pos_y: f64,
+    pub is_open: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub auto_start_enabled: bool,
     pub sound_enabled: bool,
     pub snooze_minutes: i64,
+    pub sticky_note_enabled: bool,
+    pub sticky_note_content: String,
+    pub sticky_note_width: i64,
+    pub sticky_note_height: i64,
+    pub sticky_note_x: Option<f64>,
+    pub sticky_note_y: Option<f64>,
     pub webdav_enabled: bool,
     pub webdav_url: String,
     pub webdav_username: String,

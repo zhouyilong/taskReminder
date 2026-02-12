@@ -51,10 +51,28 @@ export interface ReminderRecord {
   deletedAt?: string | null;
 }
 
+export interface StickyNote {
+  taskId: string;
+  title: string;
+  noteType: "TASK" | "CUSTOM";
+  content: string;
+  posX: number;
+  posY: number;
+  isOpen: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AppSettings {
   autoStartEnabled: boolean;
   soundEnabled: boolean;
   snoozeMinutes: number;
+  stickyNoteEnabled: boolean;
+  stickyNoteContent: string;
+  stickyNoteWidth: number;
+  stickyNoteHeight: number;
+  stickyNoteX?: number | null;
+  stickyNoteY?: number | null;
   webdavEnabled: boolean;
   webdavUrl: string;
   webdavUsername: string;

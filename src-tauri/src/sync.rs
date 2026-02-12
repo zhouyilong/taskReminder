@@ -33,6 +33,10 @@ const TASK_COLUMNS: &[&str] = &[
     "created_at",
     "completed_at",
     "reminder_time",
+    "sticky_content",
+    "sticky_pos_x",
+    "sticky_pos_y",
+    "sticky_is_open",
     "updated_at",
     "deleted_at",
 ];
@@ -618,6 +622,15 @@ fn parse_datetime_any(value: &str) -> Option<NaiveDateTime> {
 fn ensure_sync_columns(conn: &Connection) -> Result<(), AppError> {
     ensure_column(conn, "tasks", "updated_at", "TEXT")?;
     ensure_column(conn, "tasks", "deleted_at", "TEXT")?;
+    ensure_column(conn, "tasks", "sticky_content", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column(conn, "tasks", "sticky_pos_x", "REAL NOT NULL DEFAULT 48")?;
+    ensure_column(conn, "tasks", "sticky_pos_y", "REAL NOT NULL DEFAULT 76")?;
+    ensure_column(
+        conn,
+        "tasks",
+        "sticky_is_open",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     ensure_column(conn, "recurring_tasks", "updated_at", "TEXT")?;
     ensure_column(conn, "recurring_tasks", "deleted_at", "TEXT")?;
     ensure_column(

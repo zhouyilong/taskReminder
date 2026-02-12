@@ -7,7 +7,7 @@
       </div>
       <div class="notification-body">{{ payload?.description }}</div>
       <div class="notification-actions">
-        <button class="button secondary" @click="handleComplete">不再提醒</button>
+        <button class="button secondary" @click="handleAcknowledge">知道了</button>
         <button class="button" @click="handleSnooze">稍后提醒</button>
       </div>
     </div>
@@ -232,13 +232,13 @@ const handleDismiss = async () => {
   await hide();
 };
 
-const handleComplete = async () => {
+const handleAcknowledge = async () => {
   if (!payload.value) {
     return;
   }
   await api.acknowledgeNotification({
     recordId: payload.value.recordId,
-    action: "COMPLETED"
+    action: "DISMISSED"
   });
   await hide();
 };
