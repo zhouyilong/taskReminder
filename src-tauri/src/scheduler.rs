@@ -172,7 +172,7 @@ impl ReminderScheduler {
 
 fn emit_notification(app: &AppHandle, payload: &NotificationPayload) -> Result<(), AppError> {
     let notification_height = if cfg!(target_os = "linux") {
-        152.0
+        136.0
     } else {
         180.0
     };

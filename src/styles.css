@@ -908,9 +908,15 @@ input[type="checkbox"] {
 .notification-shell.linux-platform {
   min-height: 100%;
   height: 100%;
-  padding: 0;
+  box-sizing: border-box;
+  padding: 10px 12px;
   align-items: stretch;
   justify-content: stretch;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
 }
 
 .notification-window {
@@ -924,11 +930,36 @@ input[type="checkbox"] {
 }
 
 .notification-shell.linux-platform .notification-window {
+  display: flex;
+  flex-direction: column;
   box-sizing: border-box;
   min-width: 0;
   max-width: none;
   width: 100%;
   height: 100%;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.notification-shell.linux-platform .notification-title {
+  font-size: 15px;
+}
+
+.notification-shell.linux-platform .notification-body {
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+.notification-shell.linux-platform .notification-actions {
+  margin-top: 10px;
+}
+
+.notification-shell.linux-platform .notification-close {
+  width: 24px;
+  height: 24px;
 }
 
 .notification-header {
