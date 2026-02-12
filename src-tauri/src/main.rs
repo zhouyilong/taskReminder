@@ -83,6 +83,7 @@ struct SnoozePayload {
 #[serde(rename_all = "camelCase")]
 struct OpenStickyNotePayload {
     task_id: String,
+    title: Option<String>,
     default_x: Option<f64>,
     default_y: Option<f64>,
 }
@@ -100,6 +101,14 @@ struct MoveStickyNotePayload {
     task_id: String,
     x: f64,
     y: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateStickyNotePayload {
+    title: Option<String>,
+    default_x: Option<f64>,
+    default_y: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -325,6 +334,21 @@ fn open_sticky_note(
 ) -> ApiResult<StickyNote> {
     let note = into_api(state.db.open_sticky_note(
         &payload.task_id,
+        payload.title,
+        payload.default_x,
+        payload.default_y,
+    ))?;
+    into_api(state.sync.notify_local_change())?;
+    Ok(note)
+}
+
+#[tauri::command]
+fn create_sticky_note(
+    state: State<AppState>,
+    payload: CreateStickyNotePayload,
+) -> ApiResult<StickyNote> {
+    let note = into_api(state.db.create_custom_sticky_note(
+        payload.title.as_deref().unwrap_or(""),
         payload.default_x,
         payload.default_y,
     ))?;
@@ -362,6 +386,28 @@ fn close_sticky_note(state: State<AppState>, task_id: String) -> ApiResult<()> {
     into_api(state.db.close_sticky_note(&task_id))?;
     into_api(state.sync.notify_local_change())?;
     Ok(())
+}
+
+#[tauri::command]
+fn is_sticky_note_window_visible(app: tauri::AppHandle) -> ApiResult<bool> {
+    if let Some(window) = app.get_webview_window(STICKY_NOTE_LABEL) {
+        return window.is_visible().map_err(|err| err.to_string());
+    }
+    Ok(false)
+}
+
+#[tauri::command]
+fn set_sticky_note_window_visible(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    visible: bool,
+) -> ApiResult<bool> {
+    into_api(state.db.update_sticky_note_enabled(visible))?;
+    let mut settings = into_api(state.db.load_settings())?;
+    settings.sticky_note_enabled = visible;
+    into_api(sync_sticky_note_window(&app, &settings))?;
+    into_api(state.sync.notify_local_change())?;
+    Ok(visible)
 }
 
 #[tauri::command]
@@ -560,6 +606,7 @@ fn sync_sticky_note_window(app: &tauri::AppHandle, settings: &AppSettings) -> Re
         if let Some(window) = app.get_webview_window(STICKY_NOTE_LABEL) {
             let _ = window.hide();
         }
+        let _ = app.emit("sticky-note-visibility", false);
         return Ok(());
     }
 
@@ -595,6 +642,7 @@ fn sync_sticky_note_window(app: &tauri::AppHandle, settings: &AppSettings) -> Re
     }
     let _ = window.emit("sticky-note-settings-updated", settings);
     let _ = window.show();
+    let _ = app.emit("sticky-note-visibility", true);
     Ok(())
 }
 
@@ -612,6 +660,11 @@ fn main() {
                     WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();
                         let _ = window.hide();
+                        if let Some(state) = window.app_handle().try_state::<AppState>() {
+                            let _ = state.db.update_sticky_note_enabled(false);
+                            let _ = state.sync.notify_local_change();
+                        }
+                        let _ = window.app_handle().emit("sticky-note-visibility", false);
                     }
                     WindowEvent::Resized(size) => {
                         if let Some(state) = window.app_handle().try_state::<AppState>() {
@@ -655,9 +708,12 @@ fn main() {
             save_settings,
             list_sticky_notes,
             open_sticky_note,
+            create_sticky_note,
             save_sticky_note_content,
             move_sticky_note,
             close_sticky_note,
+            is_sticky_note_window_visible,
+            set_sticky_note_window_visible,
             test_webdav,
             sync_now,
             set_autostart,

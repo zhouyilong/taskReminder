@@ -10,30 +10,34 @@
 
     <div class="sticky-layout">
       <aside class="sticky-task-panel">
-        <div class="sticky-task-title">待办列表</div>
+        <div class="sticky-list-toolbar">
+          <div class="sticky-task-title">便签列表</div>
+          <button class="sticky-add-note" type="button" @click="createCustomNote">+ 新便签</button>
+        </div>
         <input
           v-model="taskKeyword"
           class="sticky-task-search"
-          placeholder="搜索待办..."
+          placeholder="搜索..."
         />
-        <div class="sticky-task-list">
+        <div class="sticky-task-list compact">
           <button
-            v-for="task in filteredTasks"
-            :key="task.id"
-            class="sticky-task-item"
-            :class="{ active: isTaskOpen(task.id) }"
+            v-for="entry in filteredEntries"
+            :key="entry.id"
+            class="sticky-task-item compact"
+            :class="{ active: isNoteOpen(entry.id) }"
             type="button"
-            @click="openTaskNote(task)"
+            @click="openFromEntry(entry)"
           >
-            <span class="sticky-task-text">{{ task.description }}</span>
+            <span class="sticky-item-dot" :class="entry.noteType === 'CUSTOM' ? 'custom' : 'task'"></span>
+            <span class="sticky-task-text compact">{{ entry.title }}</span>
           </button>
-          <div v-if="filteredTasks.length === 0" class="sticky-task-empty">暂无待办</div>
+          <div v-if="filteredEntries.length === 0" class="sticky-task-empty">暂无便签项</div>
         </div>
       </aside>
 
       <section ref="canvasRef" class="sticky-canvas">
         <div v-if="openNotes.length === 0" class="sticky-canvas-empty">
-          点击左侧待办，即可生成一张便签
+          点击左侧项目即可打开便签
         </div>
 
         <article
@@ -51,7 +55,7 @@
           <textarea
             v-model="note.content"
             class="paper-note-editor"
-            placeholder="在这里写下这条待办的补充信息..."
+            placeholder="在这里写下便签内容..."
             @input="handleNoteInput(note.taskId)"
           />
           <div class="paper-note-footer">{{ note.saveHint }}</div>
@@ -63,19 +67,21 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
-import { api } from "./api";
 import { safeStorage } from "./safeStorage";
+import { api } from "./api";
 import type { StickyNote, Task } from "./types";
 
-const NOTE_WIDTH = 284;
-const NOTE_HEIGHT = 280;
 const NOTE_PADDING = 12;
 
 type BoardNote = StickyNote & {
-  title: string;
   zIndex: number;
   saveHint: string;
+};
+
+type NoteListEntry = {
+  id: string;
+  title: string;
+  noteType: "TASK" | "CUSTOM";
 };
 
 type DraggingState = {
@@ -87,33 +93,42 @@ type DraggingState = {
 };
 
 const tasks = ref<Task[]>([]);
+const allNotes = ref<StickyNote[]>([]);
 const openNotes = ref<BoardNote[]>([]);
 const taskKeyword = ref("");
 const canvasRef = ref<HTMLElement | null>(null);
 const dragging = ref<DraggingState | null>(null);
 const zCounter = ref(100);
-const appWindow = resolveWindow();
+const saveTimers = new Map<string, number>();
 let storageHandler: ((event: StorageEvent) => void) | null = null;
 
-const filteredTasks = computed(() => {
+const noteEntries = computed<NoteListEntry[]>(() => {
+  const taskEntries = tasks.value.map(task => ({
+    id: task.id,
+    title: task.description,
+    noteType: "TASK" as const
+  }));
+  const customEntries = allNotes.value
+    .filter(note => note.noteType === "CUSTOM")
+    .map(note => ({
+      id: note.taskId,
+      title: note.title || "新便签",
+      noteType: "CUSTOM" as const
+    }));
+  return [...taskEntries, ...customEntries];
+});
+
+const filteredEntries = computed(() => {
   const keyword = taskKeyword.value.trim().toLowerCase();
   if (!keyword) {
-    return tasks.value;
+    return noteEntries.value;
   }
-  return tasks.value.filter(task => task.description.toLowerCase().includes(keyword));
+  return noteEntries.value.filter(entry => entry.title.toLowerCase().includes(keyword));
 });
 
 const sortedOpenNotes = computed(() => {
   return [...openNotes.value].sort((a, b) => a.zIndex - b.zIndex);
 });
-
-function resolveWindow(): TauriWindow | null {
-  try {
-    return getCurrentWindow();
-  } catch {
-    return null;
-  }
-}
 
 const applyThemeFromStorage = () => {
   const useLight = safeStorage.getItem("appTheme") === "light";
@@ -121,18 +136,21 @@ const applyThemeFromStorage = () => {
   document.body.classList.toggle("light-theme", useLight);
 };
 
-const syncOpenNotes = (notes: StickyNote[]) => {
-  const titleById = new Map(tasks.value.map(task => [task.id, task.description]));
-  const visible = notes
-    .filter(note => note.isOpen && titleById.has(note.taskId))
+const syncOpenNotes = () => {
+  const taskTitleMap = new Map(tasks.value.map(task => [task.id, task.description]));
+  const visibleNotes = allNotes.value
+    .filter(note => note.isOpen)
     .map((note, index) => ({
       ...note,
-      title: titleById.get(note.taskId) || "未命名待办",
+      title:
+        note.noteType === "CUSTOM"
+          ? note.title || "新便签"
+          : taskTitleMap.get(note.taskId) || note.title || "待办便签",
       zIndex: 100 + index,
       saveHint: "自动保存"
     }));
-  zCounter.value = 100 + visible.length;
-  openNotes.value = visible;
+  zCounter.value = 100 + visibleNotes.length;
+  openNotes.value = visibleNotes;
 };
 
 const refreshData = async () => {
@@ -141,11 +159,12 @@ const refreshData = async () => {
     api.listStickyNotes()
   ]);
   tasks.value = taskRows;
-  syncOpenNotes(noteRows);
+  allNotes.value = noteRows;
+  syncOpenNotes();
 };
 
-const isTaskOpen = (taskId: string) => {
-  return openNotes.value.some(note => note.taskId === taskId);
+const isNoteOpen = (noteId: string) => {
+  return openNotes.value.some(note => note.taskId === noteId);
 };
 
 const bringToFront = (taskId: string) => {
@@ -158,16 +177,18 @@ const bringToFront = (taskId: string) => {
 };
 
 const clampPosition = (x: number, y: number) => {
-  const canvas = canvasRef.value;
-  if (!canvas) {
-    return { x: Math.max(NOTE_PADDING, x), y: Math.max(NOTE_PADDING, y) };
-  }
-  const maxX = Math.max(NOTE_PADDING, canvas.clientWidth - NOTE_WIDTH - NOTE_PADDING);
-  const maxY = Math.max(NOTE_PADDING, canvas.clientHeight - NOTE_HEIGHT - NOTE_PADDING);
   return {
-    x: Math.min(maxX, Math.max(NOTE_PADDING, x)),
-    y: Math.min(maxY, Math.max(NOTE_PADDING, y))
+    x: Math.max(NOTE_PADDING, x),
+    y: Math.max(NOTE_PADDING, y)
   };
+};
+
+const buildDefaultPosition = () => {
+  const opened = openNotes.value.length;
+  return clampPosition(
+    NOTE_PADDING + (opened % 8) * 20,
+    NOTE_PADDING + (opened % 8) * 14
+  );
 };
 
 const openTaskNote = async (task: Task) => {
@@ -176,23 +197,49 @@ const openTaskNote = async (task: Task) => {
     bringToFront(task.id);
     return;
   }
-  const offset = openNotes.value.length;
-  const defaultPosition = clampPosition(
-    NOTE_PADDING + (offset % 6) * 24,
-    NOTE_PADDING + (offset % 6) * 16
-  );
-  const note = await api.openStickyNote({
+  const position = buildDefaultPosition();
+  await api.openStickyNote({
     taskId: task.id,
-    defaultX: defaultPosition.x,
-    defaultY: defaultPosition.y
-  });
-  zCounter.value += 1;
-  openNotes.value.push({
-    ...note,
     title: task.description,
-    zIndex: zCounter.value,
-    saveHint: "自动保存"
+    defaultX: position.x,
+    defaultY: position.y
   });
+  await refreshData();
+  bringToFront(task.id);
+};
+
+const openCustomNote = async (noteId: string, title: string) => {
+  const existing = openNotes.value.find(note => note.taskId === noteId);
+  if (existing) {
+    bringToFront(noteId);
+    return;
+  }
+  await api.openStickyNote({ taskId: noteId, title });
+  await refreshData();
+  bringToFront(noteId);
+};
+
+const openFromEntry = async (entry: NoteListEntry) => {
+  if (entry.noteType === "CUSTOM") {
+    await openCustomNote(entry.id, entry.title);
+    return;
+  }
+  const task = tasks.value.find(item => item.id === entry.id);
+  if (!task) {
+    return;
+  }
+  await openTaskNote(task);
+};
+
+const createCustomNote = async () => {
+  const position = buildDefaultPosition();
+  const created = await api.createStickyNote({
+    title: `新便签 ${allNotes.value.filter(note => note.noteType === "CUSTOM").length + 1}`,
+    defaultX: position.x,
+    defaultY: position.y
+  });
+  await refreshData();
+  bringToFront(created.taskId);
 };
 
 const closeTaskNote = async (taskId: string) => {
@@ -204,8 +251,6 @@ const closeTaskNote = async (taskId: string) => {
     saveTimers.delete(taskId);
   }
 };
-
-const saveTimers = new Map<string, number>();
 
 const scheduleSave = (taskId: string) => {
   const note = openNotes.value.find(item => item.taskId === taskId);
@@ -252,15 +297,12 @@ const onWindowMouseMove = (event: MouseEvent) => {
   if (!note) {
     return;
   }
-  const nextX = state.baseX + (event.clientX - state.startX);
-  const nextY = state.baseY + (event.clientY - state.startY);
-  const clamped = clampPosition(nextX, nextY);
+  const clamped = clampPosition(
+    state.baseX + (event.clientX - state.startX),
+    state.baseY + (event.clientY - state.startY)
+  );
   note.posX = clamped.x;
   note.posY = clamped.y;
-};
-
-const onWindowMouseUp = () => {
-  void stopDragging();
 };
 
 const stopDragging = async () => {
@@ -284,6 +326,10 @@ const stopDragging = async () => {
   }
 };
 
+const onWindowMouseUp = () => {
+  void stopDragging();
+};
+
 const startDragging = (event: MouseEvent, taskId: string) => {
   if ((event.target as HTMLElement).closest(".paper-note-close")) {
     return;
@@ -303,10 +349,7 @@ const startDragging = (event: MouseEvent, taskId: string) => {
 };
 
 const closeWindow = async () => {
-  if (!appWindow) {
-    return;
-  }
-  await appWindow.hide();
+  await api.setStickyNoteWindowVisible(false);
 };
 
 onMounted(async () => {

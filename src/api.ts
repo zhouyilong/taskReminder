@@ -80,10 +80,18 @@ export const api = {
   },
   async openStickyNote(payload: {
     taskId: string;
+    title?: string | null;
     defaultX?: number | null;
     defaultY?: number | null;
   }): Promise<StickyNote> {
     return invoke("open_sticky_note", { payload });
+  },
+  async createStickyNote(payload: {
+    title?: string | null;
+    defaultX?: number | null;
+    defaultY?: number | null;
+  }): Promise<StickyNote> {
+    return invoke("create_sticky_note", { payload });
   },
   async saveStickyNoteContent(payload: {
     taskId: string;
@@ -100,6 +108,12 @@ export const api = {
   },
   async closeStickyNote(taskId: string): Promise<void> {
     return invoke("close_sticky_note", { taskId });
+  },
+  async isStickyNoteWindowVisible(): Promise<boolean> {
+    return invoke("is_sticky_note_window_visible");
+  },
+  async setStickyNoteWindowVisible(visible: boolean): Promise<boolean> {
+    return invoke("set_sticky_note_window_visible", { visible });
   },
   async testWebDav(settings: AppSettings): Promise<{ ok: boolean; message: string }> {
     return invoke("test_webdav", { settings });

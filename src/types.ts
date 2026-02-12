@@ -53,6 +53,8 @@ export interface ReminderRecord {
 
 export interface StickyNote {
   taskId: string;
+  title: string;
+  noteType: "TASK" | "CUSTOM";
   content: string;
   posX: number;
   posY: number;

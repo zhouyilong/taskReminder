@@ -70,6 +70,8 @@ const RECORD_COLUMNS: &[&str] = &[
 ];
 const STICKY_NOTE_COLUMNS: &[&str] = &[
     "id",
+    "title",
+    "note_type",
     "content",
     "pos_x",
     "pos_y",
@@ -656,6 +658,8 @@ fn ensure_sticky_notes_table(conn: &Connection) -> Result<(), AppError> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS sticky_notes (
             id TEXT PRIMARY KEY,
+            title TEXT NOT NULL DEFAULT '',
+            note_type TEXT NOT NULL DEFAULT 'TASK',
             content TEXT NOT NULL DEFAULT '',
             pos_x REAL NOT NULL DEFAULT 48,
             pos_y REAL NOT NULL DEFAULT 76,
@@ -665,6 +669,13 @@ fn ensure_sticky_notes_table(conn: &Connection) -> Result<(), AppError> {
          );
          CREATE INDEX IF NOT EXISTS idx_sticky_notes_updated_at ON sticky_notes(updated_at);
          CREATE INDEX IF NOT EXISTS idx_sticky_notes_is_open ON sticky_notes(is_open);",
+    )?;
+    ensure_column(conn, "sticky_notes", "title", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column(
+        conn,
+        "sticky_notes",
+        "note_type",
+        "TEXT NOT NULL DEFAULT 'TASK'",
     )?;
     Ok(())
 }

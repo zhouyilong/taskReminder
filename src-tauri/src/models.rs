@@ -60,6 +60,8 @@ pub struct ReminderRecord {
 #[serde(rename_all = "camelCase")]
 pub struct StickyNote {
     pub task_id: String,
+    pub title: String,
+    pub note_type: String,
     pub content: String,
     pub pos_x: f64,
     pub pos_y: f64,

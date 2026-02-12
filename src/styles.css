@@ -224,6 +224,12 @@ body.sticky-note-mode {
   background: var(--primary-soft);
 }
 
+.icon-button.active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
@@ -1119,6 +1125,29 @@ input[type="checkbox"] {
   color: rgba(235, 243, 255, 0.95);
 }
 
+.sticky-list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sticky-add-note {
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(172, 198, 244, 0.54);
+  background: rgba(13, 27, 60, 0.4);
+  color: rgba(235, 243, 255, 0.96);
+  font-size: 11px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.sticky-add-note:hover {
+  background: rgba(45, 85, 170, 0.48);
+  border-color: rgba(217, 230, 255, 0.82);
+}
+
 .sticky-task-search {
   height: 34px;
   border-radius: 10px;
@@ -1143,6 +1172,10 @@ input[type="checkbox"] {
   padding-right: 2px;
 }
 
+.sticky-task-list.compact {
+  gap: 6px;
+}
+
 .sticky-task-item {
   border: 1px solid rgba(174, 201, 244, 0.4);
   border-radius: 10px;
@@ -1152,6 +1185,14 @@ input[type="checkbox"] {
   padding: 9px 10px;
   cursor: pointer;
   transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+}
+
+.sticky-task-item.compact {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  padding: 6px 8px;
 }
 
 .sticky-task-item:hover {
@@ -1172,6 +1213,27 @@ input[type="checkbox"] {
   overflow: hidden;
   line-height: 1.45;
   font-size: 13px;
+}
+
+.sticky-task-text.compact {
+  font-size: 12px;
+  line-height: 1.35;
+  -webkit-line-clamp: 1;
+}
+
+.sticky-item-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.sticky-item-dot.task {
+  background: rgba(145, 198, 255, 0.92);
+}
+
+.sticky-item-dot.custom {
+  background: rgba(255, 213, 120, 0.95);
 }
 
 .sticky-task-empty,
@@ -1344,6 +1406,12 @@ input[type="checkbox"] {
 .light-theme .sticky-task-item.active {
   background: rgba(157, 197, 255, 0.56);
   border-color: rgba(104, 135, 186, 0.76);
+}
+
+.light-theme .sticky-add-note {
+  background: rgba(244, 250, 255, 0.8);
+  color: rgba(38, 61, 95, 0.92);
+  border-color: rgba(136, 161, 202, 0.62);
 }
 
 .light-theme .sticky-task-search {

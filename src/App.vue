@@ -21,6 +21,17 @@
             </svg>
           </transition>
         </button>
+        <button
+          class="icon-button"
+          :class="{ active: stickyNoteWindowVisible }"
+          type="button"
+          :title="stickyNoteWindowVisible ? '关闭桌面便签' : '打开桌面便签'"
+          @click="toggleStickyNoteWindow"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3a4 4 0 0 1 4 4v2h1.5A1.5 1.5 0 0 1 19 10.5v8A1.5 1.5 0 0 1 17.5 20h-11A1.5 1.5 0 0 1 5 18.5v-8A1.5 1.5 0 0 1 6.5 9H8V7a4 4 0 0 1 4-4zm2 6V7a2 2 0 1 0-4 0v2h4z" />
+          </svg>
+        </button>
         <button class="icon-button" type="button" title="设置" @click="openSettings">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path
@@ -464,9 +475,6 @@
           <label>
             <input type="checkbox" v-model="settingsDraft.soundEnabled" /> 提示音
           </label>
-          <label>
-            <input type="checkbox" v-model="settingsDraft.stickyNoteEnabled" /> 启用桌面便签
-          </label>
         </div>
         <div class="form-row compact">
           <label>稍后提醒分钟数</label>
@@ -594,6 +602,7 @@ const completedTasks = ref<Task[]>([]);
 const recurringTasks = ref<RecurringTask[]>([]);
 const reminderRecords = ref<ReminderRecord[]>([]);
 const syncStatus = ref<SyncStatus | null>(null);
+const stickyNoteWindowVisible = ref(false);
 
 const recurringModeOptions: { value: RecurringMode; label: string }[] = [
   { value: "INTERVAL_RANGE", label: "区间间隔" },
@@ -1225,6 +1234,15 @@ const openWebdav = async () => {
   webdavOpen.value = true;
 };
 
+const refreshStickyWindowState = async () => {
+  stickyNoteWindowVisible.value = await api.isStickyNoteWindowVisible();
+};
+
+const toggleStickyNoteWindow = async () => {
+  const nextVisible = !stickyNoteWindowVisible.value;
+  stickyNoteWindowVisible.value = await api.setStickyNoteWindowVisible(nextVisible);
+};
+
 const saveSettings = async () => {
   await api.saveSettings({ ...settingsDraft });
   await api.setAutoStart(settingsDraft.autoStartEnabled);
@@ -1381,6 +1399,7 @@ onMounted(async () => {
     await refreshAll();
     await loadSettings();
     syncStatus.value = await api.getSyncStatus();
+    await refreshStickyWindowState();
   } catch (error) {
     console.error("[main] 初始化数据失败", error);
   }
@@ -1407,6 +1426,7 @@ onMounted(async () => {
       await refreshAll();
       await loadSettings();
       syncStatus.value = await api.getSyncStatus();
+      await refreshStickyWindowState();
     });
   } catch (error) {
     console.error("[main] 监听 data-updated 失败", error);
@@ -1417,6 +1437,13 @@ onMounted(async () => {
     });
   } catch (error) {
     console.error("[main] 监听 open-sync-settings 失败", error);
+  }
+  try {
+    await listen<boolean>("sticky-note-visibility", event => {
+      stickyNoteWindowVisible.value = event.payload;
+    });
+  } catch (error) {
+    console.error("[main] 监听 sticky-note-visibility 失败", error);
   }
 });
 

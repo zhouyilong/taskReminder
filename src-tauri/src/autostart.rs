@@ -131,12 +131,20 @@ pub fn is_autostart_enabled() -> Result<bool, AppError> {
 
 #[cfg(target_os = "macos")]
 fn macos_plist_path() -> Result<PathBuf, AppError> {
-    let home = dirs_next::home_dir().ok_or_else(|| AppError::System("无法获取用户目录".to_string()))?;
-    Ok(home.join("Library").join("LaunchAgents").join("com.taskreminder.app.plist"))
+    let home =
+        dirs_next::home_dir().ok_or_else(|| AppError::System("无法获取用户目录".to_string()))?;
+    Ok(home
+        .join("Library")
+        .join("LaunchAgents")
+        .join("com.taskreminder.app.plist"))
 }
 
 #[cfg(target_os = "linux")]
 fn linux_desktop_path() -> Result<PathBuf, AppError> {
-    let home = dirs_next::home_dir().ok_or_else(|| AppError::System("无法获取用户目录".to_string()))?;
-    Ok(home.join(".config").join("autostart").join("TaskReminderApp.desktop"))
+    let home =
+        dirs_next::home_dir().ok_or_else(|| AppError::System("无法获取用户目录".to_string()))?;
+    Ok(home
+        .join(".config")
+        .join("autostart")
+        .join("TaskReminderApp.desktop"))
 }

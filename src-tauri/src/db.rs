@@ -464,7 +464,7 @@ impl DbManager {
     pub fn list_sticky_notes(&self) -> Result<Vec<StickyNote>, AppError> {
         let conn = self.get_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, content, pos_x, pos_y, is_open, created_at, updated_at
+            "SELECT id, title, note_type, content, pos_x, pos_y, is_open, created_at, updated_at
              FROM sticky_notes
              ORDER BY updated_at DESC",
         )?;
@@ -474,22 +474,23 @@ impl DbManager {
 
     pub fn open_sticky_note(
         &self,
-        task_id: &str,
+        note_id: &str,
+        title: Option<String>,
         default_x: Option<f64>,
         default_y: Option<f64>,
     ) -> Result<StickyNote, AppError> {
         let conn = self.get_conn()?;
         let now = now_string();
         let mut stmt = conn.prepare(
-            "SELECT id, content, pos_x, pos_y, is_open, created_at, updated_at
+            "SELECT id, title, note_type, content, pos_x, pos_y, is_open, created_at, updated_at
              FROM sticky_notes
              WHERE id = ?",
         )?;
-        let existing = stmt.query_row([task_id], sticky_note_from_row).optional()?;
+        let existing = stmt.query_row([note_id], sticky_note_from_row).optional()?;
         if let Some(note) = existing {
             conn.execute(
                 "UPDATE sticky_notes SET is_open = 1, updated_at = ? WHERE id = ?",
-                params![now, task_id],
+                params![now, note_id],
             )?;
             return Ok(StickyNote {
                 is_open: true,
@@ -505,13 +506,59 @@ impl DbManager {
             .filter(|value| value.is_finite())
             .unwrap_or(76.0)
             .max(0.0);
+        let resolved_title = title
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "待办便签".to_string());
         conn.execute(
-            "INSERT INTO sticky_notes (id, content, pos_x, pos_y, is_open, created_at, updated_at)
-             VALUES (?, '', ?, ?, 1, ?, ?)",
-            params![task_id, x, y, now, now],
+            "INSERT INTO sticky_notes (id, title, note_type, content, pos_x, pos_y, is_open, created_at, updated_at)
+             VALUES (?, ?, 'TASK', '', ?, ?, 1, ?, ?)",
+            params![note_id, resolved_title, x, y, now, now],
         )?;
         Ok(StickyNote {
-            task_id: task_id.to_string(),
+            task_id: note_id.to_string(),
+            title: resolved_title,
+            note_type: "TASK".to_string(),
+            content: String::new(),
+            pos_x: x,
+            pos_y: y,
+            is_open: true,
+            created_at: now.clone(),
+            updated_at: now,
+        })
+    }
+
+    pub fn create_custom_sticky_note(
+        &self,
+        title: &str,
+        default_x: Option<f64>,
+        default_y: Option<f64>,
+    ) -> Result<StickyNote, AppError> {
+        let conn = self.get_conn()?;
+        let now = now_string();
+        let id = Uuid::new_v4().to_string();
+        let x = default_x
+            .filter(|value| value.is_finite())
+            .unwrap_or(48.0)
+            .max(0.0);
+        let y = default_y
+            .filter(|value| value.is_finite())
+            .unwrap_or(76.0)
+            .max(0.0);
+        let resolved_title = if title.trim().is_empty() {
+            "新便签".to_string()
+        } else {
+            title.trim().to_string()
+        };
+        conn.execute(
+            "INSERT INTO sticky_notes (id, title, note_type, content, pos_x, pos_y, is_open, created_at, updated_at)
+             VALUES (?, ?, 'CUSTOM', '', ?, ?, 1, ?, ?)",
+            params![id, resolved_title, x, y, now, now],
+        )?;
+        Ok(StickyNote {
+            task_id: id,
+            title: resolved_title,
+            note_type: "CUSTOM".to_string(),
             content: String::new(),
             pos_x: x,
             pos_y: y,
@@ -663,6 +710,15 @@ impl DbManager {
         Ok(())
     }
 
+    pub fn update_sticky_note_enabled(&self, enabled: bool) -> Result<(), AppError> {
+        let conn = self.get_conn()?;
+        conn.execute(
+            "UPDATE settings SET sticky_note_enabled = ? WHERE id = 1",
+            [if enabled { 1 } else { 0 }],
+        )?;
+        Ok(())
+    }
+
     pub fn update_sync_status(
         &self,
         status: &str,
@@ -711,7 +767,8 @@ impl DbManager {
              WHERE id IN (
                 SELECT id FROM tasks
                 WHERE deleted_at IS NOT NULL
-             )",
+             )
+             AND note_type = 'TASK'",
             [],
         )?;
         conn.execute(
@@ -789,12 +846,18 @@ fn record_from_row(row: &rusqlite::Row<'_>) -> Result<ReminderRecord, rusqlite::
 fn sticky_note_from_row(row: &rusqlite::Row<'_>) -> Result<StickyNote, rusqlite::Error> {
     Ok(StickyNote {
         task_id: row.get(0)?,
-        content: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-        pos_x: row.get::<_, Option<f64>>(2)?.unwrap_or(48.0),
-        pos_y: row.get::<_, Option<f64>>(3)?.unwrap_or(76.0),
-        is_open: row.get::<_, i64>(4)? == 1,
-        created_at: row.get(5)?,
-        updated_at: row.get(6)?,
+        title: row
+            .get::<_, Option<String>>(1)?
+            .unwrap_or_else(|| "便签".to_string()),
+        note_type: row
+            .get::<_, Option<String>>(2)?
+            .unwrap_or_else(|| "TASK".to_string()),
+        content: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+        pos_x: row.get::<_, Option<f64>>(4)?.unwrap_or(48.0),
+        pos_y: row.get::<_, Option<f64>>(5)?.unwrap_or(76.0),
+        is_open: row.get::<_, i64>(6)? == 1,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
     })
 }
 
@@ -844,6 +907,11 @@ fn migration_scripts() -> Vec<MigrationScript> {
             version: "1.4.3".to_string(),
             description: "add sticky notes table".to_string(),
             sql: include_str!("../migrations/V1.4.3__add_sticky_notes_table.sql"),
+        },
+        MigrationScript {
+            version: "1.4.4".to_string(),
+            description: "add sticky note title and type".to_string(),
+            sql: include_str!("../migrations/V1.4.4__add_sticky_note_meta.sql"),
         },
     ]
 }
