@@ -21,7 +21,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
-        notification: resolve(__dirname, "notification.html")
+        notification: resolve(__dirname, "notification.html"),
+        stickyNote: resolve(__dirname, "sticky-note.html")
       }
     }
   }

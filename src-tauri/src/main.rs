@@ -17,7 +17,10 @@ use std::sync::{Arc, Mutex};
 
 use chrono::Local;
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, State, WindowEvent};
+use tauri::{
+    Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl, WebviewWindowBuilder,
+    WindowEvent,
+};
 
 use crate::db::DbManager;
 use crate::errors::AppError;
@@ -30,6 +33,9 @@ use crate::state::AppState;
 use crate::sync::CloudSyncService;
 
 type ApiResult<T> = Result<T, String>;
+const STICKY_NOTE_LABEL: &str = "sticky-note";
+const STICKY_NOTE_MIN_WIDTH: i64 = 280;
+const STICKY_NOTE_MIN_HEIGHT: i64 = 320;
 
 fn into_api<T>(result: Result<T, AppError>) -> ApiResult<T> {
     result.map_err(|e| e.to_string())
@@ -272,9 +278,21 @@ fn get_settings(state: State<AppState>) -> ApiResult<AppSettings> {
 }
 
 #[tauri::command]
-fn save_settings(state: State<AppState>, settings: AppSettings) -> ApiResult<()> {
+fn save_settings(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    settings: AppSettings,
+) -> ApiResult<()> {
     into_api(state.db.save_settings(&settings))?;
+    into_api(sync_sticky_note_window(&app, &settings))?;
     into_api(state.sync.update_settings())?;
+    into_api(state.sync.notify_local_change())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn save_sticky_note_content(state: State<AppState>, content: String) -> ApiResult<()> {
+    into_api(state.db.update_sticky_note_content(&content))?;
     into_api(state.sync.notify_local_change())?;
     Ok(())
 }
@@ -316,16 +334,12 @@ fn set_autostart(state: State<AppState>, enabled: bool) -> ApiResult<()> {
 
 #[tauri::command]
 fn ack_notification(state: State<AppState>, payload: AckPayload) -> ApiResult<()> {
-    if let Some(record) = into_api(state.db.get_reminder_record(&payload.record_id))? {
+    if into_api(state.db.get_reminder_record(&payload.record_id))?.is_some() {
         into_api(
             state
                 .db
                 .update_reminder_record_action(&payload.record_id, &payload.action),
         )?;
-        if payload.action == "COMPLETED" && record.reminder_type == "TASK" {
-            into_api(state.db.complete_task(&record.reminder_id))?;
-            state.scheduler.cancel_task(&record.reminder_id);
-        }
         into_api(state.sync.notify_local_change())?;
     }
     *state.notification_snapshot.lock().unwrap() = None;
@@ -467,6 +481,55 @@ fn add_minutes(minutes: i64) -> String {
     dt.format("%Y-%m-%dT%H:%M:%S").to_string()
 }
 
+fn normalize_sticky_note_size(width: i64, height: i64) -> (f64, f64) {
+    (
+        width.max(STICKY_NOTE_MIN_WIDTH) as f64,
+        height.max(STICKY_NOTE_MIN_HEIGHT) as f64,
+    )
+}
+
+fn sync_sticky_note_window(app: &tauri::AppHandle, settings: &AppSettings) -> Result<(), AppError> {
+    if !settings.sticky_note_enabled {
+        if let Some(window) = app.get_webview_window(STICKY_NOTE_LABEL) {
+            let _ = window.hide();
+        }
+        return Ok(());
+    }
+
+    let (width, height) =
+        normalize_sticky_note_size(settings.sticky_note_width, settings.sticky_note_height);
+    let window = if let Some(existing) = app.get_webview_window(STICKY_NOTE_LABEL) {
+        existing
+    } else {
+        WebviewWindowBuilder::new(
+            app,
+            STICKY_NOTE_LABEL,
+            WebviewUrl::App("sticky-note.html".into()),
+        )
+        .title("桌面便签")
+        .inner_size(width, height)
+        .min_inner_size(STICKY_NOTE_MIN_WIDTH as f64, STICKY_NOTE_MIN_HEIGHT as f64)
+        .resizable(true)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false)
+        .build()
+        .map_err(|e| AppError::System(e.to_string()))?
+    };
+
+    let _ = window.set_size(LogicalSize::new(width, height));
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_resizable(true);
+    if let (Some(x), Some(y)) = (settings.sticky_note_x, settings.sticky_note_y) {
+        let _ = window.set_position(LogicalPosition::new(x, y));
+    }
+    let _ = window.emit("sticky-note-settings-updated", settings);
+    let _ = window.show();
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .on_window_event(|window, event| {
@@ -474,6 +537,32 @@ fn main() {
                 if let WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
                     let _ = window.hide();
+                }
+            }
+            if window.label() == STICKY_NOTE_LABEL {
+                match event {
+                    WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                    WindowEvent::Resized(size) => {
+                        if let Some(state) = window.app_handle().try_state::<AppState>() {
+                            let scale_factor = window.scale_factor().unwrap_or(1.0);
+                            let logical = size.to_logical::<f64>(scale_factor);
+                            let _ = state.db.update_sticky_note_size(
+                                logical.width.round() as i64,
+                                logical.height.round() as i64,
+                            );
+                        }
+                    }
+                    WindowEvent::Moved(position) => {
+                        if let Some(state) = window.app_handle().try_state::<AppState>() {
+                            let scale_factor = window.scale_factor().unwrap_or(1.0);
+                            let logical = position.to_logical::<f64>(scale_factor);
+                            let _ = state.db.update_sticky_note_position(logical.x, logical.y);
+                        }
+                    }
+                    _ => {}
                 }
             }
         })
@@ -496,6 +585,7 @@ fn main() {
             delete_reminder_records,
             get_settings,
             save_settings,
+            save_sticky_note_content,
             test_webdav,
             sync_now,
             set_autostart,
@@ -555,6 +645,7 @@ fn main() {
                 if settings.auto_start_enabled {
                     let _ = autostart::enable_autostart();
                 }
+                sync_sticky_note_window(&app_handle, &settings)?;
 
                 let state = AppState {
                     db,

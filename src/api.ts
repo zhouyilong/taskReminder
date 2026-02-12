@@ -74,6 +74,9 @@ export const api = {
   async saveSettings(settings: AppSettings): Promise<void> {
     return invoke("save_settings", { settings });
   },
+  async saveStickyNoteContent(content: string): Promise<void> {
+    return invoke("save_sticky_note_content", { content });
+  },
   async testWebDav(settings: AppSettings): Promise<{ ok: boolean; message: string }> {
     return invoke("test_webdav", { settings });
   },

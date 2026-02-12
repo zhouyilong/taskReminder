@@ -464,6 +464,9 @@
           <label>
             <input type="checkbox" v-model="settingsDraft.soundEnabled" /> 提示音
           </label>
+          <label>
+            <input type="checkbox" v-model="settingsDraft.stickyNoteEnabled" /> 启用桌面便签
+          </label>
         </div>
         <div class="form-row compact">
           <label>稍后提醒分钟数</label>
@@ -649,6 +652,12 @@ const settingsDraft = reactive<AppSettings>({
   autoStartEnabled: false,
   soundEnabled: true,
   snoozeMinutes: 5,
+  stickyNoteEnabled: false,
+  stickyNoteContent: "",
+  stickyNoteWidth: 360,
+  stickyNoteHeight: 520,
+  stickyNoteX: null,
+  stickyNoteY: null,
   webdavEnabled: false,
   webdavUrl: "",
   webdavUsername: "",

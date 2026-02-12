@@ -113,8 +113,15 @@ impl DbManager {
 
     fn ensure_settings_row(&self, conn: &Connection) -> Result<(), AppError> {
         conn.execute(
-            "INSERT OR IGNORE INTO settings (id, auto_start_enabled, sound_enabled, snooze_minutes, webdav_enabled, webdav_url, webdav_username, webdav_password, webdav_root_path, webdav_sync_interval_minutes, webdav_last_sync_time, webdav_last_local_change_time, webdav_last_sync_status, webdav_last_sync_error, webdav_device_id, notification_theme)
-             VALUES (1, 0, 1, 5, 0, '', '', '', '', 60, NULL, NULL, NULL, NULL, ?, 'app')",
+            "INSERT OR IGNORE INTO settings (
+                id, auto_start_enabled, sound_enabled, snooze_minutes,
+                sticky_note_enabled, sticky_note_content, sticky_note_width, sticky_note_height,
+                sticky_note_x, sticky_note_y,
+                webdav_enabled, webdav_url, webdav_username, webdav_password, webdav_root_path,
+                webdav_sync_interval_minutes, webdav_last_sync_time, webdav_last_local_change_time,
+                webdav_last_sync_status, webdav_last_sync_error, webdav_device_id, notification_theme
+            )
+             VALUES (1, 0, 1, 5, 0, '', 360, 520, NULL, NULL, 0, '', '', '', '', 60, NULL, NULL, NULL, NULL, ?, 'app')",
             [Uuid::new_v4().to_string()],
         )?;
         Ok(())
@@ -457,6 +464,7 @@ impl DbManager {
     pub fn load_settings(&self) -> Result<AppSettings, AppError> {
         let conn = self.get_conn()?;
         let sql = "SELECT auto_start_enabled, sound_enabled, snooze_minutes,
+                   sticky_note_enabled, sticky_note_content, sticky_note_width, sticky_note_height, sticky_note_x, sticky_note_y,
                    webdav_enabled, webdav_url, webdav_username, webdav_password,
                    webdav_root_path, webdav_sync_interval_minutes, webdav_last_sync_time,
                    webdav_last_local_change_time, webdav_last_sync_status, webdav_last_sync_error,
@@ -464,31 +472,39 @@ impl DbManager {
                    FROM settings WHERE id = 1";
         let mut stmt = conn.prepare(sql)?;
         let row = stmt.query_row([], |row| {
-            let webdav_url: String = row.get::<_, Option<String>>(4)?.unwrap_or_default();
-            let webdav_username: String = row.get::<_, Option<String>>(5)?.unwrap_or_default();
-            let webdav_password: String = row.get::<_, Option<String>>(6)?.unwrap_or_default();
-            let webdav_root_path: String = row.get::<_, Option<String>>(7)?.unwrap_or_default();
+            let sticky_note_width = row.get::<_, Option<i64>>(5)?.unwrap_or(360).max(260);
+            let sticky_note_height = row.get::<_, Option<i64>>(6)?.unwrap_or(520).max(320);
+            let webdav_url: String = row.get::<_, Option<String>>(10)?.unwrap_or_default();
+            let webdav_username: String = row.get::<_, Option<String>>(11)?.unwrap_or_default();
+            let webdav_password: String = row.get::<_, Option<String>>(12)?.unwrap_or_default();
+            let webdav_root_path: String = row.get::<_, Option<String>>(13)?.unwrap_or_default();
             let webdav_device_id: String = row
-                .get::<_, Option<String>>(13)?
+                .get::<_, Option<String>>(19)?
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or_else(|| Uuid::new_v4().to_string());
             let notification_theme: String = row
-                .get::<_, Option<String>>(14)?
+                .get::<_, Option<String>>(20)?
                 .unwrap_or_else(|| "app".to_string());
             Ok(AppSettings {
                 auto_start_enabled: row.get::<_, i64>(0)? == 1,
                 sound_enabled: row.get::<_, i64>(1)? == 1,
                 snooze_minutes: row.get(2)?,
-                webdav_enabled: row.get::<_, i64>(3)? == 1,
+                sticky_note_enabled: row.get::<_, i64>(3)? == 1,
+                sticky_note_content: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                sticky_note_width,
+                sticky_note_height,
+                sticky_note_x: row.get(7)?,
+                sticky_note_y: row.get(8)?,
+                webdav_enabled: row.get::<_, i64>(9)? == 1,
                 webdav_url,
                 webdav_username,
                 webdav_password,
                 webdav_root_path,
-                webdav_sync_interval_minutes: row.get(8)?,
-                webdav_last_sync_time: row.get(9)?,
-                webdav_last_local_change_time: row.get(10)?,
-                webdav_last_sync_status: row.get(11)?,
-                webdav_last_sync_error: row.get(12)?,
+                webdav_sync_interval_minutes: row.get(14)?,
+                webdav_last_sync_time: row.get(15)?,
+                webdav_last_local_change_time: row.get(16)?,
+                webdav_last_sync_status: row.get(17)?,
+                webdav_last_sync_error: row.get(18)?,
                 webdav_device_id,
                 notification_theme,
             })
@@ -501,6 +517,8 @@ impl DbManager {
         conn.execute(
             "UPDATE settings
              SET auto_start_enabled = ?, sound_enabled = ?, snooze_minutes = ?,
+                 sticky_note_enabled = ?, sticky_note_content = ?, sticky_note_width = ?, sticky_note_height = ?,
+                 sticky_note_x = ?, sticky_note_y = ?,
                  webdav_enabled = ?, webdav_url = ?, webdav_username = ?, webdav_password = ?,
                  webdav_root_path = ?, webdav_sync_interval_minutes = ?, webdav_last_sync_time = ?,
                  webdav_last_local_change_time = ?, webdav_last_sync_status = ?, webdav_last_sync_error = ?,
@@ -510,6 +528,12 @@ impl DbManager {
                 if settings.auto_start_enabled { 1 } else { 0 },
                 if settings.sound_enabled { 1 } else { 0 },
                 settings.snooze_minutes,
+                if settings.sticky_note_enabled { 1 } else { 0 },
+                settings.sticky_note_content,
+                settings.sticky_note_width.max(260),
+                settings.sticky_note_height.max(320),
+                settings.sticky_note_x,
+                settings.sticky_note_y,
                 if settings.webdav_enabled { 1 } else { 0 },
                 settings.webdav_url,
                 settings.webdav_username,
@@ -523,6 +547,33 @@ impl DbManager {
                 settings.webdav_device_id,
                 settings.notification_theme,
             ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_sticky_note_content(&self, content: &str) -> Result<(), AppError> {
+        let conn = self.get_conn()?;
+        conn.execute(
+            "UPDATE settings SET sticky_note_content = ? WHERE id = 1",
+            [content],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_sticky_note_size(&self, width: i64, height: i64) -> Result<(), AppError> {
+        let conn = self.get_conn()?;
+        conn.execute(
+            "UPDATE settings SET sticky_note_width = ?, sticky_note_height = ? WHERE id = 1",
+            params![width.max(260), height.max(320)],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_sticky_note_position(&self, x: f64, y: f64) -> Result<(), AppError> {
+        let conn = self.get_conn()?;
+        conn.execute(
+            "UPDATE settings SET sticky_note_x = ?, sticky_note_y = ? WHERE id = 1",
+            params![x, y],
         )?;
         Ok(())
     }
@@ -678,6 +729,11 @@ fn migration_scripts() -> Vec<MigrationScript> {
             version: "1.4.1".to_string(),
             description: "add recurring modes".to_string(),
             sql: include_str!("../migrations/V1.4.1__add_recurring_modes.sql"),
+        },
+        MigrationScript {
+            version: "1.4.2".to_string(),
+            description: "add sticky note settings".to_string(),
+            sql: include_str!("../migrations/V1.4.2__add_sticky_note_settings.sql"),
         },
     ]
 }

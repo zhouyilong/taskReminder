@@ -55,6 +55,12 @@ export interface AppSettings {
   autoStartEnabled: boolean;
   soundEnabled: boolean;
   snoozeMinutes: number;
+  stickyNoteEnabled: boolean;
+  stickyNoteContent: string;
+  stickyNoteWidth: number;
+  stickyNoteHeight: number;
+  stickyNoteX?: number | null;
+  stickyNoteY?: number | null;
   webdavEnabled: boolean;
   webdavUrl: string;
   webdavUsername: string;
