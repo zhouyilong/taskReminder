@@ -133,8 +133,8 @@
                   <tr>
                     <th>完成</th>
                     <th class="col-desc">描述</th>
-                    <th>提醒时间</th>
-                    <th>创建时间</th>
+                    <th class="col-datetime">提醒时间</th>
+                    <th class="col-datetime">创建时间</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -148,9 +148,9 @@
                     <td>
                       <input type="checkbox" :checked="task.status === 'COMPLETED'" @change="toggleTask(task)" />
                     </td>
-                    <td class="col-desc">{{ task.description }}</td>
-                    <td>{{ formatDateTime(task.reminderTime) }}</td>
-                    <td>{{ formatDateTime(task.createdAt) }}</td>
+                    <td class="col-desc" :title="task.description">{{ task.description }}</td>
+                    <td class="col-datetime" :title="formatDateTime(task.reminderTime)">{{ formatDateTime(task.reminderTime) }}</td>
+                    <td class="col-datetime" :title="formatDateTime(task.createdAt)">{{ formatDateTime(task.createdAt) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -184,8 +184,8 @@
                   <tr>
                     <th>取消完成</th>
                     <th class="col-desc">描述</th>
-                    <th>创建时间</th>
-                    <th>完成时间</th>
+                    <th class="col-datetime">创建时间</th>
+                    <th class="col-datetime">完成时间</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -199,9 +199,9 @@
                     <td>
                       <input type="checkbox" checked @change="toggleTask(task)" />
                     </td>
-                    <td class="col-desc">{{ task.description }}</td>
-                    <td>{{ formatDateTime(task.createdAt) }}</td>
-                    <td>{{ formatDateTime(task.completedAt) }}</td>
+                    <td class="col-desc" :title="task.description">{{ task.description }}</td>
+                    <td class="col-datetime" :title="formatDateTime(task.createdAt)">{{ formatDateTime(task.createdAt) }}</td>
+                    <td class="col-datetime" :title="formatDateTime(task.completedAt)">{{ formatDateTime(task.completedAt) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -267,14 +267,14 @@
           </div>
           <div class="table-card">
             <div class="table-scroll">
-              <table class="table">
+              <table class="table recurring-table">
                 <thead>
                   <tr>
                     <th class="col-desc">描述</th>
                     <th>模式</th>
-                    <th>规则</th>
-                    <th>下次触发</th>
-                    <th>状态</th>
+                    <th class="col-rule">规则</th>
+                    <th class="col-datetime col-next-trigger">下次触发</th>
+                    <th class="col-status">状态</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -285,11 +285,11 @@
                     @dblclick="openEditRecurring(task)"
                     @contextmenu.prevent.stop="openRecurringMenu($event, task)"
                   >
-                    <td class="col-desc">{{ task.description }}</td>
-                    <td>{{ formatRecurringMode(task.repeatMode) }}</td>
-                    <td>{{ formatRecurringRule(task) }}</td>
-                    <td>{{ formatDateTime(task.nextTrigger) }}</td>
-                    <td>{{ task.isPaused ? "已暂停" : "运行中" }}</td>
+                    <td class="col-desc" :title="task.description">{{ task.description }}</td>
+                    <td :title="formatRecurringMode(task.repeatMode)">{{ formatRecurringMode(task.repeatMode) }}</td>
+                    <td class="col-rule" :title="formatRecurringRule(task)">{{ formatRecurringRule(task) }}</td>
+                    <td class="col-datetime col-next-trigger" :title="formatDateTime(task.nextTrigger)">{{ formatDateTime(task.nextTrigger) }}</td>
+                    <td class="col-status" :title="task.isPaused ? '已暂停' : '运行中'">{{ task.isPaused ? "已暂停" : "运行中" }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -351,11 +351,11 @@
                     <td>
                       <input type="checkbox" v-model="selectedRecords" :value="record.id" />
                     </td>
-                    <td class="col-desc">{{ record.description }}</td>
-                    <td>{{ record.type === 'TASK' ? '任务' : '循环' }}</td>
-                    <td class="col-datetime">{{ formatDateTime(record.triggerTime) }}</td>
-                    <td class="col-datetime">{{ formatDateTime(record.closeTime) }}</td>
-                    <td>{{ formatAction(record.action) }}</td>
+                    <td class="col-desc" :title="record.description">{{ record.description }}</td>
+                    <td :title="record.type === 'TASK' ? '任务' : '循环'">{{ record.type === 'TASK' ? '任务' : '循环' }}</td>
+                    <td class="col-datetime" :title="formatDateTime(record.triggerTime)">{{ formatDateTime(record.triggerTime) }}</td>
+                    <td class="col-datetime" :title="formatDateTime(record.closeTime)">{{ formatDateTime(record.closeTime) }}</td>
+                    <td :title="formatAction(record.action)">{{ formatAction(record.action) }}</td>
                   </tr>
                 </tbody>
               </table>

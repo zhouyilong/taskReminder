@@ -599,6 +599,26 @@ textarea:focus {
   width: 40%;
 }
 
+.col-datetime {
+  width: 172px;
+}
+
+.recurring-table {
+  min-width: 980px;
+}
+
+.recurring-table .col-rule {
+  width: 30%;
+}
+
+.recurring-table .col-next-trigger {
+  width: 180px;
+}
+
+.recurring-table .col-status {
+  width: 90px;
+}
+
 .records-table {
   min-width: 980px;
   table-layout: auto;
@@ -606,8 +626,6 @@ textarea:focus {
 
 .records-table .col-datetime {
   min-width: 168px;
-  overflow: visible;
-  text-overflow: clip;
 }
 
 .pagination {
@@ -877,6 +895,14 @@ input[type="checkbox"] {
   background: transparent;
 }
 
+.notification-shell.linux-platform {
+  min-height: 100%;
+  height: 100%;
+  padding: 0;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
 .notification-window {
   min-width: 320px;
   max-width: 420px;
@@ -885,6 +911,15 @@ input[type="checkbox"] {
   background: var(--bg-surface);
   padding: 14px 16px;
   box-shadow: var(--shadow-soft);
+}
+
+.notification-shell.linux-platform .notification-window {
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .notification-header {
