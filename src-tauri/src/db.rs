@@ -472,6 +472,18 @@ impl DbManager {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
+    pub fn get_sticky_note(&self, note_id: &str) -> Result<Option<StickyNote>, AppError> {
+        let conn = self.get_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, title, note_type, content, pos_x, pos_y, is_open, created_at, updated_at
+             FROM sticky_notes
+             WHERE id = ?",
+        )?;
+        stmt.query_row([note_id], sticky_note_from_row)
+            .optional()
+            .map_err(AppError::from)
+    }
+
     pub fn open_sticky_note(
         &self,
         note_id: &str,
@@ -615,6 +627,16 @@ impl DbManager {
         conn.execute(
             "UPDATE sticky_notes SET is_open = 0, updated_at = ? WHERE id = ?",
             params![now, task_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn close_all_sticky_notes(&self) -> Result<(), AppError> {
+        let conn = self.get_conn()?;
+        let now = now_string();
+        conn.execute(
+            "UPDATE sticky_notes SET is_open = 0, updated_at = ? WHERE is_open = 1",
+            [now],
         )?;
         Ok(())
     }

@@ -5,7 +5,8 @@
   "windows": [
     "main",
     "notification",
-    "sticky-note"
+    "sticky-note",
+    "sticky-note-item-*"
   ],
   "permissions": [
     "core:default",

@@ -82,6 +82,12 @@ body.sticky-note-mode {
   background: transparent;
 }
 
+#sticky-note-item {
+  width: 100vw;
+  height: 100vh;
+  background: transparent;
+}
+
 .app {
   height: 100vh;
   display: flex;
@@ -1109,6 +1115,10 @@ input[type="checkbox"] {
   gap: 8px;
 }
 
+.sticky-manager-layout {
+  grid-template-columns: 240px 1fr;
+}
+
 .sticky-task-panel {
   min-height: 0;
   border-radius: 14px;
@@ -1177,6 +1187,13 @@ input[type="checkbox"] {
   gap: 6px;
 }
 
+.sticky-task-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  align-items: center;
+}
+
 .sticky-task-item {
   border: 1px solid rgba(174, 201, 244, 0.4);
   border-radius: 10px;
@@ -1205,6 +1222,27 @@ input[type="checkbox"] {
 .sticky-task-item.active {
   background: rgba(63, 113, 248, 0.42);
   border-color: rgba(223, 234, 255, 0.82);
+}
+
+.sticky-task-row.active .sticky-item-close {
+  opacity: 1;
+}
+
+.sticky-item-close {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid rgba(174, 201, 244, 0.5);
+  background: rgba(11, 24, 55, 0.4);
+  color: rgba(234, 242, 255, 0.95);
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.sticky-item-close:hover {
+  border-color: rgba(223, 234, 255, 0.82);
+  background: rgba(63, 113, 248, 0.42);
 }
 
 .sticky-task-text {
@@ -1257,11 +1295,10 @@ input[type="checkbox"] {
   overflow: visible;
 }
 
-.sticky-notes-layer {
-  position: absolute;
-  inset: 42px 8px 8px 8px;
-  pointer-events: none;
-  overflow: visible;
+.sticky-manager-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .sticky-canvas-empty {
@@ -1293,6 +1330,30 @@ input[type="checkbox"] {
   flex-direction: column;
   overflow: hidden;
   pointer-events: auto;
+}
+
+.sticky-note-item-root {
+  width: 100%;
+  height: 100%;
+}
+
+.sticky-item-loading {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(209, 222, 247, 0.88);
+  font-size: 12px;
+}
+
+.paper-note-window {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  left: 0;
+  top: 0;
+  z-index: 1;
 }
 
 .paper-note::after {
@@ -1346,6 +1407,7 @@ input[type="checkbox"] {
   outline: none;
   padding: 0;
   min-width: 0;
+  -webkit-app-region: no-drag;
 }
 
 .paper-note-title-input::placeholder {
@@ -1363,6 +1425,7 @@ input[type="checkbox"] {
   font-size: 15px;
   line-height: 1;
   flex-shrink: 0;
+  -webkit-app-region: no-drag;
 }
 
 .paper-note-editor {
@@ -1422,6 +1485,12 @@ input[type="checkbox"] {
 .light-theme .sticky-task-item.active {
   background: rgba(157, 197, 255, 0.56);
   border-color: rgba(104, 135, 186, 0.76);
+}
+
+.light-theme .sticky-item-close {
+  background: rgba(246, 251, 255, 0.62);
+  border-color: rgba(149, 174, 214, 0.44);
+  color: rgba(35, 56, 84, 0.95);
 }
 
 .light-theme .sticky-add-note {

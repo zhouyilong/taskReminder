@@ -22,7 +22,8 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
         notification: resolve(__dirname, "notification.html"),
-        stickyNote: resolve(__dirname, "sticky-note.html")
+        stickyNote: resolve(__dirname, "sticky-note.html"),
+        stickyNoteItem: resolve(__dirname, "sticky-note-item.html")
       }
     }
   }

@@ -78,6 +78,9 @@ export const api = {
   async listStickyNotes(): Promise<StickyNote[]> {
     return invoke("list_sticky_notes");
   },
+  async getStickyNoteByWindowLabel(label: string): Promise<StickyNote | null> {
+    return invoke("get_sticky_note_by_window_label", { label });
+  },
   async openStickyNote(payload: {
     taskId: string;
     title?: string | null;
