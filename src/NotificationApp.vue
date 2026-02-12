@@ -15,10 +15,11 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { listen, TauriEvent } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
+import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
 import { api } from "./api";
 import { safeStorage } from "./safeStorage";
 import type { NotificationPayload } from "./types";
@@ -47,6 +48,31 @@ let mediaQuery: MediaQueryList | null = null;
 let mediaHandler: ((event: MediaQueryListEvent) => void) | null = null;
 let themePoll: number | null = null;
 let storageHandler: ((event: StorageEvent) => void) | null = null;
+
+const adjustLinuxWindowSize = async () => {
+  if (!isLinuxPlatform || !appWindow) {
+    return;
+  }
+  await nextTick();
+  const panel = document.querySelector(".notification-window");
+  if (!(panel instanceof HTMLElement)) {
+    return;
+  }
+  const width = Math.max(320, Math.ceil(panel.offsetWidth));
+  const height = Math.max(128, Math.ceil(panel.offsetHeight));
+  try {
+    await appWindow.setSize(new LogicalSize(width, height));
+    const monitor = await appWindow.currentMonitor();
+    const windowSize = await appWindow.outerSize();
+    if (monitor) {
+      const x = Math.max(0, monitor.size.width - windowSize.width - 20);
+      const y = Math.max(0, monitor.size.height - windowSize.height - 40);
+      await appWindow.setPosition(new PhysicalPosition(x, y));
+    }
+  } catch (error) {
+    console.error("[notification] 调整 Linux 窗口尺寸失败", error);
+  }
+};
 
 const startAutoClose = () => {
   if (timer) {
@@ -207,6 +233,7 @@ const show = async (data: NotificationPayload) => {
   visible.value = true;
   await loadNotificationTheme();
   await applyThemeByMode();
+  await adjustLinuxWindowSize();
   startAutoClose();
 };
 
