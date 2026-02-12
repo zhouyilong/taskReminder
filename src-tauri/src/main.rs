@@ -6,6 +6,7 @@ mod errors;
 mod maintenance;
 mod models;
 mod paths;
+mod recurrence;
 mod scheduler;
 mod single_instance;
 mod state;
@@ -49,6 +50,11 @@ struct CreateRecurringPayload {
     interval_minutes: i64,
     start_time: Option<String>,
     end_time: Option<String>,
+    repeat_mode: Option<String>,
+    schedule_time: Option<String>,
+    schedule_weekday: Option<i64>,
+    schedule_day: Option<i64>,
+    cron_expression: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -160,13 +166,33 @@ fn create_recurring_task(
     state: State<AppState>,
     payload: CreateRecurringPayload,
 ) -> ApiResult<RecurringTask> {
-    let interval = payload.interval_minutes.max(1);
-    let task = into_api(state.db.create_recurring_task(
-        payload.description.trim(),
-        interval,
-        payload.start_time,
-        payload.end_time,
-    ))?;
+    let mut draft = RecurringTask {
+        id: String::new(),
+        description: payload.description.trim().to_string(),
+        task_type: "RECURRING".to_string(),
+        status: "PENDING".to_string(),
+        created_at: String::new(),
+        completed_at: None,
+        reminder_time: None,
+        updated_at: None,
+        deleted_at: None,
+        interval_minutes: payload.interval_minutes.max(1),
+        last_triggered: None,
+        next_trigger: String::new(),
+        is_paused: false,
+        start_time: payload.start_time,
+        end_time: payload.end_time,
+        repeat_mode: payload
+            .repeat_mode
+            .unwrap_or_else(|| recurrence::REPEAT_MODE_INTERVAL_RANGE.to_string()),
+        schedule_time: payload.schedule_time,
+        schedule_weekday: payload.schedule_weekday,
+        schedule_day: payload.schedule_day,
+        cron_expression: payload.cron_expression,
+    };
+    into_api(recurrence::sanitize_recurring_task(&mut draft))?;
+    draft.next_trigger = into_api(recurrence::compute_next_trigger(&draft, None))?;
+    let task = into_api(state.db.create_recurring_task(&draft))?;
     if !task.is_paused {
         into_api(state.scheduler.schedule_recurring(task.clone()))?;
     }
@@ -176,11 +202,14 @@ fn create_recurring_task(
 
 #[tauri::command]
 fn update_recurring_task(state: State<AppState>, task: RecurringTask) -> ApiResult<()> {
+    let mut task = task;
+    into_api(recurrence::sanitize_recurring_task(&mut task))?;
+    task.next_trigger = into_api(recurrence::compute_next_trigger(&task, None))?;
     into_api(state.db.update_recurring_task(&task))?;
     if task.is_paused {
         state.scheduler.cancel_recurring(&task.id);
     } else {
-        into_api(state.scheduler.schedule_recurring(task))?;
+        into_api(state.scheduler.schedule_recurring(task.clone()))?;
     }
     into_api(state.sync.notify_local_change())?;
     Ok(())
@@ -200,7 +229,8 @@ fn resume_recurring_task(state: State<AppState>, id: String) -> ApiResult<()> {
         return Ok(());
     };
     task.is_paused = false;
-    task.next_trigger = add_minutes(task.interval_minutes);
+    into_api(recurrence::sanitize_recurring_task(&mut task))?;
+    task.next_trigger = into_api(recurrence::compute_next_trigger(&task, None))?;
     into_api(state.db.update_recurring_task(&task))?;
     into_api(state.scheduler.schedule_recurring(task))?;
     into_api(state.sync.notify_local_change())?;

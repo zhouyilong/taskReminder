@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{Local, NaiveDateTime};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tokio::time::sleep;
 
 use crate::db::DbManager;
 use crate::errors::AppError;
 use crate::models::{NotificationPayload, RecurringTask, Task};
+use crate::recurrence::{compute_next_trigger, sanitize_recurring_task, should_trigger_now};
 use crate::sync::CloudSyncService;
 
 #[derive(Clone)]
@@ -106,60 +107,17 @@ impl ReminderScheduler {
         if task.deleted_at.is_some() || task.is_paused {
             return Ok(());
         }
-
-        let now = Local::now();
-        let current_time = now.time();
-
-        if let Some(start) = task.start_time.clone() {
-            let start_time = parse_time(&start)?;
-            if current_time < start_time {
-                let next = combine_date_time(now.date_naive(), start_time)?;
-                task.next_trigger = next;
-                self.db.update_recurring_task(&task)?;
-                self.sync.notify_local_change()?;
-                self.schedule_recurring(task)?;
-                return Ok(());
-            }
+        let now = Local::now().naive_local();
+        if !should_trigger_now(&task, now)? {
+            task.next_trigger = compute_next_trigger(&task, Some(now))?;
+            self.db.update_recurring_task(&task)?;
+            self.sync.notify_local_change()?;
+            self.schedule_recurring(task)?;
+            return Ok(());
         }
-
-        if let Some(end) = task.end_time.clone() {
-            let end_time = parse_time(&end)?;
-            if current_time > end_time {
-                let next_date = now.date_naive().succ_opt().unwrap_or(now.date_naive());
-                let next_time = task
-                    .start_time
-                    .as_deref()
-                    .map(parse_time)
-                    .transpose()?
-                    .unwrap_or_else(|| NaiveTime::from_hms_opt(0, 0, 0).unwrap());
-                task.next_trigger = combine_date_time(next_date, next_time)?;
-                self.db.update_recurring_task(&task)?;
-                self.sync.notify_local_change()?;
-                self.schedule_recurring(task)?;
-                return Ok(());
-            }
-        }
-
+        sanitize_recurring_task(&mut task)?;
         task.last_triggered = Some(now_string());
-        let now_naive = now.naive_local();
-        let next_time = now_naive + chrono::Duration::minutes(task.interval_minutes);
-        let mut next_trigger = next_time;
-
-        if let Some(end) = task.end_time.clone() {
-            let end_time = parse_time(&end)?;
-            if next_time.time() > end_time {
-                let next_date = now.date_naive().succ_opt().unwrap_or(now.date_naive());
-                let start_time = task
-                    .start_time
-                    .as_deref()
-                    .map(parse_time)
-                    .transpose()?
-                    .unwrap_or_else(|| NaiveTime::from_hms_opt(0, 0, 0).unwrap());
-                next_trigger = NaiveDateTime::new(next_date, start_time);
-            }
-        }
-
-        task.next_trigger = next_trigger.format("%Y-%m-%dT%H:%M:%S").to_string();
+        task.next_trigger = compute_next_trigger(&task, Some(now))?;
         self.db.update_recurring_task(&task)?;
 
         let record = self
@@ -213,6 +171,11 @@ impl ReminderScheduler {
 }
 
 fn emit_notification(app: &AppHandle, payload: &NotificationPayload) -> Result<(), AppError> {
+    let notification_height = if cfg!(target_os = "linux") {
+        136.0
+    } else {
+        180.0
+    };
     let window = if let Some(existing) = app.get_webview_window("notification") {
         existing
     } else {
@@ -226,7 +189,7 @@ fn emit_notification(app: &AppHandle, payload: &NotificationPayload) -> Result<(
         .transparent(true)
         .always_on_top(true)
         .resizable(false)
-        .inner_size(380.0, 180.0)
+        .inner_size(380.0, notification_height)
         .build()
         .map_err(|e| AppError::System(e.to_string()))?
     };
@@ -235,7 +198,7 @@ fn emit_notification(app: &AppHandle, payload: &NotificationPayload) -> Result<(
         if let Some(monitor) = monitor {
             let size = monitor.size();
             let pos_x = size.width.saturating_sub(400) as f64;
-            let pos_y = size.height.saturating_sub(220) as f64;
+            let pos_y = size.height.saturating_sub(notification_height as u32 + 40) as f64;
             let _ = window.set_position(tauri::LogicalPosition { x: pos_x, y: pos_y });
         }
     }
@@ -255,16 +218,6 @@ fn seconds_until(value: &str) -> Result<u64, AppError> {
 
 fn parse_datetime(value: &str) -> Result<NaiveDateTime, AppError> {
     parse_datetime_any(value).ok_or_else(|| AppError::Invalid(format!("无法解析时间: {}", value)))
-}
-
-fn parse_time(value: &str) -> Result<NaiveTime, AppError> {
-    NaiveTime::parse_from_str(value, "%H:%M").map_err(|e| AppError::Invalid(e.to_string()))
-}
-
-fn combine_date_time(date: NaiveDate, time: NaiveTime) -> Result<String, AppError> {
-    Ok(NaiveDateTime::new(date, time)
-        .format("%Y-%m-%dT%H:%M:%S")
-        .to_string())
 }
 
 fn now_string() -> String {

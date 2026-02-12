@@ -26,15 +26,47 @@ const MIN_AUTOMATIC_SYNC_INTERVAL_SECONDS: i64 = 15 * 60;
 const STARTUP_SYNC_DELAY_SECONDS: u64 = 15;
 
 const TASK_COLUMNS: &[&str] = &[
-    "id", "description", "type", "status", "created_at", "completed_at", "reminder_time", "updated_at", "deleted_at",
+    "id",
+    "description",
+    "type",
+    "status",
+    "created_at",
+    "completed_at",
+    "reminder_time",
+    "updated_at",
+    "deleted_at",
 ];
 const RECURRING_COLUMNS: &[&str] = &[
-    "id", "description", "type", "status", "created_at", "completed_at",
-    "interval_minutes", "last_triggered", "next_trigger", "is_paused",
-    "start_time", "end_time", "updated_at", "deleted_at",
+    "id",
+    "description",
+    "type",
+    "status",
+    "created_at",
+    "completed_at",
+    "interval_minutes",
+    "last_triggered",
+    "next_trigger",
+    "is_paused",
+    "start_time",
+    "end_time",
+    "repeat_mode",
+    "schedule_time",
+    "schedule_weekday",
+    "schedule_day",
+    "cron_expression",
+    "updated_at",
+    "deleted_at",
 ];
 const RECORD_COLUMNS: &[&str] = &[
-    "id", "reminder_id", "description", "type", "trigger_time", "close_time", "action", "updated_at", "deleted_at",
+    "id",
+    "reminder_id",
+    "description",
+    "type",
+    "trigger_time",
+    "close_time",
+    "action",
+    "updated_at",
+    "deleted_at",
 ];
 
 #[derive(Clone)]
@@ -123,6 +155,7 @@ impl CloudSyncService {
         self.db.mark_local_change()?;
         self.local_change_seq.fetch_add(1, Ordering::SeqCst);
         self.dirty.store(true, Ordering::SeqCst);
+        let _ = self.app.emit("data-updated", ());
         self.schedule_debounced_sync()?;
         Ok(())
     }
@@ -357,13 +390,19 @@ fn compute_dirty_from_settings(settings: &AppSettings) -> bool {
         return true;
     };
 
-    match (parse_datetime_any(local_change), parse_datetime_any(last_sync)) {
+    match (
+        parse_datetime_any(local_change),
+        parse_datetime_any(last_sync),
+    ) {
         (Some(local_dt), Some(sync_dt)) => local_dt > sync_dt,
         _ => true,
     }
 }
 
-fn next_allowed_auto_sync_time(settings: &AppSettings, now: NaiveDateTime) -> Option<NaiveDateTime> {
+fn next_allowed_auto_sync_time(
+    settings: &AppSettings,
+    now: NaiveDateTime,
+) -> Option<NaiveDateTime> {
     let last_sync = settings
         .webdav_last_sync_time
         .as_deref()
@@ -382,7 +421,8 @@ pub fn test_webdav(settings: &AppSettings) -> Result<(bool, String), AppError> {
 }
 
 fn export_local_snapshot(db_path: &std::path::Path) -> Result<std::path::PathBuf, AppError> {
-    let snapshot = std::env::temp_dir().join(format!("taskreminder-snapshot-{}.db", uuid::Uuid::new_v4()));
+    let snapshot =
+        std::env::temp_dir().join(format!("taskreminder-snapshot-{}.db", uuid::Uuid::new_v4()));
     let conn = Connection::open(db_path)?;
     let escaped = snapshot.to_string_lossy().replace('"', "''");
     conn.execute_batch(&format!("VACUUM INTO '{}'", escaped))?;
@@ -390,12 +430,16 @@ fn export_local_snapshot(db_path: &std::path::Path) -> Result<std::path::PathBuf
 }
 
 fn download_remote(client: &WebDavClient) -> Result<std::path::PathBuf, AppError> {
-    let target = std::env::temp_dir().join(format!("taskreminder-remote-{}.db", uuid::Uuid::new_v4()));
+    let target =
+        std::env::temp_dir().join(format!("taskreminder-remote-{}.db", uuid::Uuid::new_v4()));
     client.download(REMOTE_DB_NAME, &target)?;
     Ok(target)
 }
 
-fn merge_databases(local_path: &std::path::Path, remote_path: &std::path::Path) -> Result<(), AppError> {
+fn merge_databases(
+    local_path: &std::path::Path,
+    remote_path: &std::path::Path,
+) -> Result<(), AppError> {
     let mut local = Connection::open(local_path)?;
     let remote = Connection::open(remote_path)?;
     ensure_sync_columns(&local)?;
@@ -403,8 +447,20 @@ fn merge_databases(local_path: &std::path::Path, remote_path: &std::path::Path) 
 
     let tx = local.transaction()?;
     merge_table(&tx, &remote, "tasks", TASK_COLUMNS, "created_at")?;
-    merge_table(&tx, &remote, "recurring_tasks", RECURRING_COLUMNS, "created_at")?;
-    merge_table(&tx, &remote, "reminder_records", RECORD_COLUMNS, "trigger_time")?;
+    merge_table(
+        &tx,
+        &remote,
+        "recurring_tasks",
+        RECURRING_COLUMNS,
+        "created_at",
+    )?;
+    merge_table(
+        &tx,
+        &remote,
+        "reminder_records",
+        RECORD_COLUMNS,
+        "trigger_time",
+    )?;
     tx.commit()?;
     Ok(())
 }
@@ -497,20 +553,21 @@ fn load_rows(
         }
         let id_value = value_to_string(&values[id_index]);
         if let Some(id) = id_value {
-        let updated = updated_index.and_then(|idx| value_to_string(&values[idx]));
-        let deleted = deleted_index.and_then(|idx| value_to_string(&values[idx]));
-        let fallback = fallback_index.and_then(|idx| value_to_string(&values[idx]));
-        let normalized = normalize_compare_time(updated.clone(), deleted.clone(), fallback.clone());
-        if let (Some(idx), Some(value)) = (updated_index, normalized.clone()) {
-            values[idx] = Value::Text(value);
-        }
-        let compare = normalized.and_then(|value| parse_datetime_any(&value));
-        map.insert(
-            id,
-            RowData {
-                values,
-                compare_time: compare,
-            },
+            let updated = updated_index.and_then(|idx| value_to_string(&values[idx]));
+            let deleted = deleted_index.and_then(|idx| value_to_string(&values[idx]));
+            let fallback = fallback_index.and_then(|idx| value_to_string(&values[idx]));
+            let normalized =
+                normalize_compare_time(updated.clone(), deleted.clone(), fallback.clone());
+            if let (Some(idx), Some(value)) = (updated_index, normalized.clone()) {
+                values[idx] = Value::Text(value);
+            }
+            let compare = normalized.and_then(|value| parse_datetime_any(&value));
+            map.insert(
+                id,
+                RowData {
+                    values,
+                    compare_time: compare,
+                },
             );
         }
     }
@@ -563,12 +620,27 @@ fn ensure_sync_columns(conn: &Connection) -> Result<(), AppError> {
     ensure_column(conn, "tasks", "deleted_at", "TEXT")?;
     ensure_column(conn, "recurring_tasks", "updated_at", "TEXT")?;
     ensure_column(conn, "recurring_tasks", "deleted_at", "TEXT")?;
+    ensure_column(
+        conn,
+        "recurring_tasks",
+        "repeat_mode",
+        "TEXT NOT NULL DEFAULT 'INTERVAL_RANGE'",
+    )?;
+    ensure_column(conn, "recurring_tasks", "schedule_time", "TEXT")?;
+    ensure_column(conn, "recurring_tasks", "schedule_weekday", "INTEGER")?;
+    ensure_column(conn, "recurring_tasks", "schedule_day", "INTEGER")?;
+    ensure_column(conn, "recurring_tasks", "cron_expression", "TEXT")?;
     ensure_column(conn, "reminder_records", "updated_at", "TEXT")?;
     ensure_column(conn, "reminder_records", "deleted_at", "TEXT")?;
     Ok(())
 }
 
-fn ensure_column(conn: &Connection, table: &str, column: &str, column_type: &str) -> Result<(), AppError> {
+fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    column_type: &str,
+) -> Result<(), AppError> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
@@ -577,7 +649,13 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, column_type: &str
             return Ok(());
         }
     }
-    conn.execute(&format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, column_type), [])?;
+    conn.execute(
+        &format!(
+            "ALTER TABLE {} ADD COLUMN {} {}",
+            table, column, column_type
+        ),
+        [],
+    )?;
     Ok(())
 }
 
@@ -633,7 +711,10 @@ impl WebDavClient {
     fn test_connection(&self) -> Result<(bool, String), AppError> {
         let mut req = self
             .client
-            .request(reqwest::Method::from_bytes(b"PROPFIND").unwrap(), &self.base_url)
+            .request(
+                reqwest::Method::from_bytes(b"PROPFIND").unwrap(),
+                &self.base_url,
+            )
             .header("Depth", "0");
         if let Some(auth) = &self.auth_header {
             req = req.header("Authorization", auth);
@@ -667,7 +748,10 @@ impl WebDavClient {
         }
         let resp = req.send().map_err(|e| AppError::Sync(e.to_string()))?;
         if !resp.status().is_success() {
-            return Err(AppError::Sync(format!("下载失败，状态码: {}", resp.status())));
+            return Err(AppError::Sync(format!(
+                "下载失败，状态码: {}",
+                resp.status()
+            )));
         }
         let bytes = resp.bytes().map_err(|e| AppError::Sync(e.to_string()))?;
         std::fs::write(target, bytes)?;
@@ -677,13 +761,20 @@ impl WebDavClient {
     fn upload(&self, name: &str, source: &std::path::Path) -> Result<(), AppError> {
         let url = build_url(&self.base_url, name);
         let data = std::fs::read(source)?;
-        let mut req = self.client.put(url).body(data).header("Content-Type", "application/octet-stream");
+        let mut req = self
+            .client
+            .put(url)
+            .body(data)
+            .header("Content-Type", "application/octet-stream");
         if let Some(auth) = &self.auth_header {
             req = req.header("Authorization", auth);
         }
         let resp = req.send().map_err(|e| AppError::Sync(e.to_string()))?;
         if !resp.status().is_success() {
-            return Err(AppError::Sync(format!("上传失败，状态码: {}", resp.status())));
+            return Err(AppError::Sync(format!(
+                "上传失败，状态码: {}",
+                resp.status()
+            )));
         }
         Ok(())
     }
@@ -706,7 +797,10 @@ impl WebDavClient {
         }
         let resp = req.send().map_err(|e| AppError::Sync(e.to_string()))?;
         if !resp.status().is_success() {
-            return Err(AppError::Sync(format!("写入锁失败，状态码: {}", resp.status())));
+            return Err(AppError::Sync(format!(
+                "写入锁失败，状态码: {}",
+                resp.status()
+            )));
         }
         Ok(true)
     }
@@ -765,14 +859,19 @@ fn build_url(base: &str, name: &str) -> String {
     if name.is_empty() {
         return base.to_string();
     }
-    format!("{}/{}", base.trim_end_matches('/'), name.trim_start_matches('/'))
+    format!(
+        "{}/{}",
+        base.trim_end_matches('/'),
+        name.trim_start_matches('/')
+    )
 }
 
 fn build_auth_header(username: &str, password: &str) -> Option<String> {
     if username.trim().is_empty() {
         return None;
     }
-    let token = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", username, password));
+    let token =
+        base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", username, password));
     Some(format!("Basic {}", token))
 }
 

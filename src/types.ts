@@ -2,6 +2,7 @@ export type TaskStatus = "PENDING" | "COMPLETED";
 export type TaskType = "ONE_TIME" | "RECURRING";
 export type ReminderType = "TASK" | "RECURRING";
 export type UserAction = "DISMISSED" | "SNOOZED" | "COMPLETED" | "PENDING";
+export type RecurringMode = "INTERVAL_RANGE" | "DAILY" | "WEEKLY" | "MONTHLY" | "CRON";
 
 export interface Task {
   id: string;
@@ -31,6 +32,11 @@ export interface RecurringTask {
   isPaused: boolean;
   startTime?: string | null;
   endTime?: string | null;
+  repeatMode: RecurringMode;
+  scheduleTime?: string | null;
+  scheduleWeekday?: number | null;
+  scheduleDay?: number | null;
+  cronExpression?: string | null;
 }
 
 export interface ReminderRecord {
