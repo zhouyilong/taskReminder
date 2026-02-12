@@ -334,10 +334,10 @@
                   <tr>
                     <th>选择</th>
                     <th class="col-desc">描述</th>
-                    <th>类型</th>
+                    <th class="col-type">类型</th>
                     <th class="col-datetime">触发时间</th>
                     <th class="col-datetime">关闭时间</th>
-                    <th>操作</th>
+                    <th class="col-action">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -352,10 +352,10 @@
                       <input type="checkbox" v-model="selectedRecords" :value="record.id" />
                     </td>
                     <td class="col-desc" :title="record.description">{{ record.description }}</td>
-                    <td :title="record.type === 'TASK' ? '任务' : '循环'">{{ record.type === 'TASK' ? '任务' : '循环' }}</td>
+                    <td class="col-type" :title="record.type === 'TASK' ? '任务' : '循环'">{{ record.type === 'TASK' ? '任务' : '循环' }}</td>
                     <td class="col-datetime" :title="formatDateTime(record.triggerTime)">{{ formatDateTime(record.triggerTime) }}</td>
                     <td class="col-datetime" :title="formatDateTime(record.closeTime)">{{ formatDateTime(record.closeTime) }}</td>
-                    <td :title="formatAction(record.action)">{{ formatAction(record.action) }}</td>
+                    <td class="col-action" :title="formatAction(record.action)">{{ formatAction(record.action) }}</td>
                   </tr>
                 </tbody>
               </table>

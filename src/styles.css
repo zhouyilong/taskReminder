@@ -630,12 +630,24 @@ textarea:focus {
 }
 
 .records-table {
-  min-width: 980px;
-  table-layout: auto;
+  min-width: 860px;
+  table-layout: fixed;
+}
+
+.records-table .col-desc {
+  width: 28%;
+}
+
+.records-table .col-type {
+  width: 74px;
 }
 
 .records-table .col-datetime {
-  min-width: 168px;
+  width: 148px;
+}
+
+.records-table .col-action {
+  width: 88px;
 }
 
 .pagination {
