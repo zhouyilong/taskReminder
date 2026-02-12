@@ -271,7 +271,7 @@
                 <thead>
                   <tr>
                     <th class="col-desc">描述</th>
-                    <th>模式</th>
+                    <th class="col-mode">模式</th>
                     <th class="col-rule">规则</th>
                     <th class="col-datetime col-next-trigger">下次触发</th>
                     <th class="col-status">状态</th>
@@ -286,7 +286,7 @@
                     @contextmenu.prevent.stop="openRecurringMenu($event, task)"
                   >
                     <td class="col-desc" :title="task.description">{{ task.description }}</td>
-                    <td :title="formatRecurringMode(task.repeatMode)">{{ formatRecurringMode(task.repeatMode) }}</td>
+                    <td class="col-mode" :title="formatRecurringMode(task.repeatMode)">{{ formatRecurringMode(task.repeatMode) }}</td>
                     <td class="col-rule" :title="formatRecurringRule(task)">{{ formatRecurringRule(task) }}</td>
                     <td class="col-datetime col-next-trigger" :title="formatDateTime(task.nextTrigger)">{{ formatDateTime(task.nextTrigger) }}</td>
                     <td class="col-status" :title="task.isPaused ? '已暂停' : '运行中'">{{ task.isPaused ? "已暂停" : "运行中" }}</td>

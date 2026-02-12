@@ -604,19 +604,27 @@ textarea:focus {
 }
 
 .recurring-table {
-  min-width: 980px;
+  min-width: 900px;
+}
+
+.recurring-table .col-desc {
+  width: 24%;
+}
+
+.recurring-table .col-mode {
+  width: 112px;
 }
 
 .recurring-table .col-rule {
-  width: 30%;
+  width: 26%;
 }
 
 .recurring-table .col-next-trigger {
-  width: 180px;
+  width: 168px;
 }
 
 .recurring-table .col-status {
-  width: 90px;
+  width: 80px;
 }
 
 .records-table {
