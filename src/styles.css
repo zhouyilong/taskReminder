@@ -1116,7 +1116,7 @@ input[type="checkbox"] {
 }
 
 .sticky-manager-layout {
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 1fr;
 }
 
 .sticky-task-panel {

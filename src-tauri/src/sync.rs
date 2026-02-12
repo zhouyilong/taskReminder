@@ -33,6 +33,10 @@ const TASK_COLUMNS: &[&str] = &[
     "created_at",
     "completed_at",
     "reminder_time",
+    "sticky_content",
+    "sticky_pos_x",
+    "sticky_pos_y",
+    "sticky_is_open",
     "updated_at",
     "deleted_at",
 ];
@@ -67,17 +71,6 @@ const RECORD_COLUMNS: &[&str] = &[
     "action",
     "updated_at",
     "deleted_at",
-];
-const STICKY_NOTE_COLUMNS: &[&str] = &[
-    "id",
-    "title",
-    "note_type",
-    "content",
-    "pos_x",
-    "pos_y",
-    "is_open",
-    "created_at",
-    "updated_at",
 ];
 
 #[derive(Clone)]
@@ -472,13 +465,6 @@ fn merge_databases(
         RECORD_COLUMNS,
         "trigger_time",
     )?;
-    merge_table(
-        &tx,
-        &remote,
-        "sticky_notes",
-        STICKY_NOTE_COLUMNS,
-        "updated_at",
-    )?;
     tx.commit()?;
     Ok(())
 }
@@ -636,6 +622,15 @@ fn parse_datetime_any(value: &str) -> Option<NaiveDateTime> {
 fn ensure_sync_columns(conn: &Connection) -> Result<(), AppError> {
     ensure_column(conn, "tasks", "updated_at", "TEXT")?;
     ensure_column(conn, "tasks", "deleted_at", "TEXT")?;
+    ensure_column(conn, "tasks", "sticky_content", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column(conn, "tasks", "sticky_pos_x", "REAL NOT NULL DEFAULT 48")?;
+    ensure_column(conn, "tasks", "sticky_pos_y", "REAL NOT NULL DEFAULT 76")?;
+    ensure_column(
+        conn,
+        "tasks",
+        "sticky_is_open",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     ensure_column(conn, "recurring_tasks", "updated_at", "TEXT")?;
     ensure_column(conn, "recurring_tasks", "deleted_at", "TEXT")?;
     ensure_column(
@@ -650,33 +645,6 @@ fn ensure_sync_columns(conn: &Connection) -> Result<(), AppError> {
     ensure_column(conn, "recurring_tasks", "cron_expression", "TEXT")?;
     ensure_column(conn, "reminder_records", "updated_at", "TEXT")?;
     ensure_column(conn, "reminder_records", "deleted_at", "TEXT")?;
-    ensure_sticky_notes_table(conn)?;
-    Ok(())
-}
-
-fn ensure_sticky_notes_table(conn: &Connection) -> Result<(), AppError> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS sticky_notes (
-            id TEXT PRIMARY KEY,
-            title TEXT NOT NULL DEFAULT '',
-            note_type TEXT NOT NULL DEFAULT 'TASK',
-            content TEXT NOT NULL DEFAULT '',
-            pos_x REAL NOT NULL DEFAULT 48,
-            pos_y REAL NOT NULL DEFAULT 76,
-            is_open INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-         );
-         CREATE INDEX IF NOT EXISTS idx_sticky_notes_updated_at ON sticky_notes(updated_at);
-         CREATE INDEX IF NOT EXISTS idx_sticky_notes_is_open ON sticky_notes(is_open);",
-    )?;
-    ensure_column(conn, "sticky_notes", "title", "TEXT NOT NULL DEFAULT ''")?;
-    ensure_column(
-        conn,
-        "sticky_notes",
-        "note_type",
-        "TEXT NOT NULL DEFAULT 'TASK'",
-    )?;
     Ok(())
 }
 
