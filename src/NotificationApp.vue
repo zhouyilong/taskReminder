@@ -233,6 +233,9 @@ const show = async (data: NotificationPayload) => {
   visible.value = true;
   await loadNotificationTheme();
   await applyThemeByMode();
+  if (appWindow) {
+    await appWindow.show();
+  }
   await adjustLinuxWindowSize();
   startAutoClose();
 };
@@ -295,9 +298,6 @@ onMounted(async () => {
   try {
     await listen<NotificationPayload>("notification", async event => {
       await show(event.payload);
-      if (appWindow) {
-        await appWindow.show();
-      }
     });
   } catch (error) {
     console.error("[notification] 监听 notification 失败", error);

@@ -906,7 +906,7 @@ input[type="checkbox"] {
 }
 
 .notification-shell.linux-platform {
-  min-height: 100vh;
+  min-height: 100%;
   padding: 0;
   align-items: center;
   justify-content: center;
@@ -923,12 +923,8 @@ input[type="checkbox"] {
 }
 
 .notification-shell.linux-platform .notification-window {
-  min-width: 0;
-  max-width: none;
-  width: 100%;
-  height: 100%;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-soft);
+  min-width: 320px;
+  max-width: 420px;
 }
 
 .notification-header {
