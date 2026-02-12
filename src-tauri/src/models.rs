@@ -34,6 +34,11 @@ pub struct RecurringTask {
     pub is_paused: bool,
     pub start_time: Option<String>,
     pub end_time: Option<String>,
+    pub repeat_mode: String,
+    pub schedule_time: Option<String>,
+    pub schedule_weekday: Option<i64>,
+    pub schedule_day: Option<i64>,
+    pub cron_expression: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
