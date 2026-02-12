@@ -171,6 +171,11 @@ impl ReminderScheduler {
 }
 
 fn emit_notification(app: &AppHandle, payload: &NotificationPayload) -> Result<(), AppError> {
+    let notification_height = if cfg!(target_os = "linux") {
+        152.0
+    } else {
+        180.0
+    };
     let window = if let Some(existing) = app.get_webview_window("notification") {
         existing
     } else {
@@ -184,7 +189,7 @@ fn emit_notification(app: &AppHandle, payload: &NotificationPayload) -> Result<(
         .transparent(true)
         .always_on_top(true)
         .resizable(false)
-        .inner_size(380.0, 180.0)
+        .inner_size(380.0, notification_height)
         .build()
         .map_err(|e| AppError::System(e.to_string()))?
     };
@@ -193,7 +198,7 @@ fn emit_notification(app: &AppHandle, payload: &NotificationPayload) -> Result<(
         if let Some(monitor) = monitor {
             let size = monitor.size();
             let pos_x = size.width.saturating_sub(400) as f64;
-            let pos_y = size.height.saturating_sub(220) as f64;
+            let pos_y = size.height.saturating_sub(notification_height as u32 + 40) as f64;
             let _ = window.set_position(tauri::LogicalPosition { x: pos_x, y: pos_y });
         }
     }
