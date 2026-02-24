@@ -1,6 +1,6 @@
 <template>
   <div class="app" :class="{ 'light-theme': isLightTheme, 'is-linux': isLinuxPlatform }">
-    <div class="titlebar" data-tauri-drag-region @dblclick="toggleMaximize">
+    <div class="titlebar" @dblclick="toggleMaximize">
       <div class="titlebar-left" data-tauri-drag-region>
         <span class="app-title">任务提醒 {{ appVersion }}<span v-if="isDevMode" class="dev-tag"> [开发]</span></span>
         <span class="tag">{{ syncStatusLabel }}</span>
@@ -25,11 +25,12 @@
           class="icon-button"
           :class="{ active: stickyNoteWindowVisible }"
           type="button"
-          :title="stickyNoteWindowVisible ? '关闭桌面便签' : '打开桌面便签'"
+          :title="stickyNoteToggleTitle"
           @click="toggleStickyNoteWindow"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 3a4 4 0 0 1 4 4v2h1.5A1.5 1.5 0 0 1 19 10.5v8A1.5 1.5 0 0 1 17.5 20h-11A1.5 1.5 0 0 1 5 18.5v-8A1.5 1.5 0 0 1 6.5 9H8V7a4 4 0 0 1 4-4zm2 6V7a2 2 0 1 0-4 0v2h4z" />
+            <path d="M5 3h10l4 4v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+            <path d="M14 3v4h4" fill="none" stroke="var(--bg-base, #1a1a2e)" stroke-width="1.2" />
           </svg>
         </button>
         <button class="icon-button" type="button" title="设置" @click="openSettings">
@@ -132,18 +133,23 @@
             <div class="section-title">待办事项</div>
             <span class="section-meta">共 {{ tasks.length }} 条任务</span>
           </div>
+          <div class="subsection-title">任务表单</div>
           <div class="form-row compact">
+            <label class="field-label">标题</label>
+            <input class="input" v-model="newTaskDescription" placeholder="输入任务标题" style="flex: 1" />
             <label class="field-label">描述</label>
-            <input class="input" v-model="newTaskDescription" placeholder="输入任务描述" style="flex: 1" />
+            <input class="input" v-model="newTaskStickyContent" placeholder="输入任务描述（可选）" style="flex: 1" />
             <button class="button" @click="handleAddTask">添加任务</button>
           </div>
+          <div class="subsection-title">待办列表</div>
           <div class="table-card">
-            <div class="table-scroll">
-              <table class="table">
+            <div class="table-scroll table-scroll-no-x">
+              <table class="table tasks-table">
                 <thead>
                   <tr>
                     <th>完成</th>
-                    <th class="col-desc">描述</th>
+                    <th class="col-desc">标题</th>
+                    <th class="col-note">描述</th>
                     <th class="col-datetime">提醒时间</th>
                     <th class="col-datetime">创建时间</th>
                   </tr>
@@ -160,6 +166,7 @@
                       <input type="checkbox" :checked="task.status === 'COMPLETED'" @change="toggleTask(task)" />
                     </td>
                     <td class="col-desc" :title="task.description">{{ task.description }}</td>
+                    <td class="col-note" :title="task.stickyContent || '-'">{{ task.stickyContent || "-" }}</td>
                     <td class="col-datetime" :title="formatDateTime(task.reminderTime)">{{ formatDateTime(task.reminderTime) }}</td>
                     <td class="col-datetime" :title="formatDateTime(task.createdAt)">{{ formatDateTime(task.createdAt) }}</td>
                   </tr>
@@ -184,17 +191,20 @@
             <div class="section-title">已办事项</div>
             <span class="section-meta">筛选后 {{ filteredCompleted.length }} 条</span>
           </div>
+          <div class="subsection-title">筛选表单</div>
           <div class="form-row compact">
-            <label class="field-label">描述</label>
-            <input class="input" v-model="completedFilter" placeholder="按描述过滤" style="flex: 1" />
+            <label class="field-label">标题</label>
+            <input class="input" v-model="completedFilter" placeholder="按标题/描述过滤" style="flex: 1" />
           </div>
+          <div class="subsection-title">已办列表</div>
           <div class="table-card">
-            <div class="table-scroll">
-              <table class="table">
+            <div class="table-scroll table-scroll-no-x">
+              <table class="table completed-table">
                 <thead>
                   <tr>
                     <th>取消完成</th>
-                    <th class="col-desc">描述</th>
+                    <th class="col-desc">标题</th>
+                    <th class="col-note">描述</th>
                     <th class="col-datetime">创建时间</th>
                     <th class="col-datetime">完成时间</th>
                   </tr>
@@ -211,6 +221,7 @@
                       <input type="checkbox" checked @change="toggleTask(task)" />
                     </td>
                     <td class="col-desc" :title="task.description">{{ task.description }}</td>
+                    <td class="col-note" :title="task.stickyContent || '-'">{{ task.stickyContent || "-" }}</td>
                     <td class="col-datetime" :title="formatDateTime(task.createdAt)">{{ formatDateTime(task.createdAt) }}</td>
                     <td class="col-datetime" :title="formatDateTime(task.completedAt)">{{ formatDateTime(task.completedAt) }}</td>
                   </tr>
@@ -390,7 +401,10 @@
 
     <Modal :open="editTaskOpen" title="编辑任务" :showDelete="true" @close="editTaskOpen = false" @confirm="saveTaskEdit" @delete="deleteTaskFromModal">
       <div class="form-row">
-        <input class="input" v-model="editTaskDescription" placeholder="任务描述" style="flex: 1" />
+        <input class="input" v-model="editTaskDescription" placeholder="任务标题" style="flex: 1" />
+      </div>
+      <div class="form-row">
+        <input class="input" v-model="editTaskStickyContent" placeholder="任务描述（可选）" style="flex: 1" />
       </div>
       <div class="form-row">
         <input
@@ -562,6 +576,7 @@
     <Modal :open="confirmDeleteOpen" title="确认删除" @close="closeDeleteConfirm" @confirm="handleConfirmDelete">
       <div class="modal-text">{{ confirmDeleteMessage }}</div>
     </Modal>
+
   </div>
 </template>
 
@@ -593,7 +608,7 @@ const resolveCurrentWindow = (): TauriWindow | null => {
     return null;
   }
 };
-const appWindow = resolveCurrentWindow();
+const getAppWindow = (): TauriWindow | null => resolveCurrentWindow();
 const uiScale = ref(Number(safeStorage.getItem("uiScale") ?? "1"));
 const isSidebarCollapsed = ref(safeStorage.getItem("sidebarCollapsed") === "1");
 
@@ -603,6 +618,7 @@ const recurringTasks = ref<RecurringTask[]>([]);
 const reminderRecords = ref<ReminderRecord[]>([]);
 const syncStatus = ref<SyncStatus | null>(null);
 const stickyNoteWindowVisible = ref(false);
+const stickyNoteSwitching = ref(false);
 
 const recurringModeOptions: { value: RecurringMode; label: string }[] = [
   { value: "INTERVAL_RANGE", label: "区间间隔" },
@@ -623,6 +639,7 @@ const weekdayOptions: { value: number; label: string }[] = [
 ];
 
 const newTaskDescription = ref("");
+const newTaskStickyContent = ref("");
 const newRecurringDescription = ref("");
 const newRecurringInterval = ref(60);
 const newRecurringStart = ref("08:00");
@@ -636,6 +653,7 @@ const newRecurringCronExpression = ref("0 9 * * *");
 const editTaskOpen = ref(false);
 const editTaskId = ref("");
 const editTaskDescription = ref("");
+const editTaskStickyContent = ref("");
 const editTaskReminder = ref("");
 const editTaskReminderInput = ref<HTMLInputElement | null>(null);
 const isLinuxPlatform =
@@ -722,6 +740,12 @@ const syncStatusLabel = computed(() => {
 });
 
 const uiScalePercent = computed(() => Math.round(uiScale.value * 100));
+const stickyNoteToggleTitle = computed(() => {
+  if (stickyNoteSwitching.value) {
+    return "桌面便签处理中...";
+  }
+  return stickyNoteWindowVisible.value ? "关闭桌面便签" : "打开桌面便签";
+});
 
 const tasksTotalPages = computed(() => {
   return Math.max(1, Math.ceil(tasks.value.length / tasksPageSize.value));
@@ -737,7 +761,11 @@ const filteredCompleted = computed(() => {
   if (!keyword) {
     return completedTasks.value;
   }
-  return completedTasks.value.filter(task => task.description.toLowerCase().includes(keyword));
+  return completedTasks.value.filter(task => {
+    const descriptionMatched = task.description.toLowerCase().includes(keyword);
+    const stickyContentMatched = (task.stickyContent || "").toLowerCase().includes(keyword);
+    return descriptionMatched || stickyContentMatched;
+  });
 });
 
 const completedTotalPages = computed(() => {
@@ -1050,8 +1078,12 @@ const handleAddTask = async () => {
   if (!newTaskDescription.value.trim()) {
     return;
   }
-  await api.createTask(newTaskDescription.value.trim());
+  await api.createTask({
+    description: newTaskDescription.value.trim(),
+    stickyContent: newTaskStickyContent.value.trim() || null,
+  });
   newTaskDescription.value = "";
+  newTaskStickyContent.value = "";
   await refreshAll();
 };
 
@@ -1067,6 +1099,7 @@ const toggleTask = async (task: Task) => {
 const openEditTask = (task: Task) => {
   editTaskId.value = task.id;
   editTaskDescription.value = task.description;
+  editTaskStickyContent.value = task.stickyContent || "";
   editTaskReminder.value = toDatetimeLocal(task.reminderTime ?? null);
   editTaskOpen.value = true;
 };
@@ -1105,6 +1138,7 @@ const saveTaskEdit = async () => {
   await api.updateTask({
     id: editTaskId.value,
     description: editTaskDescription.value,
+    stickyContent: editTaskStickyContent.value.trim() || null,
     reminderTime: fromDatetimeLocal(editTaskReminder.value)
   });
   editTaskOpen.value = false;
@@ -1234,13 +1268,83 @@ const openWebdav = async () => {
   webdavOpen.value = true;
 };
 
+const withInvokeTimeout = async <T,>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string
+): Promise<T> => {
+  let timer = 0;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = window.setTimeout(() => {
+          reject(new Error(timeoutMessage));
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) {
+      window.clearTimeout(timer);
+    }
+  }
+};
+
+const readStickyWindowVisibleSafely = async () => {
+  try {
+    return await withInvokeTimeout(
+      api.isStickyNoteWindowVisible(),
+      2500,
+      "查询桌面便签状态超时"
+    );
+  } catch (error) {
+    console.warn("[main] 查询桌面便签状态失败，改为使用本地状态兜底", error);
+    return null as boolean | null;
+  }
+};
+
 const refreshStickyWindowState = async () => {
-  stickyNoteWindowVisible.value = await api.isStickyNoteWindowVisible();
+  const visible = await readStickyWindowVisibleSafely();
+  if (visible !== null) {
+    stickyNoteWindowVisible.value = visible;
+  }
 };
 
 const toggleStickyNoteWindow = async () => {
-  const nextVisible = !stickyNoteWindowVisible.value;
-  stickyNoteWindowVisible.value = await api.setStickyNoteWindowVisible(nextVisible);
+  if (stickyNoteSwitching.value) {
+    return;
+  }
+  stickyNoteSwitching.value = true;
+  try {
+    const currentVisible = await readStickyWindowVisibleSafely();
+    const shouldClose = currentVisible ?? stickyNoteWindowVisible.value;
+    if (shouldClose) {
+      stickyNoteWindowVisible.value = await withInvokeTimeout(
+        api.setStickyNoteWindowVisible(false),
+        4000,
+        "关闭桌面便签超时"
+      );
+      return;
+    }
+
+    await withInvokeTimeout(
+      api.setStickyNoteWindowVisible(true),
+      5000,
+      "打开桌面便签超时"
+    );
+    const confirmedVisible = await readStickyWindowVisibleSafely();
+    if (confirmedVisible !== null) {
+      stickyNoteWindowVisible.value = confirmedVisible;
+    } else {
+      stickyNoteWindowVisible.value = true;
+    }
+  } catch (error) {
+    console.error("[main] 切换桌面便签失败", error);
+    const message = error instanceof Error ? error.message : String(error);
+    alert(`桌面便签窗口操作失败：${message}`);
+  } finally {
+    stickyNoteSwitching.value = false;
+  }
 };
 
 const saveSettings = async () => {
@@ -1276,6 +1380,7 @@ const toggleTheme = () => {
 };
 
 const handleMinimize = async () => {
+  const appWindow = getAppWindow();
   if (!appWindow) {
     return;
   }
@@ -1283,6 +1388,7 @@ const handleMinimize = async () => {
 };
 
 const handleMaximize = async () => {
+  const appWindow = getAppWindow();
   if (!appWindow) {
     return;
   }
@@ -1301,6 +1407,7 @@ const toggleMaximize = async () => {
 
 const handleClose = async () => {
   // 默认“关闭”改为最小化到托盘：隐藏主窗口，保留后台运行（托盘可重新打开/退出）。
+  const appWindow = getAppWindow();
   if (!appWindow) {
     return;
   }
@@ -1371,7 +1478,8 @@ const openDetail = (title: string, items: { label: string; value: string }[]) =>
 
 const openTaskDetail = (task: Task) => {
   openDetail("任务详情", [
-    { label: "描述", value: task.description },
+    { label: "标题", value: task.description },
+    { label: "描述", value: task.stickyContent || "-" },
     { label: "状态", value: task.status === "COMPLETED" ? "已完成" : "待办" },
     { label: "创建时间", value: formatDateTime(task.createdAt) },
     { label: "完成时间", value: formatDateTime(task.completedAt) },
@@ -1405,6 +1513,7 @@ onMounted(async () => {
   } catch (error) {
     console.error("[main] 初始化数据失败", error);
   }
+  const appWindow = getAppWindow();
   if (appWindow) {
     try {
       isWindowMaximized.value = await appWindow.isMaximized();

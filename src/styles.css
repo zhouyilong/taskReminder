@@ -84,6 +84,8 @@ body.sticky-note-mode {
   width: 100vw;
   height: 100vh;
   background: transparent;
+  border-radius: 0;
+  overflow: hidden;
 }
 
 #sticky-note-item {
@@ -494,6 +496,14 @@ textarea:focus-visible {
   font-weight: 500;
 }
 
+.subsection-title {
+  margin: 4px 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.2px;
+}
+
 .form-row {
   display: flex;
   gap: 10px;
@@ -583,6 +593,11 @@ textarea:focus {
   overflow: auto;
 }
 
+.table-scroll-no-x {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -630,8 +645,35 @@ textarea:focus {
   width: 40%;
 }
 
+.col-note {
+  width: 28%;
+}
+
 .col-datetime {
   width: 172px;
+}
+
+.tasks-table th:first-child,
+.tasks-table td:first-child,
+.completed-table th:first-child,
+.completed-table td:first-child {
+  width: 72px;
+  min-width: 72px;
+}
+
+.tasks-table .col-datetime,
+.completed-table .col-datetime {
+  width: 142px;
+}
+
+.tasks-table .col-desc,
+.completed-table .col-desc {
+  width: 30%;
+}
+
+.tasks-table .col-note,
+.completed-table .col-note {
+  width: 24%;
 }
 
 .recurring-table {
@@ -776,6 +818,27 @@ input[type="checkbox"] {
   justify-content: center;
   background: rgba(5, 10, 20, 0.5);
   backdrop-filter: blur(4px);
+}
+
+.sticky-manager-fallback-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1120;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 64px 18px 18px;
+  background: rgba(5, 10, 20, 0.24);
+  backdrop-filter: blur(2px);
+}
+
+.sticky-manager-fallback-panel {
+  width: min(380px, calc(100vw - 24px));
+  height: min(540px, calc(100vh - 84px));
+  min-height: 360px;
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 16px 30px rgba(6, 10, 22, 0.28);
 }
 
 .modal {
@@ -1074,34 +1137,63 @@ input[type="checkbox"] {
   width: 100%;
   height: 100%;
   box-sizing: border-box;
-  padding: 8px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  border-radius: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.sticky-board::after {
+  content: "";
+  position: absolute;
+  inset: 0;
   border-radius: 18px;
-  border: 1px solid rgba(138, 168, 226, 0.32);
   background:
-    linear-gradient(150deg, rgba(10, 24, 58, 0.42), rgba(9, 14, 36, 0.3)),
-    radial-gradient(circle at 22% 12%, rgba(98, 141, 244, 0.22), transparent 42%),
-    radial-gradient(circle at 78% 88%, rgba(28, 58, 126, 0.22), transparent 45%);
-  box-shadow: 0 14px 30px rgba(3, 8, 22, 0.28);
-  backdrop-filter: blur(10px);
+    radial-gradient(125% 115% at 12% -6%, rgba(118, 170, 255, 0.26), transparent 52%),
+    linear-gradient(162deg, #102448 0%, #0f2142 52%, #0c1a35 100%);
+  box-shadow: 0 18px 30px rgba(3, 10, 26, 0.34);
+  z-index: 0;
+  pointer-events: none;
+}
+
+.sticky-board::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 34%),
+    radial-gradient(80% 45% at 100% 0%, rgba(65, 122, 236, 0.2), transparent 70%);
+  z-index: 0;
+  pointer-events: none;
+}
+
+.sticky-board > * {
+  position: relative;
+  z-index: 1;
 }
 
 .sticky-topbar {
-  height: 28px;
+  min-height: 30px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 0 1px 0 3px;
-  color: rgba(233, 240, 255, 0.94);
+  gap: 10px;
+  padding: 0 4px 0 5px;
+  color: rgba(236, 244, 255, 0.96);
+  z-index: 2;
 }
 
 .sticky-brand {
   font-size: 14px;
   font-weight: 700;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.3px;
+  text-shadow: 0 1px 2px rgba(6, 12, 26, 0.22);
 }
 
 .sticky-topbar-actions {
@@ -1113,21 +1205,24 @@ input[type="checkbox"] {
 
 .sticky-ghost-button,
 .sticky-close-window {
-  height: 20px;
+  height: 24px;
   border-radius: 999px;
-  border: 1px solid rgba(189, 209, 246, 0.5);
-  background: rgba(11, 20, 46, 0.34);
-  color: rgba(235, 242, 255, 0.95);
-  padding: 0 9px;
-  font-size: 10px;
+  border: 1px solid rgba(185, 208, 245, 0.62);
+  background: linear-gradient(160deg, rgba(22, 44, 88, 0.72), rgba(16, 32, 67, 0.72));
+  color: rgba(240, 246, 255, 0.96);
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.18s ease, border-color 0.18s ease;
+  box-shadow: inset 0 1px 0 rgba(221, 234, 255, 0.18);
+  transition: transform 0.16s ease, background 0.18s ease, border-color 0.18s ease;
 }
 
 .sticky-ghost-button:hover,
 .sticky-close-window:hover {
-  background: rgba(46, 90, 186, 0.42);
-  border-color: rgba(206, 224, 255, 0.78);
+  transform: translateY(-1px);
+  background: linear-gradient(160deg, rgba(43, 82, 165, 0.78), rgba(31, 61, 126, 0.78));
+  border-color: rgba(219, 232, 255, 0.82);
 }
 
 .sticky-layout {
@@ -1136,6 +1231,8 @@ input[type="checkbox"] {
   display: grid;
   grid-template-columns: 240px 1fr;
   gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(166, 193, 236, 0.34);
 }
 
 .sticky-manager-layout {
@@ -1144,19 +1241,22 @@ input[type="checkbox"] {
 
 .sticky-task-panel {
   min-height: 0;
-  border-radius: 14px;
-  border: 1px solid rgba(164, 192, 238, 0.38);
-  background: rgba(9, 20, 48, 0.3);
-  padding: 8px;
+  border-radius: 0;
+  border: none;
+  background: transparent;
+  padding: 2px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-app-region: no-drag;
 }
 
 .sticky-task-title {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
-  color: rgba(235, 243, 255, 0.95);
+  color: rgba(238, 245, 255, 0.98);
 }
 
 .sticky-list-toolbar {
@@ -1167,43 +1267,127 @@ input[type="checkbox"] {
 }
 
 .sticky-add-note {
-  height: 22px;
+  height: 26px;
   border-radius: 999px;
-  border: 1px solid rgba(172, 198, 244, 0.54);
-  background: rgba(13, 27, 60, 0.4);
-  color: rgba(235, 243, 255, 0.96);
+  border: 1px solid rgba(174, 201, 244, 0.66);
+  background: linear-gradient(155deg, rgba(32, 68, 136, 0.9), rgba(23, 50, 103, 0.9));
+  color: rgba(239, 246, 255, 0.98);
   font-size: 11px;
+  font-weight: 700;
   padding: 0 10px;
   cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(222, 234, 255, 0.18);
+  transition: transform 0.16s ease, background 0.18s ease, border-color 0.18s ease, opacity 0.18s ease;
 }
 
 .sticky-add-note:hover {
-  background: rgba(45, 85, 170, 0.48);
-  border-color: rgba(217, 230, 255, 0.82);
+  transform: translateY(-1px);
+  background: linear-gradient(155deg, rgba(51, 97, 190, 0.92), rgba(32, 70, 140, 0.92));
+  border-color: rgba(220, 233, 255, 0.86);
+}
+
+.sticky-add-note:disabled {
+  opacity: 0.62;
+  cursor: default;
 }
 
 .sticky-task-search {
-  height: 28px;
-  border-radius: 8px;
-  border: 1px solid rgba(170, 196, 236, 0.42);
-  background: rgba(7, 15, 36, 0.38);
-  color: rgba(238, 245, 255, 0.96);
-  padding: 0 8px;
+  height: 30px;
+  border-radius: 10px;
+  border: 1px solid rgba(170, 197, 236, 0.62);
+  background: rgba(15, 35, 72, 0.94);
+  color: rgba(241, 247, 255, 0.98);
+  padding: 0 10px;
   font-size: 12px;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+
+.sticky-task-search:focus {
+  border-color: rgba(209, 225, 255, 0.82);
+  box-shadow: 0 0 0 3px rgba(88, 138, 234, 0.2);
+  background: rgba(16, 39, 79, 0.96);
 }
 
 .sticky-task-search::placeholder {
   color: rgba(197, 213, 242, 0.82);
 }
 
-.sticky-task-list {
+.sticky-task-list-frame {
+  position: relative;
   min-height: 0;
   flex: 1;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid rgba(162, 191, 238, 0.46);
+  background: linear-gradient(180deg, rgba(8, 21, 46, 0.34), rgba(8, 21, 46, 0.2));
+  box-shadow:
+    inset 0 1px 0 rgba(222, 235, 255, 0.11),
+    inset 0 -1px 0 rgba(11, 23, 49, 0.28);
+}
+
+.sticky-task-list-frame::before,
+.sticky-task-list-frame::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.sticky-task-list-frame::before {
+  left: 1px;
+  right: 1px;
+  bottom: 1px;
+  height: 2px;
+  background: rgba(17, 40, 80, 0.22);
+}
+
+.sticky-task-list-frame::after {
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  width: 2px;
+  background: rgba(17, 40, 80, 0.22);
+}
+
+.sticky-task-list {
+  min-height: 0;
+  height: 100%;
   overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding-right: 2px;
+  padding: 6px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) rgba(17, 40, 80, 0.22);
+}
+
+.sticky-task-list::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.sticky-task-list::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.sticky-task-list::-webkit-scrollbar-track {
+  background: rgba(17, 40, 80, 0.22);
+  border-radius: 999px;
+}
+
+.sticky-task-list::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.sticky-task-list::-webkit-scrollbar-button {
+  width: 0;
+  height: 0;
+  display: none;
+  background: transparent;
 }
 
 .sticky-task-list.compact {
@@ -1218,33 +1402,39 @@ input[type="checkbox"] {
 }
 
 .sticky-task-item {
-  border: 1px solid rgba(174, 201, 244, 0.4);
+  border: 1px solid rgba(176, 202, 244, 0.66);
   border-radius: 10px;
-  background: rgba(11, 24, 55, 0.34);
-  color: rgba(234, 242, 255, 0.95);
+  background: linear-gradient(160deg, rgba(22, 53, 107, 0.92), rgba(18, 44, 90, 0.92));
+  color: rgba(236, 244, 255, 0.97);
   text-align: left;
   padding: 9px 10px;
   cursor: pointer;
-  transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+  box-shadow: inset 0 1px 0 rgba(220, 233, 255, 0.13);
+  transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+  -webkit-app-region: no-drag;
 }
 
 .sticky-task-item.compact {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   border-radius: 8px;
-  padding: 5px 7px;
+  padding: 6px 8px;
 }
 
 .sticky-task-item:hover {
-  background: rgba(40, 77, 157, 0.42);
-  border-color: rgba(210, 226, 255, 0.78);
+  background: linear-gradient(160deg, rgba(40, 84, 165, 0.94), rgba(28, 61, 123, 0.94));
+  border-color: rgba(213, 228, 255, 0.8);
+  box-shadow: inset 0 1px 0 rgba(231, 240, 255, 0.2);
   transform: translateY(-1px);
 }
 
 .sticky-task-item.active {
-  background: rgba(63, 113, 248, 0.42);
-  border-color: rgba(223, 234, 255, 0.82);
+  background: linear-gradient(160deg, rgba(62, 116, 218, 0.95), rgba(43, 92, 180, 0.95));
+  border-color: rgba(225, 236, 255, 0.86);
+  box-shadow:
+    inset 0 1px 0 rgba(238, 245, 255, 0.22),
+    0 5px 12px rgba(10, 25, 56, 0.22);
 }
 
 .sticky-task-row.active .sticky-item-close {
@@ -1252,20 +1442,30 @@ input[type="checkbox"] {
 }
 
 .sticky-item-close {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border-radius: 999px;
-  border: 1px solid rgba(174, 201, 244, 0.5);
-  background: rgba(11, 24, 55, 0.4);
-  color: rgba(234, 242, 255, 0.95);
+  border: 1px solid rgba(176, 202, 244, 0.58);
+  background: linear-gradient(165deg, rgba(23, 53, 108, 0.9), rgba(17, 41, 84, 0.9));
+  color: rgba(236, 244, 255, 0.98);
   line-height: 1;
   cursor: pointer;
   opacity: 0.85;
+  transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease;
 }
 
 .sticky-item-close:hover {
-  border-color: rgba(223, 234, 255, 0.82);
-  background: rgba(63, 113, 248, 0.42);
+  transform: translateY(-1px);
+  border-color: rgba(224, 235, 255, 0.84);
+  background: linear-gradient(165deg, rgba(54, 103, 198, 0.92), rgba(39, 76, 150, 0.92));
+}
+
+.sticky-context-menu {
+  min-width: 124px;
+  z-index: 1300;
+  border-color: rgba(168, 195, 240, 0.7);
+  background: linear-gradient(170deg, rgba(14, 34, 69, 0.96), rgba(10, 27, 56, 0.96));
+  box-shadow: 0 10px 20px rgba(4, 10, 24, 0.34);
 }
 
 .sticky-task-text {
@@ -1278,8 +1478,9 @@ input[type="checkbox"] {
 }
 
 .sticky-task-text.compact {
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: 13px;
+  line-height: 1.38;
+  font-weight: 500;
   -webkit-line-clamp: 1;
 }
 
@@ -1338,21 +1539,39 @@ input[type="checkbox"] {
   width: 284px;
   height: 280px;
   border-radius: 14px;
-  border: 1px solid rgba(168, 145, 78, 0.36);
+  border: 1px solid rgba(166, 138, 88, 0.58);
   background:
-    linear-gradient(180deg, rgba(255, 246, 214, 0.86), rgba(241, 226, 178, 0.78)),
+    linear-gradient(180deg, rgba(255, 249, 229, 0.98), rgba(251, 239, 198, 0.96)),
     repeating-linear-gradient(
       180deg,
-      rgba(147, 118, 49, 0.08) 0,
-      rgba(147, 118, 49, 0.08) 1px,
+      rgba(124, 101, 64, 0.1) 0,
+      rgba(124, 101, 64, 0.1) 1px,
       transparent 1px,
       transparent 25px
     );
-  box-shadow: 0 10px 20px rgba(20, 15, 6, 0.26);
+  box-shadow:
+    0 14px 26px rgba(32, 24, 10, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.42);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   pointer-events: auto;
+}
+
+.paper-note::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 70% at 10% -12%, rgba(255, 255, 255, 0.32), transparent 58%),
+    repeating-linear-gradient(
+      45deg,
+      rgba(126, 99, 57, 0.03) 0,
+      rgba(126, 99, 57, 0.03) 2px,
+      transparent 2px,
+      transparent 8px
+    );
+  pointer-events: none;
 }
 
 .sticky-note-item-root {
@@ -1380,30 +1599,41 @@ input[type="checkbox"] {
 }
 
 .paper-note::after {
-  display: none;
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 28px;
+  height: 28px;
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+  background: linear-gradient(135deg, rgba(255, 253, 242, 0.92), rgba(230, 206, 148, 0.95));
+  box-shadow: -1px 1px 0 rgba(157, 126, 75, 0.35);
+  pointer-events: none;
 }
 
 .paper-pin {
   position: absolute;
-  top: 6px;
+  top: 7px;
   left: 50%;
   transform: translateX(-50%);
   width: 12px;
   height: 12px;
   border-radius: 999px;
-  background: radial-gradient(circle at 35% 30%, #fffcf6, #b53f3f 58%, #7c2525);
-  box-shadow: 0 4px 8px rgba(79, 24, 24, 0.4);
+  background: radial-gradient(circle at 36% 30%, #fff7f4, #cf5248 56%, #8d221d);
+  box-shadow: 0 3px 8px rgba(58, 24, 20, 0.34);
   z-index: 3;
 }
 
 .paper-note-header {
-  padding: 11px 8px 3px;
+  padding: 12px 9px 4px;
   display: flex;
   align-items: center;
   gap: 6px;
   justify-content: space-between;
   cursor: grab;
   user-select: none;
+  border-bottom: 1px solid rgba(164, 133, 83, 0.44);
+  background: linear-gradient(180deg, rgba(255, 250, 236, 0.85), rgba(255, 245, 213, 0.2));
 }
 
 .paper-note-header:active {
@@ -1413,8 +1643,8 @@ input[type="checkbox"] {
 .paper-note-title-input {
   border: none;
   background: transparent;
-  color: rgba(86, 61, 24, 0.92);
-  font-size: 12px;
+  color: #5e4420;
+  font-size: 13px;
   font-weight: 700;
   line-height: 1.2;
   width: 100%;
@@ -1425,21 +1655,29 @@ input[type="checkbox"] {
 }
 
 .paper-note-title-input::placeholder {
-  color: rgba(122, 96, 56, 0.7);
+  color: rgba(108, 85, 52, 0.62);
 }
 
 .paper-note-close {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border-radius: 999px;
-  border: 1px solid rgba(145, 116, 57, 0.34);
-  background: rgba(255, 242, 204, 0.58);
-  color: rgba(123, 85, 26, 0.92);
+  border: 1px solid rgba(170, 142, 92, 0.56);
+  background: rgba(255, 248, 224, 0.9);
+  color: #7d5a2d;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
   flex-shrink: 0;
   -webkit-app-region: no-drag;
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.paper-note-close:hover {
+  transform: translateY(-1px);
+  border-color: rgba(181, 96, 72, 0.62);
+  background: rgba(255, 232, 216, 0.95);
+  color: #97443a;
 }
 
 .paper-note-editor {
@@ -1448,69 +1686,122 @@ input[type="checkbox"] {
   resize: none;
   flex: 1;
   min-height: 0;
-  padding: 4px 10px 8px;
-  color: rgba(84, 58, 22, 0.93);
-  font-size: 15px;
-  line-height: 1.58;
+  padding: 7px 11px 8px;
+  color: #58411f;
+  font-size: 14px;
+  line-height: 1.62;
+  font-weight: 500;
+  caret-color: #8a632d;
   outline: none;
 }
 
+.paper-note-editor::-webkit-scrollbar {
+  width: 8px;
+}
+
+.paper-note-editor::-webkit-scrollbar-thumb {
+  background: rgba(156, 125, 74, 0.44);
+  border-radius: 999px;
+}
+
 .paper-note-editor::placeholder {
-  color: rgba(126, 99, 60, 0.62);
+  color: rgba(114, 90, 56, 0.56);
+}
+
+.paper-note-footer {
+  min-height: 22px;
+  padding: 0 10px 7px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.paper-note-save-hint {
+  font-size: 11px;
+  color: rgba(116, 91, 54, 0.7);
+  letter-spacing: 0.2px;
+}
+
+.paper-note-header,
+.paper-note-editor,
+.paper-note-footer {
+  position: relative;
+  z-index: 1;
 }
 
 .light-theme .sticky-board {
-  border-color: rgba(154, 176, 212, 0.44);
+  background: transparent;
+  box-shadow: none;
+}
+
+.light-theme .sticky-board::after {
   background:
-    linear-gradient(150deg, rgba(238, 246, 255, 0.5), rgba(223, 235, 252, 0.36)),
-    radial-gradient(circle at 24% 14%, rgba(111, 158, 238, 0.2), transparent 42%),
-    radial-gradient(circle at 84% 88%, rgba(162, 185, 228, 0.22), transparent 46%);
-  box-shadow: 0 12px 26px rgba(57, 88, 128, 0.16);
+    radial-gradient(120% 115% at 10% -8%, rgba(123, 166, 236, 0.28), transparent 52%),
+    linear-gradient(165deg, #edf3fc, #e5edf9 54%, #dde7f5 100%);
+  box-shadow: 0 16px 28px rgba(57, 88, 128, 0.16);
+}
+
+.light-theme #sticky-note {
+  background: transparent;
+}
+
+html.sticky-note-manager-mode,
+body.sticky-note-manager-mode {
+  background: transparent !important;
+}
+
+html.sticky-note-manager-mode.light-theme,
+body.sticky-note-manager-mode.light-theme {
+  background: transparent !important;
 }
 
 .light-theme .sticky-topbar,
 .light-theme .sticky-task-title {
-  color: rgba(37, 58, 87, 0.9);
+  color: rgba(35, 57, 87, 0.95);
 }
 
 .light-theme .sticky-task-panel,
 .light-theme .sticky-canvas {
-  background: rgba(242, 249, 255, 0.46);
-  border-color: rgba(143, 166, 206, 0.46);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .light-theme .sticky-task-item {
-  background: rgba(246, 251, 255, 0.62);
-  border-color: rgba(149, 174, 214, 0.44);
-  color: rgba(35, 56, 84, 0.95);
+  background: linear-gradient(164deg, #dbe9fb, #cddff6);
+  border-color: rgba(126, 155, 199, 0.74);
+  color: #29466f;
 }
 
 .light-theme .sticky-task-item:hover {
-  background: rgba(196, 220, 255, 0.52);
-  border-color: rgba(122, 149, 197, 0.72);
+  background: linear-gradient(164deg, #cde1fb, #bdd4f5);
+  border-color: rgba(102, 136, 188, 0.84);
 }
 
 .light-theme .sticky-task-item.active {
-  background: rgba(157, 197, 255, 0.56);
-  border-color: rgba(104, 135, 186, 0.76);
+  background: linear-gradient(164deg, #b8d3f8, #a8c7f3);
+  border-color: rgba(91, 126, 184, 0.92);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.78),
+    0 5px 12px rgba(66, 100, 153, 0.16);
 }
 
 .light-theme .sticky-item-close {
-  background: rgba(246, 251, 255, 0.62);
-  border-color: rgba(149, 174, 214, 0.44);
-  color: rgba(35, 56, 84, 0.95);
+  background: linear-gradient(165deg, #d8e6f8, #ccdef5);
+  border-color: rgba(126, 155, 199, 0.72);
+  color: #2d496f;
 }
 
 .light-theme .sticky-add-note {
-  background: rgba(244, 250, 255, 0.8);
-  color: rgba(38, 61, 95, 0.92);
-  border-color: rgba(136, 161, 202, 0.62);
+  background: linear-gradient(160deg, #d8e8fb, #c9ddf6);
+  color: #375983;
+  border-color: rgba(109, 140, 188, 0.78);
 }
 
 .light-theme .sticky-task-search {
-  background: rgba(248, 252, 255, 0.66);
-  color: rgba(33, 55, 84, 0.95);
-  border-color: rgba(142, 168, 209, 0.46);
+  background: #eaf2ff;
+  color: #2f4d77;
+  border-color: rgba(122, 153, 199, 0.82);
 }
 
 .light-theme .sticky-task-search::placeholder,
@@ -1521,9 +1812,73 @@ input[type="checkbox"] {
 
 .light-theme .sticky-ghost-button,
 .light-theme .sticky-close-window {
-  background: rgba(238, 246, 255, 0.56);
-  color: rgba(42, 64, 96, 0.9);
-  border-color: rgba(136, 160, 200, 0.56);
+  background: linear-gradient(160deg, #d8e8fb, #c9ddf6);
+  color: #375983;
+  border-color: rgba(109, 140, 188, 0.78);
+}
+
+.light-theme .sticky-context-menu {
+  border-color: rgba(126, 157, 201, 0.72);
+  background: linear-gradient(170deg, rgba(240, 247, 255, 0.98), rgba(229, 240, 255, 0.98));
+  box-shadow: 0 10px 20px rgba(57, 88, 128, 0.16);
+}
+
+.light-theme .sticky-layout {
+  border-top-color: rgba(126, 157, 201, 0.42);
+}
+
+.light-theme .sticky-task-list {
+  scrollbar-color: var(--scroll-thumb) rgba(175, 196, 225, 0.45);
+}
+
+.light-theme .sticky-task-list-frame {
+  border-color: rgba(126, 157, 201, 0.66);
+  background: linear-gradient(180deg, rgba(233, 242, 255, 0.8), rgba(225, 236, 252, 0.72));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.76),
+    inset 0 -1px 0 rgba(161, 186, 222, 0.32);
+}
+
+.light-theme .sticky-task-list-frame::before,
+.light-theme .sticky-task-list-frame::after {
+  background: rgba(175, 196, 225, 0.45);
+}
+
+.light-theme .sticky-task-list::-webkit-scrollbar-track {
+  background: rgba(175, 196, 225, 0.45);
+}
+
+.light-theme .paper-note {
+  border-color: rgba(173, 144, 91, 0.54);
+  background:
+    linear-gradient(180deg, rgba(255, 250, 233, 0.99), rgba(252, 242, 207, 0.97)),
+    repeating-linear-gradient(
+      180deg,
+      rgba(125, 101, 65, 0.09) 0,
+      rgba(125, 101, 65, 0.09) 1px,
+      transparent 1px,
+      transparent 25px
+    );
+  box-shadow:
+    0 14px 24px rgba(106, 84, 44, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.light-theme .paper-note::after {
+  background: linear-gradient(135deg, rgba(255, 255, 247, 0.94), rgba(232, 211, 160, 0.95));
+  box-shadow: -1px 1px 0 rgba(164, 136, 88, 0.34);
+}
+
+.light-theme .paper-note-title-input {
+  color: #5e4523;
+}
+
+.light-theme .paper-note-editor {
+  color: #574220;
+}
+
+.light-theme .paper-note-save-hint {
+  color: rgba(114, 90, 56, 0.66);
 }
 
 @media (max-width: 980px) {
@@ -1533,6 +1888,16 @@ input[type="checkbox"] {
 }
 
 @media (max-width: 980px) {
+  .sticky-manager-fallback-mask {
+    padding: 56px 12px 12px;
+  }
+
+  .sticky-manager-fallback-panel {
+    width: 100%;
+    height: min(560px, calc(100vh - 68px));
+    min-height: 300px;
+  }
+
   .titlebar {
     height: 52px;
   }

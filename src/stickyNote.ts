@@ -4,6 +4,8 @@ import { renderStartupError } from "./startupError";
 
 document.documentElement.classList.add("sticky-note-mode");
 document.body.classList.add("sticky-note-mode");
+document.documentElement.classList.add("sticky-note-manager-mode");
+document.body.classList.add("sticky-note-manager-mode");
 
 const bootstrap = async () => {
   try {

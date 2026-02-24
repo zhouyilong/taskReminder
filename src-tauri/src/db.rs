@@ -130,7 +130,7 @@ impl DbManager {
     pub fn list_active_tasks(&self) -> Result<Vec<Task>, AppError> {
         let conn = self.get_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, description, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at
+            "SELECT id, description, sticky_content, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at
              FROM tasks
              WHERE deleted_at IS NULL AND status != 'COMPLETED'
              ORDER BY created_at ASC",
@@ -142,7 +142,7 @@ impl DbManager {
     pub fn list_completed_tasks(&self) -> Result<Vec<Task>, AppError> {
         let conn = self.get_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, description, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at
+            "SELECT id, description, sticky_content, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at
              FROM tasks
              WHERE deleted_at IS NULL AND status = 'COMPLETED'
              ORDER BY completed_at DESC",
@@ -154,7 +154,7 @@ impl DbManager {
     pub fn get_task(&self, task_id: &str) -> Result<Option<Task>, AppError> {
         let conn = self.get_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, description, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at
+            "SELECT id, description, sticky_content, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at
              FROM tasks WHERE id = ?",
         )?;
         let task = stmt
@@ -217,18 +217,20 @@ impl DbManager {
         Ok(record)
     }
 
-    pub fn create_task(&self, description: &str) -> Result<Task, AppError> {
+    pub fn create_task(&self, description: &str, sticky_content: Option<&str>) -> Result<Task, AppError> {
         let conn = self.get_conn()?;
         let now = now_string();
         let id = Uuid::new_v4().to_string();
+        let note = sticky_content.unwrap_or("").trim().to_string();
         conn.execute(
-            "INSERT INTO tasks (id, description, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at)
-             VALUES (?, ?, 'ONE_TIME', 'PENDING', ?, NULL, NULL, ?, NULL)",
-            params![id, description, now, now],
+            "INSERT INTO tasks (id, description, type, status, created_at, completed_at, reminder_time, sticky_content, updated_at, deleted_at)
+             VALUES (?, ?, 'ONE_TIME', 'PENDING', ?, NULL, NULL, ?, ?, NULL)",
+            params![id, description, now, note, now],
         )?;
         Ok(Task {
             id,
             description: description.to_string(),
+            sticky_content: if note.is_empty() { None } else { Some(note) },
             task_type: "ONE_TIME".to_string(),
             status: "PENDING".to_string(),
             created_at: now.clone(),
@@ -243,13 +245,17 @@ impl DbManager {
         &self,
         task_id: &str,
         description: &str,
+        sticky_content: Option<String>,
         reminder_time: Option<String>,
     ) -> Result<(), AppError> {
         let conn = self.get_conn()?;
         let now = now_string();
+        let note = sticky_content
+            .map(|value| value.trim().to_string())
+            .unwrap_or_default();
         conn.execute(
-            "UPDATE tasks SET description = ?, reminder_time = ?, updated_at = ? WHERE id = ?",
-            params![description, reminder_time, now, task_id],
+            "UPDATE tasks SET description = ?, sticky_content = ?, reminder_time = ?, updated_at = ? WHERE id = ?",
+            params![description, note, reminder_time, now, task_id],
         )?;
         Ok(())
     }
@@ -812,13 +818,14 @@ fn task_from_row(row: &rusqlite::Row<'_>) -> Result<Task, rusqlite::Error> {
     Ok(Task {
         id: row.get(0)?,
         description: row.get(1)?,
-        task_type: row.get(2)?,
-        status: row.get(3)?,
-        created_at: row.get(4)?,
-        completed_at: row.get(5)?,
-        reminder_time: row.get(6)?,
-        updated_at: row.get(7)?,
-        deleted_at: row.get(8)?,
+        sticky_content: row.get::<_, Option<String>>(2)?,
+        task_type: row.get(3)?,
+        status: row.get(4)?,
+        created_at: row.get(5)?,
+        completed_at: row.get(6)?,
+        reminder_time: row.get(7)?,
+        updated_at: row.get(8)?,
+        deleted_at: row.get(9)?,
     })
 }
 

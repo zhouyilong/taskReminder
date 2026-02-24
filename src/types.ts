@@ -7,6 +7,7 @@ export type RecurringMode = "INTERVAL_RANGE" | "DAILY" | "WEEKLY" | "MONTHLY" | 
 export interface Task {
   id: string;
   description: string;
+  stickyContent?: string | null;
   type: TaskType;
   status: TaskStatus;
   createdAt: string;

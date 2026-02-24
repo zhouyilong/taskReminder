@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub struct Task {
     pub id: String,
     pub description: String,
+    pub sticky_content: Option<String>,
     #[serde(rename = "type")]
     pub task_type: String,
     pub status: String,

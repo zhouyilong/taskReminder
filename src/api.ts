@@ -23,10 +23,15 @@ export const api = {
   async listReminderRecords(): Promise<ReminderRecord[]> {
     return invoke("list_reminder_records");
   },
-  async createTask(description: string): Promise<Task> {
-    return invoke("create_task", { description });
+  async createTask(payload: { description: string; stickyContent?: string | null }): Promise<Task> {
+    return invoke("create_task", { payload });
   },
-  async updateTask(task: { id: string; description: string; reminderTime?: string | null }): Promise<void> {
+  async updateTask(task: {
+    id: string;
+    description: string;
+    stickyContent?: string | null;
+    reminderTime?: string | null;
+  }): Promise<void> {
     return invoke("update_task", { task });
   },
   async completeTask(id: string): Promise<void> {
@@ -126,6 +131,9 @@ export const api = {
   },
   async setStickyNoteWindowVisible(visible: boolean): Promise<boolean> {
     return invoke("set_sticky_note_window_visible", { visible });
+  },
+  async forceShowStickyNoteWindow(): Promise<boolean> {
+    return invoke("force_show_sticky_note_window");
   },
   async testWebDav(settings: AppSettings): Promise<{ ok: boolean; message: string }> {
     return invoke("test_webdav", { settings });

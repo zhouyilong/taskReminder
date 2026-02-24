@@ -8,14 +8,12 @@
           class="paper-note-title-input"
           type="text"
           placeholder="便签标题"
-          data-tauri-drag-region="false"
           @mousedown.stop
           @input="handleTitleInput"
         />
         <button
           class="paper-note-close"
           type="button"
-          data-tauri-drag-region="false"
           @mousedown.stop.prevent
           @click.stop="closeNote"
         >
@@ -26,10 +24,12 @@
         v-model="note.content"
         class="paper-note-editor"
         placeholder="在这里写下便签内容..."
-        data-tauri-drag-region="false"
         @mousedown.stop
         @input="handleContentInput"
       />
+      <footer class="paper-note-footer">
+        <span class="paper-note-save-hint">{{ saveHint }}</span>
+      </footer>
     </article>
     <div v-else class="sticky-item-loading">载入便签...</div>
   </div>
@@ -46,6 +46,7 @@ import type { StickyNote } from "./types";
 const note = ref<StickyNote | null>(null);
 const saveHint = ref("自动保存");
 const windowRef = getCurrentWindow();
+const refreshEventName = `sticky-note-item-refresh-${windowRef.label.replace(/^sticky-note-item-/, "")}`;
 const saveTimers = {
   title: 0,
   content: 0
@@ -119,7 +120,16 @@ const handleContentInput = () => {
 };
 
 const closeNote = async () => {
-  await api.closeStickyNoteByWindowLabel(windowRef.label);
+  try {
+    await windowRef.hide();
+  } catch (error) {
+    console.error("[sticky-note-item] 本地隐藏失败", error);
+  }
+  try {
+    await api.closeStickyNoteByWindowLabel(windowRef.label);
+  } catch (error) {
+    console.error("[sticky-note-item] 关闭便签失败", error);
+  }
 };
 
 const loadCurrentNote = async () => {
@@ -130,7 +140,7 @@ const loadCurrentNote = async () => {
 onMounted(async () => {
   applyThemeFromStorage();
   await loadCurrentNote();
-  unlistenRefresh = await listen<StickyNote>("sticky-note-item-refresh", event => {
+  unlistenRefresh = await listen<StickyNote>(refreshEventName, event => {
     note.value = event.payload;
     saveHint.value = "自动保存";
   });
