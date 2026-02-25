@@ -685,6 +685,7 @@ const settingsDraft = reactive<AppSettings>({
   stickyNoteHeight: 520,
   stickyNoteX: null,
   stickyNoteY: null,
+  stickyNoteOpacity: 0.95,
   webdavEnabled: false,
   webdavUrl: "",
   webdavUsername: "",

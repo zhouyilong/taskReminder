@@ -74,6 +74,7 @@ export interface AppSettings {
   stickyNoteHeight: number;
   stickyNoteX?: number | null;
   stickyNoteY?: number | null;
+  stickyNoteOpacity: number;
   webdavEnabled: boolean;
   webdavUrl: string;
   webdavUsername: string;

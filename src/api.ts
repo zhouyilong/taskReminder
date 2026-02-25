@@ -126,6 +126,9 @@ export const api = {
   async closeStickyNoteByWindowLabel(label: string): Promise<void> {
     return invoke("close_sticky_note_by_window_label", { label });
   },
+  async setStickyNoteOpacity(opacity: number): Promise<number> {
+    return invoke("set_sticky_note_opacity", { opacity });
+  },
   async isStickyNoteWindowVisible(): Promise<boolean> {
     return invoke("is_sticky_note_window_visible");
   },

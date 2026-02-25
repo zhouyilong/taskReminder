@@ -16,6 +16,11 @@ pub struct DbManager {
     db_path: PathBuf,
 }
 
+fn normalize_sticky_note_opacity(opacity: Option<f64>) -> f64 {
+    let value = opacity.filter(|v| v.is_finite()).unwrap_or(0.95);
+    value.clamp(0.35, 1.0)
+}
+
 impl DbManager {
     pub fn new(db_path: PathBuf) -> Result<Self, AppError> {
         let manager = SqliteConnectionManager::file(&db_path);
@@ -116,12 +121,12 @@ impl DbManager {
             "INSERT OR IGNORE INTO settings (
                 id, auto_start_enabled, sound_enabled, snooze_minutes,
                 sticky_note_enabled, sticky_note_content, sticky_note_width, sticky_note_height,
-                sticky_note_x, sticky_note_y,
+                sticky_note_x, sticky_note_y, sticky_note_opacity,
                 webdav_enabled, webdav_url, webdav_username, webdav_password, webdav_root_path,
                 webdav_sync_interval_minutes, webdav_last_sync_time, webdav_last_local_change_time,
                 webdav_last_sync_status, webdav_last_sync_error, webdav_device_id, notification_theme
             )
-             VALUES (1, 0, 1, 5, 0, '', 360, 520, NULL, NULL, 0, '', '', '', '', 60, NULL, NULL, NULL, NULL, ?, 'app')",
+             VALUES (1, 0, 1, 5, 0, '', 360, 520, NULL, NULL, 0.95, 0, '', '', '', '', 60, NULL, NULL, NULL, NULL, ?, 'app')",
             [Uuid::new_v4().to_string()],
         )?;
         Ok(())
@@ -217,7 +222,11 @@ impl DbManager {
         Ok(record)
     }
 
-    pub fn create_task(&self, description: &str, sticky_content: Option<&str>) -> Result<Task, AppError> {
+    pub fn create_task(
+        &self,
+        description: &str,
+        sticky_content: Option<&str>,
+    ) -> Result<Task, AppError> {
         let conn = self.get_conn()?;
         let now = now_string();
         let id = Uuid::new_v4().to_string();
@@ -599,9 +608,15 @@ impl DbManager {
         };
         conn.execute(
             "UPDATE tasks
-             SET description = ?, sticky_is_open = 1, updated_at = ?
+             SET description = ?,
+                 sticky_content = CASE
+                     WHEN TRIM(COALESCE(sticky_content, '')) = '' THEN ?
+                     ELSE sticky_content
+                 END,
+                 sticky_is_open = 1,
+                 updated_at = ?
              WHERE id = ?",
-            params![resolved_title, now, task_id],
+            params![resolved_title, resolved_title, now, task_id],
         )?;
         Ok(())
     }
@@ -641,7 +656,7 @@ impl DbManager {
     pub fn load_settings(&self) -> Result<AppSettings, AppError> {
         let conn = self.get_conn()?;
         let sql = "SELECT auto_start_enabled, sound_enabled, snooze_minutes,
-                   sticky_note_enabled, sticky_note_content, sticky_note_width, sticky_note_height, sticky_note_x, sticky_note_y,
+                   sticky_note_enabled, sticky_note_content, sticky_note_width, sticky_note_height, sticky_note_x, sticky_note_y, sticky_note_opacity,
                    webdav_enabled, webdav_url, webdav_username, webdav_password,
                    webdav_root_path, webdav_sync_interval_minutes, webdav_last_sync_time,
                    webdav_last_local_change_time, webdav_last_sync_status, webdav_last_sync_error,
@@ -651,16 +666,17 @@ impl DbManager {
         let row = stmt.query_row([], |row| {
             let sticky_note_width = row.get::<_, Option<i64>>(5)?.unwrap_or(360).max(260);
             let sticky_note_height = row.get::<_, Option<i64>>(6)?.unwrap_or(520).max(320);
-            let webdav_url: String = row.get::<_, Option<String>>(10)?.unwrap_or_default();
-            let webdav_username: String = row.get::<_, Option<String>>(11)?.unwrap_or_default();
-            let webdav_password: String = row.get::<_, Option<String>>(12)?.unwrap_or_default();
-            let webdav_root_path: String = row.get::<_, Option<String>>(13)?.unwrap_or_default();
+            let sticky_note_opacity = normalize_sticky_note_opacity(row.get(9)?);
+            let webdav_url: String = row.get::<_, Option<String>>(11)?.unwrap_or_default();
+            let webdav_username: String = row.get::<_, Option<String>>(12)?.unwrap_or_default();
+            let webdav_password: String = row.get::<_, Option<String>>(13)?.unwrap_or_default();
+            let webdav_root_path: String = row.get::<_, Option<String>>(14)?.unwrap_or_default();
             let webdav_device_id: String = row
-                .get::<_, Option<String>>(19)?
+                .get::<_, Option<String>>(20)?
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or_else(|| Uuid::new_v4().to_string());
             let notification_theme: String = row
-                .get::<_, Option<String>>(20)?
+                .get::<_, Option<String>>(21)?
                 .unwrap_or_else(|| "app".to_string());
             Ok(AppSettings {
                 auto_start_enabled: row.get::<_, i64>(0)? == 1,
@@ -672,16 +688,17 @@ impl DbManager {
                 sticky_note_height,
                 sticky_note_x: row.get(7)?,
                 sticky_note_y: row.get(8)?,
-                webdav_enabled: row.get::<_, i64>(9)? == 1,
+                sticky_note_opacity,
+                webdav_enabled: row.get::<_, i64>(10)? == 1,
                 webdav_url,
                 webdav_username,
                 webdav_password,
                 webdav_root_path,
-                webdav_sync_interval_minutes: row.get(14)?,
-                webdav_last_sync_time: row.get(15)?,
-                webdav_last_local_change_time: row.get(16)?,
-                webdav_last_sync_status: row.get(17)?,
-                webdav_last_sync_error: row.get(18)?,
+                webdav_sync_interval_minutes: row.get(15)?,
+                webdav_last_sync_time: row.get(16)?,
+                webdav_last_local_change_time: row.get(17)?,
+                webdav_last_sync_status: row.get(18)?,
+                webdav_last_sync_error: row.get(19)?,
                 webdav_device_id,
                 notification_theme,
             })
@@ -695,7 +712,7 @@ impl DbManager {
             "UPDATE settings
              SET auto_start_enabled = ?, sound_enabled = ?, snooze_minutes = ?,
                  sticky_note_enabled = ?, sticky_note_content = ?, sticky_note_width = ?, sticky_note_height = ?,
-                 sticky_note_x = ?, sticky_note_y = ?,
+                 sticky_note_x = ?, sticky_note_y = ?, sticky_note_opacity = ?,
                  webdav_enabled = ?, webdav_url = ?, webdav_username = ?, webdav_password = ?,
                  webdav_root_path = ?, webdav_sync_interval_minutes = ?, webdav_last_sync_time = ?,
                  webdav_last_local_change_time = ?, webdav_last_sync_status = ?, webdav_last_sync_error = ?,
@@ -711,6 +728,7 @@ impl DbManager {
                 settings.sticky_note_height.max(320),
                 settings.sticky_note_x,
                 settings.sticky_note_y,
+                normalize_sticky_note_opacity(Some(settings.sticky_note_opacity)),
                 if settings.webdav_enabled { 1 } else { 0 },
                 settings.webdav_url,
                 settings.webdav_username,
@@ -753,6 +771,16 @@ impl DbManager {
             [if enabled { 1 } else { 0 }],
         )?;
         Ok(())
+    }
+
+    pub fn update_sticky_note_opacity(&self, opacity: f64) -> Result<f64, AppError> {
+        let conn = self.get_conn()?;
+        let normalized = normalize_sticky_note_opacity(Some(opacity));
+        conn.execute(
+            "UPDATE settings SET sticky_note_opacity = ? WHERE id = 1",
+            [normalized],
+        )?;
+        Ok(normalized)
     }
 
     pub fn update_sync_status(
@@ -945,6 +973,11 @@ fn migration_scripts() -> Vec<MigrationScript> {
             version: "1.4.5".to_string(),
             description: "merge sticky notes into tasks".to_string(),
             sql: include_str!("../migrations/V1.4.5__merge_sticky_notes_into_tasks.sql"),
+        },
+        MigrationScript {
+            version: "1.4.6".to_string(),
+            description: "add sticky note opacity".to_string(),
+            sql: include_str!("../migrations/V1.4.6__add_sticky_note_opacity.sql"),
         },
     ]
 }

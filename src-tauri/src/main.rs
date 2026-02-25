@@ -39,6 +39,9 @@ const STICKY_NOTE_MIN_WIDTH: i64 = 280;
 const STICKY_NOTE_MIN_HEIGHT: i64 = 320;
 const STICKY_NOTE_ITEM_WIDTH: f64 = 284.0;
 const STICKY_NOTE_ITEM_HEIGHT: f64 = 280.0;
+const STICKY_NOTE_MIN_OPACITY: f64 = 0.35;
+const STICKY_NOTE_MAX_OPACITY: f64 = 1.0;
+const STICKY_NOTE_DEFAULT_OPACITY: f64 = 0.95;
 
 fn into_api<T>(result: Result<T, AppError>) -> ApiResult<T> {
     result.map_err(|e| e.to_string())
@@ -196,11 +199,10 @@ fn list_reminder_records(state: State<AppState>) -> ApiResult<Vec<ReminderRecord
 
 #[tauri::command]
 fn create_task(state: State<AppState>, payload: CreateTaskPayload) -> ApiResult<Task> {
-    let task = into_api(
-        state
-            .db
-            .create_task(payload.description.trim(), payload.sticky_content.as_deref()),
-    )?;
+    let task = into_api(state.db.create_task(
+        payload.description.trim(),
+        payload.sticky_content.as_deref(),
+    ))?;
     into_api(state.sync.notify_local_change())?;
     Ok(task)
 }
@@ -465,6 +467,7 @@ fn create_sticky_note(
 
 #[tauri::command]
 fn save_sticky_note_content(
+    app: tauri::AppHandle,
     state: State<AppState>,
     payload: SaveStickyNoteContentPayload,
 ) -> ApiResult<()> {
@@ -473,12 +476,14 @@ fn save_sticky_note_content(
             .db
             .save_sticky_note_content(&payload.task_id, &payload.content),
     )?;
+    let _ = app.emit("sticky-note-changed", payload.task_id.clone());
     into_api(state.sync.notify_local_change())?;
     Ok(())
 }
 
 #[tauri::command]
 fn update_sticky_note_title(
+    app: tauri::AppHandle,
     state: State<AppState>,
     payload: UpdateStickyNoteTitlePayload,
 ) -> ApiResult<()> {
@@ -487,6 +492,7 @@ fn update_sticky_note_title(
             .db
             .update_sticky_note_title(&payload.task_id, &payload.title),
     )?;
+    let _ = app.emit("sticky-note-changed", payload.task_id.clone());
     into_api(state.sync.notify_local_change())?;
     Ok(())
 }
@@ -536,6 +542,20 @@ fn close_sticky_note_by_window_label(
 }
 
 #[tauri::command]
+fn set_sticky_note_opacity(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    opacity: f64,
+) -> ApiResult<f64> {
+    let normalized = into_api(state.db.update_sticky_note_opacity(opacity))?;
+    if let Ok(settings) = state.db.load_settings() {
+        let _ = app.emit("sticky-note-settings-updated", settings);
+    }
+    into_api(state.sync.notify_local_change())?;
+    Ok(normalized)
+}
+
+#[tauri::command]
 fn is_sticky_note_window_visible(app: tauri::AppHandle) -> ApiResult<bool> {
     if let Some(window) = app.get_webview_window(STICKY_NOTE_LABEL) {
         return window.is_visible().map_err(|err| err.to_string());
@@ -561,16 +581,12 @@ fn set_sticky_note_window_visible(
         if let Some(window) = app.get_webview_window(STICKY_NOTE_LABEL) {
             let _ = window.hide();
         }
-        hide_sticky_note_item_windows(&app);
         let _ = app.emit("sticky-note-visibility", false);
     }
 
     let db = state.db.clone();
     std::thread::spawn(move || {
         let _ = db.update_sticky_note_enabled(visible);
-        if !visible {
-            let _ = db.close_all_sticky_notes();
-        }
     });
 
     let _ = app.emit("sticky-note-changed", "all");
@@ -775,6 +791,13 @@ fn normalize_sticky_note_size(width: i64, height: i64) -> (f64, f64) {
     )
 }
 
+fn normalize_sticky_note_opacity(value: f64) -> f64 {
+    if !value.is_finite() {
+        return STICKY_NOTE_DEFAULT_OPACITY;
+    }
+    value.clamp(STICKY_NOTE_MIN_OPACITY, STICKY_NOTE_MAX_OPACITY)
+}
+
 fn enforce_sticky_item_layer(window: &tauri::WebviewWindow) {
     let _ = window.set_always_on_top(false);
     let _ = window.set_always_on_bottom(true);
@@ -909,23 +932,16 @@ fn show_sticky_note_item_window(app: &tauri::AppHandle, note: &StickyNote) -> Re
     Ok(())
 }
 
-fn hide_sticky_note_item_windows(app: &tauri::AppHandle) {
-    for (label, window) in app.webview_windows() {
-        if label.starts_with(STICKY_NOTE_ITEM_PREFIX) {
-            let _ = window.hide();
-        }
-    }
-}
+fn sync_sticky_note_window(app: &tauri::AppHandle, settings: &AppSettings) -> Result<(), AppError> {
+    let mut sanitized_settings = settings.clone();
+    sanitized_settings.sticky_note_opacity =
+        normalize_sticky_note_opacity(sanitized_settings.sticky_note_opacity);
 
-fn sync_sticky_note_window(
-    app: &tauri::AppHandle,
-    settings: &AppSettings,
-) -> Result<(), AppError> {
     if !settings.sticky_note_enabled {
         if let Some(window) = app.get_webview_window(STICKY_NOTE_LABEL) {
             let _ = window.hide();
         }
-        hide_sticky_note_item_windows(app);
+        let _ = app.emit("sticky-note-settings-updated", sanitized_settings);
         let _ = app.emit("sticky-note-visibility", false);
         return Ok(());
     }
@@ -968,7 +984,7 @@ fn sync_sticky_note_window(
             place_sticky_window_top_right(&app_for_position, &window, width);
         }
     });
-    let _ = window.emit("sticky-note-settings-updated", settings);
+    let _ = app.emit("sticky-note-settings-updated", sanitized_settings);
     let _ = app.emit("sticky-note-visibility", true);
     Ok(())
 }
@@ -988,13 +1004,10 @@ fn main() {
                         api.prevent_close();
                         let _ = window.hide();
                         if let Some(state) = window.app_handle().try_state::<AppState>() {
-                            let _ = state.db.close_all_sticky_notes();
                             let _ = state.db.update_sticky_note_enabled(false);
                             let _ = state.sync.notify_local_change();
                         }
-                        hide_sticky_note_item_windows(&window.app_handle());
                         let _ = window.app_handle().emit("sticky-note-visibility", false);
-                        let _ = window.app_handle().emit("sticky-note-changed", "all");
                     }
                     WindowEvent::Resized(size) => {
                         if let Some(state) = window.app_handle().try_state::<AppState>() {
@@ -1071,6 +1084,7 @@ fn main() {
             move_sticky_note,
             close_sticky_note,
             close_sticky_note_by_window_label,
+            set_sticky_note_opacity,
             is_sticky_note_window_visible,
             set_sticky_note_window_visible,
             force_show_sticky_note_window,

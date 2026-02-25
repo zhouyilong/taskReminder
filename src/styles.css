@@ -32,6 +32,7 @@
   --radius: 16px;
   --radius-sm: 12px;
   --radius-xs: 10px;
+  --sticky-note-opacity: 0.95;
   font-family: "Source Han Sans SC", "PingFang SC", "Noto Sans SC", "Segoe UI", sans-serif;
 }
 
@@ -1146,6 +1147,8 @@ input[type="checkbox"] {
   background: transparent;
   box-shadow: none;
   overflow: hidden;
+  opacity: var(--sticky-note-opacity);
+  transition: opacity 0.16s ease;
 }
 
 .sticky-board::after {
@@ -1194,6 +1197,8 @@ input[type="checkbox"] {
   font-weight: 700;
   letter-spacing: 0.3px;
   text-shadow: 0 1px 2px rgba(6, 12, 26, 0.22);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .sticky-topbar-actions {
@@ -1203,23 +1208,62 @@ input[type="checkbox"] {
   -webkit-app-region: no-drag;
 }
 
-.sticky-ghost-button,
-.sticky-close-window {
+.sticky-opacity-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(185, 208, 245, 0.52);
+  background: linear-gradient(160deg, rgba(20, 41, 82, 0.68), rgba(14, 29, 60, 0.68));
+  box-shadow: inset 0 1px 0 rgba(221, 234, 255, 0.12);
+}
+
+.sticky-opacity-label {
+  font-size: 11px;
+  color: rgba(232, 242, 255, 0.88);
+  white-space: nowrap;
+}
+
+.sticky-opacity-slider {
+  width: 86px;
+  height: 3px;
+  border-radius: 999px;
+  accent-color: rgba(176, 212, 255, 0.96);
+  cursor: pointer;
+}
+
+.sticky-opacity-value {
+  min-width: 34px;
+  text-align: right;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(236, 244, 255, 0.92);
+}
+
+.sticky-icon-button {
+  width: 24px;
   height: 24px;
   border-radius: 999px;
   border: 1px solid rgba(185, 208, 245, 0.62);
   background: linear-gradient(160deg, rgba(22, 44, 88, 0.72), rgba(16, 32, 67, 0.72));
   color: rgba(240, 246, 255, 0.96);
-  padding: 0 10px;
-  font-size: 11px;
-  font-weight: 600;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   box-shadow: inset 0 1px 0 rgba(221, 234, 255, 0.18);
   transition: transform 0.16s ease, background 0.18s ease, border-color 0.18s ease;
 }
 
-.sticky-ghost-button:hover,
-.sticky-close-window:hover {
+.sticky-icon-button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.sticky-icon-button:hover {
   transform: translateY(-1px);
   background: linear-gradient(160deg, rgba(43, 82, 165, 0.78), rgba(31, 61, 126, 0.78));
   border-color: rgba(219, 232, 255, 0.82);
@@ -1262,7 +1306,7 @@ input[type="checkbox"] {
 .sticky-list-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
 }
 
@@ -1596,6 +1640,8 @@ input[type="checkbox"] {
   left: 0;
   top: 0;
   z-index: 1;
+  opacity: var(--sticky-note-opacity);
+  transition: opacity 0.16s ease;
 }
 
 .paper-note::after {
@@ -1810,11 +1856,21 @@ body.sticky-note-manager-mode.light-theme {
   color: rgba(92, 113, 143, 0.8);
 }
 
-.light-theme .sticky-ghost-button,
-.light-theme .sticky-close-window {
+.light-theme .sticky-icon-button {
   background: linear-gradient(160deg, #d8e8fb, #c9ddf6);
   color: #375983;
   border-color: rgba(109, 140, 188, 0.78);
+}
+
+.light-theme .sticky-opacity-control {
+  background: linear-gradient(160deg, #d8e8fb, #c9ddf6);
+  border-color: rgba(109, 140, 188, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
+}
+
+.light-theme .sticky-opacity-label,
+.light-theme .sticky-opacity-value {
+  color: #375983;
 }
 
 .light-theme .sticky-context-menu {

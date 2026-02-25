@@ -3,15 +3,61 @@
     <div class="sticky-topbar" :data-tauri-drag-region="props.embedded ? undefined : ''">
       <div class="sticky-brand">桌面便签</div>
       <div class="sticky-topbar-actions">
-        <button class="sticky-ghost-button" type="button" @click="refreshData">刷新</button>
-        <button class="sticky-close-window" type="button" @click="closeWindow">关闭</button>
+        <div class="sticky-opacity-control" :data-tauri-drag-region="props.embedded ? undefined : 'false'">
+          <span class="sticky-opacity-label">透明度</span>
+          <input
+            v-model.number="stickyOpacity"
+            class="sticky-opacity-slider"
+            type="range"
+            min="0.35"
+            max="1"
+            step="0.01"
+            :data-tauri-drag-region="props.embedded ? undefined : 'false'"
+            @input="handleOpacityInput"
+          />
+          <span class="sticky-opacity-value">{{ stickyOpacityPercent }}%</span>
+        </div>
+        <button
+          class="sticky-icon-button"
+          type="button"
+          title="刷新"
+          :data-tauri-drag-region="props.embedded ? undefined : 'false'"
+          @click="refreshData"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+        <button
+          class="sticky-icon-button"
+          type="button"
+          title="关闭"
+          :data-tauri-drag-region="props.embedded ? undefined : 'false'"
+          @click="closeWindow"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M6 6l12 12M18 6L6 18"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
       </div>
     </div>
 
     <div class="sticky-layout sticky-manager-layout">
       <aside class="sticky-task-panel" :data-tauri-drag-region="props.embedded ? undefined : 'false'">
         <div class="sticky-list-toolbar">
-          <div class="sticky-task-title">便签列表</div>
           <button
             class="sticky-add-note"
             type="button"
@@ -83,7 +129,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { safeStorage } from "./safeStorage";
 import { api } from "./api";
-import type { StickyNote, Task } from "./types";
+import type { AppSettings, StickyNote, Task } from "./types";
 
 const props = withDefaults(defineProps<{ embedded?: boolean }>(), {
   embedded: false
@@ -98,10 +144,14 @@ type NoteListEntry = {
 };
 
 const NOTE_PADDING = 12;
+const MIN_STICKY_OPACITY = 0.35;
+const MAX_STICKY_OPACITY = 1;
+const DEFAULT_STICKY_OPACITY = 0.95;
 const tasks = ref<Task[]>([]);
 const allNotes = ref<StickyNote[]>([]);
 const taskKeyword = ref("");
 const creatingNote = ref(false);
+const stickyOpacity = ref(DEFAULT_STICKY_OPACITY);
 const entryContextMenu = ref({
   visible: false,
   x: 0,
@@ -112,6 +162,7 @@ let storageHandler: ((event: StorageEvent) => void) | null = null;
 let unlistenChanged: UnlistenFn | null = null;
 let unlistenThemeChanged: UnlistenFn | null = null;
 let unlistenSettingsUpdated: UnlistenFn | null = null;
+let stickyOpacityPersistTimer = 0;
 
 const noteEntries = computed<NoteListEntry[]>(() => {
   const taskEntries = tasks.value.map(task => ({
@@ -128,6 +179,7 @@ const filteredEntries = computed(() => {
   }
   return noteEntries.value.filter(entry => entry.title.toLowerCase().includes(keyword));
 });
+const stickyOpacityPercent = computed(() => Math.round(stickyOpacity.value * 100));
 
 const applyTheme = (useLight: boolean) => {
   document.documentElement.classList.toggle("light-theme", useLight);
@@ -136,6 +188,47 @@ const applyTheme = (useLight: boolean) => {
 
 const applyThemeFromStorage = () => {
   applyTheme(safeStorage.getItem("appTheme") === "light");
+};
+
+const normalizeStickyOpacity = (value: number) => {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_STICKY_OPACITY;
+  }
+  return Math.min(MAX_STICKY_OPACITY, Math.max(MIN_STICKY_OPACITY, value));
+};
+
+const applyStickyOpacity = (value: number) => {
+  const normalized = normalizeStickyOpacity(value);
+  stickyOpacity.value = normalized;
+  document.documentElement.style.setProperty("--sticky-note-opacity", normalized.toFixed(2));
+};
+
+const clearStickyOpacityPersistTimer = () => {
+  if (stickyOpacityPersistTimer) {
+    window.clearTimeout(stickyOpacityPersistTimer);
+    stickyOpacityPersistTimer = 0;
+  }
+};
+
+const persistStickyOpacity = async () => {
+  try {
+    const saved = await api.setStickyNoteOpacity(stickyOpacity.value);
+    applyStickyOpacity(saved);
+  } catch (error) {
+    console.error("[sticky-note] 保存透明度失败", error);
+  }
+};
+
+const scheduleStickyOpacityPersist = () => {
+  clearStickyOpacityPersistTimer();
+  stickyOpacityPersistTimer = window.setTimeout(() => {
+    void persistStickyOpacity();
+  }, 180);
+};
+
+const handleOpacityInput = () => {
+  applyStickyOpacity(stickyOpacity.value);
+  scheduleStickyOpacityPersist();
 };
 
 const withInvokeTimeout = async <T,>(
@@ -283,7 +376,11 @@ const closeWindow = async () => {
 
 onMounted(async () => {
   applyThemeFromStorage();
-  await refreshData();
+  const [, settings] = await Promise.all([
+    refreshData(),
+    api.getSettings()
+  ]);
+  applyStickyOpacity(settings.stickyNoteOpacity ?? DEFAULT_STICKY_OPACITY);
   window.addEventListener("click", hideEntryContextMenu);
   window.addEventListener("contextmenu", hideEntryContextMenu);
   storageHandler = event => {
@@ -295,8 +392,8 @@ onMounted(async () => {
   unlistenChanged = await listen("sticky-note-changed", () => {
     void refreshData();
   });
-  unlistenSettingsUpdated = await listen("sticky-note-settings-updated", () => {
-    void refreshData();
+  unlistenSettingsUpdated = await listen<AppSettings>("sticky-note-settings-updated", event => {
+    applyStickyOpacity(event.payload.stickyNoteOpacity ?? DEFAULT_STICKY_OPACITY);
   });
   unlistenThemeChanged = await listen<string>("app-theme-updated", event => {
     applyTheme(event.payload === "light");
@@ -318,5 +415,6 @@ onBeforeUnmount(() => {
   if (unlistenSettingsUpdated) {
     unlistenSettingsUpdated();
   }
+  clearStickyOpacityPersistTimer();
 });
 </script>

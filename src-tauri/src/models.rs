@@ -83,6 +83,7 @@ pub struct AppSettings {
     pub sticky_note_height: i64,
     pub sticky_note_x: Option<f64>,
     pub sticky_note_y: Option<f64>,
+    pub sticky_note_opacity: f64,
     pub webdav_enabled: bool,
     pub webdav_url: String,
     pub webdav_username: String,
