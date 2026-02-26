@@ -11,6 +11,29 @@
           @mousedown.stop
           @input="handleTitleInput"
         />
+        <div class="paper-note-actions">
+          <button
+            class="paper-note-action"
+            type="button"
+            title="新增便签"
+            @mousedown.stop.prevent
+            @click.stop="createSiblingNote"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            </svg>
+          </button>
+          <button
+            class="paper-note-action complete"
+            type="button"
+            title="标记完成并关闭"
+            @mousedown.stop.prevent
+            @click.stop="completeAndCloseNote"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 12.5l4 4 8-8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
         <button
           class="paper-note-close"
           type="button"
@@ -19,6 +42,7 @@
         >
           ×
         </button>
+        </div>
       </header>
       <textarea
         v-model="note.content"
@@ -28,7 +52,12 @@
         @input="handleContentInput"
       />
       <footer class="paper-note-footer">
-        <span class="paper-note-save-hint">{{ saveHint }}</span>
+        <span class="paper-note-save-hint">
+          <template v-if="saveCountdownSeconds > 0">
+            编辑中，<span class="paper-note-save-countdown">{{ saveCountdownSeconds }}</span>秒后自动保存
+          </template>
+          <template v-else>{{ saveHint }}</template>
+        </span>
       </footer>
     </article>
     <div v-else class="sticky-item-loading">载入便签...</div>
@@ -45,10 +74,13 @@ import type { AppSettings, StickyNote } from "./types";
 
 const note = ref<StickyNote | null>(null);
 const saveHint = ref("自动保存");
+const saveCountdownSeconds = ref(0);
 const windowRef = getCurrentWindow();
 const refreshEventName = `sticky-note-item-refresh-${windowRef.label.replace(/^sticky-note-item-/, "")}`;
 const AUTO_SAVE_IDLE_MS = 5000;
+const AUTO_SAVE_IDLE_SECONDS = AUTO_SAVE_IDLE_MS / 1000;
 let saveTimer = 0;
+let saveCountdownTimer = 0;
 let lastSavedTitle = "";
 let lastSavedContent = "";
 const MIN_STICKY_OPACITY = 0.35;
@@ -92,6 +124,19 @@ const clearSaveTimer = () => {
   }
 };
 
+const clearSaveCountdownTimer = () => {
+  if (saveCountdownTimer) {
+    window.clearInterval(saveCountdownTimer);
+    saveCountdownTimer = 0;
+  }
+  saveCountdownSeconds.value = 0;
+};
+
+const clearAutoSaveTrackers = () => {
+  clearSaveTimer();
+  clearSaveCountdownTimer();
+};
+
 const flushPendingSave = async (force = false) => {
   if (!note.value) {
     return;
@@ -101,6 +146,7 @@ const flushPendingSave = async (force = false) => {
     window.clearTimeout(saveTimer);
     saveTimer = 0;
   }
+  clearSaveCountdownTimer();
 
   const nextTitle = normalizeTitle(note.value.title);
   const nextContent = note.value.content;
@@ -140,8 +186,13 @@ const scheduleAutoSave = () => {
   if (!note.value) {
     return;
   }
-  clearSaveTimer();
-  saveHint.value = `编辑中，${AUTO_SAVE_IDLE_MS / 1000}秒后自动保存`;
+  clearAutoSaveTrackers();
+  saveCountdownSeconds.value = AUTO_SAVE_IDLE_SECONDS;
+  saveCountdownTimer = window.setInterval(() => {
+    if (saveCountdownSeconds.value > 1) {
+      saveCountdownSeconds.value -= 1;
+    }
+  }, 1000);
   saveTimer = window.setTimeout(() => {
     void flushPendingSave();
   }, AUTO_SAVE_IDLE_MS);
@@ -162,7 +213,7 @@ const handleContentInput = () => {
 };
 
 const closeNote = async () => {
-  clearSaveTimer();
+  clearAutoSaveTrackers();
   await flushPendingSave(true);
   try {
     await windowRef.hide();
@@ -176,6 +227,61 @@ const closeNote = async () => {
   }
 };
 
+const resolveCurrentLogicalPosition = async () => {
+  try {
+    const [scaleFactor, position] = await Promise.all([
+      windowRef.scaleFactor(),
+      windowRef.outerPosition()
+    ]);
+    return {
+      x: position.x / scaleFactor,
+      y: position.y / scaleFactor
+    };
+  } catch (error) {
+    console.warn("[sticky-note-item] 读取当前窗口位置失败", error);
+    return null;
+  }
+};
+
+const createSiblingNote = async () => {
+  const position = await resolveCurrentLogicalPosition();
+  const payload: { defaultX?: number; defaultY?: number } = {};
+  if (position) {
+    payload.defaultX = Math.max(0, position.x + 26);
+    payload.defaultY = Math.max(0, position.y + 22);
+  }
+  try {
+    await api.createStickyNote(payload);
+  } catch (error) {
+    console.error("[sticky-note-item] 新增便签失败", error);
+    const message = error instanceof Error ? error.message : String(error);
+    alert(`新增便签失败：${message}`);
+  }
+};
+
+const completeAndCloseNote = async () => {
+  if (!note.value) {
+    return;
+  }
+  const taskId = note.value.taskId;
+  clearAutoSaveTrackers();
+  await flushPendingSave(true);
+  try {
+    await api.completeTask(taskId);
+  } catch (error) {
+    console.error("[sticky-note-item] 标记完成失败", error);
+    const message = error instanceof Error ? error.message : String(error);
+    alert(`标记完成失败：${message}`);
+    return;
+  }
+  try {
+    await api.closeStickyNote(taskId);
+  } catch (error) {
+    console.error("[sticky-note-item] 关闭已完成便签失败", error);
+    await closeNote();
+  }
+};
+
 const loadCurrentNote = async () => {
   const row = await api.getStickyNoteByWindowLabel(windowRef.label);
   note.value = row;
@@ -186,6 +292,7 @@ const loadCurrentNote = async () => {
     lastSavedTitle = "";
     lastSavedContent = "";
   }
+  clearSaveCountdownTimer();
   saveHint.value = "自动保存";
 };
 
@@ -200,7 +307,7 @@ onMounted(async () => {
     applyStickyOpacity(DEFAULT_STICKY_OPACITY);
   }
   unlistenRefresh = await listen<StickyNote>(refreshEventName, event => {
-    clearSaveTimer();
+    clearAutoSaveTrackers();
     note.value = event.payload;
     lastSavedTitle = normalizeTitle(event.payload.title);
     lastSavedContent = event.payload.content;
@@ -233,6 +340,6 @@ onBeforeUnmount(() => {
   if (unlistenSettingsUpdated) {
     unlistenSettingsUpdated();
   }
-  clearSaveTimer();
+  clearAutoSaveTrackers();
 });
 </script>

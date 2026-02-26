@@ -36,6 +36,8 @@ const TASK_COLUMNS: &[&str] = &[
     "sticky_content",
     "sticky_pos_x",
     "sticky_pos_y",
+    "sticky_width",
+    "sticky_height",
     "sticky_is_open",
     "updated_at",
     "deleted_at",
@@ -625,6 +627,8 @@ fn ensure_sync_columns(conn: &Connection) -> Result<(), AppError> {
     ensure_column(conn, "tasks", "sticky_content", "TEXT NOT NULL DEFAULT ''")?;
     ensure_column(conn, "tasks", "sticky_pos_x", "REAL NOT NULL DEFAULT 48")?;
     ensure_column(conn, "tasks", "sticky_pos_y", "REAL NOT NULL DEFAULT 76")?;
+    ensure_column(conn, "tasks", "sticky_width", "REAL NOT NULL DEFAULT 284")?;
+    ensure_column(conn, "tasks", "sticky_height", "REAL NOT NULL DEFAULT 280")?;
     ensure_column(
         conn,
         "tasks",

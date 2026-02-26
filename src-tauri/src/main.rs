@@ -39,6 +39,8 @@ const STICKY_NOTE_MIN_WIDTH: i64 = 280;
 const STICKY_NOTE_MIN_HEIGHT: i64 = 320;
 const STICKY_NOTE_ITEM_WIDTH: f64 = 284.0;
 const STICKY_NOTE_ITEM_HEIGHT: f64 = 280.0;
+const STICKY_NOTE_ITEM_MIN_WIDTH: f64 = 220.0;
+const STICKY_NOTE_ITEM_MIN_HEIGHT: f64 = 180.0;
 const STICKY_NOTE_MIN_OPACITY: f64 = 0.35;
 const STICKY_NOTE_MAX_OPACITY: f64 = 1.0;
 const STICKY_NOTE_DEFAULT_OPACITY: f64 = 0.95;
@@ -437,11 +439,25 @@ fn create_sticky_note(
     state: State<AppState>,
     payload: CreateStickyNotePayload,
 ) -> ApiResult<StickyNote> {
-    let note = into_api(state.db.create_custom_sticky_note(
+    into_api(create_custom_sticky_note_via_app(
+        &app,
+        state.inner(),
         payload.title.as_deref().unwrap_or(""),
         payload.default_x,
         payload.default_y,
-    ))?;
+    ))
+}
+
+pub(crate) fn create_custom_sticky_note_via_app(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    title: &str,
+    default_x: Option<f64>,
+    default_y: Option<f64>,
+) -> Result<StickyNote, AppError> {
+    let note = state
+        .db
+        .create_custom_sticky_note(title, default_x, default_y)?;
     {
         let app_for_show = app.clone();
         let note_for_show = note.clone();
@@ -563,12 +579,11 @@ fn is_sticky_note_window_visible(app: tauri::AppHandle) -> ApiResult<bool> {
     Ok(false)
 }
 
-#[tauri::command]
-fn set_sticky_note_window_visible(
-    app: tauri::AppHandle,
-    state: State<AppState>,
+pub(crate) fn trigger_sticky_note_window_visibility(
+    app: &tauri::AppHandle,
+    db: DbManager,
     visible: bool,
-) -> ApiResult<bool> {
+) {
     if visible {
         let app_for_show = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -584,12 +599,19 @@ fn set_sticky_note_window_visible(
         let _ = app.emit("sticky-note-visibility", false);
     }
 
-    let db = state.db.clone();
     std::thread::spawn(move || {
         let _ = db.update_sticky_note_enabled(visible);
     });
-
     let _ = app.emit("sticky-note-changed", "all");
+}
+
+#[tauri::command]
+fn set_sticky_note_window_visible(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    visible: bool,
+) -> ApiResult<bool> {
+    trigger_sticky_note_window_visibility(&app, state.db.clone(), visible);
     Ok(visible)
 }
 
@@ -910,7 +932,7 @@ fn show_sticky_note_item_window(app: &tauri::AppHandle, note: &StickyNote) -> Re
         WebviewWindowBuilder::new(app, &label, WebviewUrl::App("sticky-note-item.html".into()))
             .title("便签")
             .inner_size(STICKY_NOTE_ITEM_WIDTH, STICKY_NOTE_ITEM_HEIGHT)
-            .min_inner_size(220.0, 180.0)
+            .min_inner_size(STICKY_NOTE_ITEM_MIN_WIDTH, STICKY_NOTE_ITEM_MIN_HEIGHT)
             .resizable(true)
             .focused(false)
             .decorations(false)
@@ -923,6 +945,9 @@ fn show_sticky_note_item_window(app: &tauri::AppHandle, note: &StickyNote) -> Re
             .map_err(|e| AppError::System(e.to_string()))?
     };
 
+    let width = note.width.max(STICKY_NOTE_ITEM_MIN_WIDTH);
+    let height = note.height.max(STICKY_NOTE_ITEM_MIN_HEIGHT);
+    let _ = window.set_size(LogicalSize::new(width, height));
     let _ = window.set_position(LogicalPosition::new(note.pos_x, note.pos_y));
     let _ = window.set_shadow(false);
     enforce_sticky_item_layer(&window);
@@ -1050,6 +1075,19 @@ fn main() {
                             let scale_factor = window.scale_factor().unwrap_or(1.0);
                             let logical = position.to_logical::<f64>(scale_factor);
                             let _ = state.db.move_sticky_note(&note_id, logical.x, logical.y);
+                        }
+                    }
+                    WindowEvent::Resized(size) => {
+                        if let (Some(state), Some(note_id)) =
+                            (window.app_handle().try_state::<AppState>(), note_id)
+                        {
+                            let scale_factor = window.scale_factor().unwrap_or(1.0);
+                            let logical = size.to_logical::<f64>(scale_factor);
+                            let _ = state.db.resize_sticky_note(
+                                &note_id,
+                                logical.width,
+                                logical.height,
+                            );
                         }
                     }
                     _ => {}

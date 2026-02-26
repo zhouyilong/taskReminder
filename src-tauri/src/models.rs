@@ -66,6 +66,8 @@ pub struct StickyNote {
     pub content: String,
     pub pos_x: f64,
     pub pos_y: f64,
+    pub width: f64,
+    pub height: f64,
     pub is_open: bool,
     pub created_at: String,
     pub updated_at: String,

@@ -4,8 +4,10 @@ use tauri::{
     AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 
+use crate::create_custom_sticky_note_via_app;
 use crate::paths;
 use crate::state::AppState;
+use crate::trigger_sticky_note_window_visibility;
 
 fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -29,6 +31,24 @@ fn show_main(app: &AppHandle) {
     }
 }
 
+fn show_sticky_notes(app: &AppHandle) {
+    if let Some(state) = app.try_state::<AppState>() {
+        trigger_sticky_note_window_visibility(app, state.db.clone(), true);
+    } else {
+        let _ = app.emit("tray-open-sticky-notes", ());
+    }
+}
+
+fn create_sticky_note(app: &AppHandle) {
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Err(err) = create_custom_sticky_note_via_app(app, state.inner(), "", None, None) {
+            eprintln!("[tray] 新建便签失败: {}", err);
+        }
+    } else {
+        let _ = app.emit("tray-create-sticky-note", ());
+    }
+}
+
 pub fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
     let dev_tag = if paths::is_dev_mode() {
         " [开发]"
@@ -37,7 +57,8 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
     };
     let menu = MenuBuilder::new(app)
         .text("open", format!("打开{}", dev_tag))
-        .text("cloud", "云同步（WebDAV）...")
+        .text("open_sticky", "打开桌面便签")
+        .text("new_note", "新建便签")
         .text("sync_now", "立即同步")
         .separator()
         .text("quit", "退出")
@@ -50,9 +71,11 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
             "open" => {
                 show_main(app);
             }
-            "cloud" => {
-                let _ = app.emit("open-sync-settings", ());
-                show_main(app);
+            "open_sticky" => {
+                show_sticky_notes(app);
+            }
+            "new_note" => {
+                create_sticky_note(app);
             }
             "sync_now" => {
                 if let Some(state) = app.try_state::<AppState>() {

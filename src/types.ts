@@ -59,6 +59,8 @@ export interface StickyNote {
   content: string;
   posX: number;
   posY: number;
+  width: number;
+  height: number;
   isOpen: boolean;
   createdAt: string;
   updatedAt: string;

@@ -130,7 +130,17 @@
         <Transition name="fade" mode="out-in">
           <div v-if="activeTab === 'tasks'" key="tasks" class="tab-panel">
           <div class="section-heading">
-            <div class="section-title">待办事项</div>
+            <div class="section-heading-main">
+              <div class="section-title">待办事项</div>
+              <button
+                class="button secondary task-note-entry"
+                type="button"
+                :disabled="creatingQuickStickyNote"
+                @click="handleCreateStickyNoteFromTasks"
+              >
+                {{ creatingQuickStickyNote ? "新建中..." : "新建便签" }}
+              </button>
+            </div>
             <span class="section-meta">共 {{ tasks.length }} 条任务</span>
           </div>
           <div class="subsection-title">任务表单</div>
@@ -619,6 +629,7 @@ const reminderRecords = ref<ReminderRecord[]>([]);
 const syncStatus = ref<SyncStatus | null>(null);
 const stickyNoteWindowVisible = ref(false);
 const stickyNoteSwitching = ref(false);
+const creatingQuickStickyNote = ref(false);
 
 const recurringModeOptions: { value: RecurringMode; label: string }[] = [
   { value: "INTERVAL_RANGE", label: "区间间隔" },
@@ -1097,6 +1108,36 @@ const toggleTask = async (task: Task) => {
   await refreshAll();
 };
 
+const openTaskStickyNote = async (task: Task) => {
+  try {
+    await api.openStickyNote({
+      taskId: task.id,
+      title: task.description
+    });
+  } catch (error) {
+    console.error("[main] 打开便签卡片失败", error);
+    const message = error instanceof Error ? error.message : String(error);
+    alert(`打开便签卡片失败：${message}`);
+  }
+};
+
+const handleCreateStickyNoteFromTasks = async () => {
+  if (creatingQuickStickyNote.value) {
+    return;
+  }
+  creatingQuickStickyNote.value = true;
+  try {
+    await api.createStickyNote({});
+    await refreshAll();
+  } catch (error) {
+    console.error("[main] 快速新建便签失败", error);
+    const message = error instanceof Error ? error.message : String(error);
+    alert(`新建便签失败：${message}`);
+  } finally {
+    creatingQuickStickyNote.value = false;
+  }
+};
+
 const openEditTask = (task: Task) => {
   editTaskId.value = task.id;
   editTaskDescription.value = task.description;
@@ -1440,6 +1481,7 @@ const hideContextMenu = () => {
 const openTaskMenu = (event: MouseEvent, task: Task) => {
   showContextMenu(event, [
     { label: "编辑", action: () => openEditTask(task) },
+    { label: "打开便签卡片", action: () => openTaskStickyNote(task) },
     {
       label: task.status === "COMPLETED" ? "取消完成" : "标记完成",
       action: () => toggleTask(task),
@@ -1549,6 +1591,21 @@ onMounted(async () => {
     });
   } catch (error) {
     console.error("[main] 监听 open-sync-settings 失败", error);
+  }
+  try {
+    await listen("tray-open-sticky-notes", async () => {
+      await api.setStickyNoteWindowVisible(true);
+      await refreshStickyWindowState();
+    });
+  } catch (error) {
+    console.error("[main] 监听 tray-open-sticky-notes 失败", error);
+  }
+  try {
+    await listen("tray-create-sticky-note", async () => {
+      await handleCreateStickyNoteFromTasks();
+    });
+  } catch (error) {
+    console.error("[main] 监听 tray-create-sticky-note 失败", error);
   }
   try {
     await listen<boolean>("sticky-note-visibility", event => {
