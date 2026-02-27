@@ -957,6 +957,21 @@ fn show_sticky_note_item_window(app: &tauri::AppHandle, note: &StickyNote) -> Re
     Ok(())
 }
 
+fn restore_open_sticky_note_items(app: &tauri::AppHandle, db: &DbManager) -> Result<(), AppError> {
+    let mut notes = db.list_sticky_notes()?;
+    notes.retain(|note| note.is_open);
+    notes.sort_by(|a, b| a.updated_at.cmp(&b.updated_at));
+    for note in notes {
+        if let Err(err) = show_sticky_note_item_window(app, &note) {
+            eprintln!(
+                "[sticky-note] 启动恢复便签窗口失败 task_id={} err={}",
+                note.task_id, err
+            );
+        }
+    }
+    Ok(())
+}
+
 fn sync_sticky_note_window(app: &tauri::AppHandle, settings: &AppSettings) -> Result<(), AppError> {
     let mut sanitized_settings = settings.clone();
     sanitized_settings.sticky_note_opacity =
@@ -1181,16 +1196,11 @@ fn main() {
                 sync.start()?;
                 maintenance::start_maintenance(db.clone());
 
-                let mut settings = db.load_settings()?;
+                let settings = db.load_settings()?;
                 if settings.auto_start_enabled {
                     let _ = autostart::enable_autostart();
                 }
-                if settings.sticky_note_enabled {
-                    settings.sticky_note_enabled = false;
-                    let _ = db.update_sticky_note_enabled(false);
-                    let _ = db.close_all_sticky_notes();
-                }
-                sync_sticky_note_window(&app_handle, &settings)?;
+                let db_for_restore = db.clone();
 
                 let state = AppState {
                     db,
@@ -1199,6 +1209,8 @@ fn main() {
                     notification_snapshot: snapshot,
                 };
                 app.manage(state);
+                sync_sticky_note_window(&app_handle, &settings)?;
+                restore_open_sticky_note_items(&app_handle, &db_for_restore)?;
                 Ok(())
             })();
             result.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)

@@ -144,6 +144,10 @@ type NoteListEntry = {
 };
 
 const NOTE_PADDING = 12;
+const NOTE_DEFAULT_X = 48;
+const NOTE_DEFAULT_Y = 76;
+const NOTE_STACK_OFFSET_X = 26;
+const NOTE_STACK_OFFSET_Y = 22;
 const MIN_STICKY_OPACITY = 0.35;
 const MAX_STICKY_OPACITY = 1;
 const DEFAULT_STICKY_OPACITY = 0.95;
@@ -267,10 +271,32 @@ const isNoteOpen = (noteId: string) => {
 };
 
 const buildDefaultPosition = () => {
-  const opened = allNotes.value.filter(note => note.isOpen).length;
+  const openedNotes = allNotes.value.filter(note => note.isOpen);
+  if (openedNotes.length === 0) {
+    return {
+      x: NOTE_DEFAULT_X,
+      y: NOTE_DEFAULT_Y
+    };
+  }
+  const anchor = openedNotes.reduce((current, note) => {
+    if (note.posY < current.posY) {
+      return note;
+    }
+    if (note.posY === current.posY && note.posX > current.posX) {
+      return note;
+    }
+    return current;
+  });
+  const nextY = anchor.posY - NOTE_STACK_OFFSET_Y;
+  if (nextY >= NOTE_PADDING) {
+    return {
+      x: Math.max(NOTE_PADDING, anchor.posX),
+      y: nextY
+    };
+  }
   return {
-    x: NOTE_PADDING + (opened % 9) * 28,
-    y: NOTE_PADDING + (opened % 9) * 22
+    x: Math.max(NOTE_PADDING, anchor.posX + NOTE_STACK_OFFSET_X),
+    y: NOTE_PADDING
   };
 };
 

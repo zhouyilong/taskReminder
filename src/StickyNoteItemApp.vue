@@ -248,7 +248,7 @@ const createSiblingNote = async () => {
   const payload: { defaultX?: number; defaultY?: number } = {};
   if (position) {
     payload.defaultX = Math.max(0, position.x + 26);
-    payload.defaultY = Math.max(0, position.y + 22);
+    payload.defaultY = Math.max(0, position.y - 22);
   }
   try {
     await api.createStickyNote(payload);
