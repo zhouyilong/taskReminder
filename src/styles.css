@@ -1594,434 +1594,261 @@ input[type="checkbox"] {
 }
 
 .paper-note {
-  position: absolute;
-  width: 284px;
-  height: 280px;
-  border-radius: 14px;
-  border: 1px solid rgba(166, 138, 88, 0.58);
-  background:
-    linear-gradient(180deg, rgba(255, 249, 229, 0.98), rgba(251, 239, 198, 0.96)),
-    repeating-linear-gradient(
-      180deg,
-      rgba(124, 101, 64, 0.1) 0,
-      rgba(124, 101, 64, 0.1) 1px,
-      transparent 1px,
-      transparent 25px
-    );
-  box-shadow:
-    0 14px 26px rgba(32, 24, 10, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.42);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  pointer-events: auto;
-}
-
-.paper-note::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(120% 70% at 10% -12%, rgba(255, 255, 255, 0.32), transparent 58%),
-    repeating-linear-gradient(
-      45deg,
-      rgba(126, 99, 57, 0.03) 0,
-      rgba(126, 99, 57, 0.03) 2px,
-      transparent 2px,
-      transparent 8px
-    );
-  pointer-events: none;
-}
-
-.sticky-note-item-root {
-  width: 100%;
-  height: 100%;
-}
-
-.sticky-item-loading {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: rgba(209, 222, 247, 0.88);
-  font-size: 12px;
-}
-
-.paper-note-window {
   position: relative;
   width: 100%;
   height: 100%;
-  left: 0;
-  top: 0;
-  z-index: 1;
-  opacity: var(--sticky-note-opacity);
-  transition: opacity 0.16s ease;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(172deg, #17171b 0%, #131318 54%, #101016 100%);
+  border: 1px solid #2a2a2e;
+  border-radius: 20px;
+  box-shadow:
+    0 16px 30px rgba(0, 0, 0, 0.42),
+    11px 12px 0 -7px rgba(10, 10, 14, 0.72),
+    12px 22px 28px -14px rgba(0, 0, 0, 0.56);
+  overflow: hidden;
+  transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
-.paper-note::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 28px;
-  height: 28px;
-  clip-path: polygon(0 0, 100% 0, 100% 100%);
-  background: linear-gradient(135deg, rgba(255, 253, 242, 0.92), rgba(230, 206, 148, 0.95));
-  box-shadow: -1px 1px 0 rgba(157, 126, 75, 0.35);
-  pointer-events: none;
+.sticky-note-item-root {
+  width: 100vw;
+  height: 100vh;
 }
 
-.paper-pin {
-  position: absolute;
-  top: 7px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  background: radial-gradient(circle at 36% 30%, #fff7f4, #cf5248 56%, #8d221d);
-  box-shadow: 0 3px 8px rgba(58, 24, 20, 0.34);
-  z-index: 3;
+.paper-note-window {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
 }
 
 .paper-note-header {
-  padding: 12px 9px 4px;
+  height: 56px;
+  padding: 0 14px 0 20px;
   display: flex;
   align-items: center;
-  gap: 6px;
   justify-content: space-between;
-  cursor: grab;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  background: transparent;
   user-select: none;
-  border-bottom: 1px solid rgba(164, 133, 83, 0.44);
-  background: linear-gradient(180deg, rgba(255, 250, 236, 0.85), rgba(255, 245, 213, 0.2));
+  cursor: move;
 }
 
-.paper-note-header:active {
-  cursor: grabbing;
+.paper-note-header-pinned {
+  cursor: default;
+}
+
+.paper-note-header-pinned .paper-note-title-input {
+  cursor: text;
 }
 
 .paper-note-title-input {
+  flex: 1;
+  min-width: 0;
   border: none;
   background: transparent;
-  color: #5e4420;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.2;
-  width: 100%;
+  color: #fafaf9;
+  font-family: "Fraunces", serif;
+  font-size: 20px;
+  font-weight: 600;
   outline: none;
   padding: 0;
-  min-width: 0;
-  -webkit-app-region: no-drag;
+  margin-right: 12px;
 }
 
 .paper-note-title-input::placeholder {
-  color: rgba(108, 85, 52, 0.62);
+  color: #4a4a50;
 }
 
 .paper-note-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
-.paper-note-action {
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  border: 1px solid rgba(170, 142, 92, 0.56);
-  background: rgba(255, 248, 224, 0.9);
-  color: #7d5a2d;
-  cursor: pointer;
-  display: inline-flex;
+.paper-note-action,
+.paper-note-close {
+  width: 26px;
+  height: 26px;
+  display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-  -webkit-app-region: no-drag;
-  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+  border: none;
+  background: transparent;
+  color: #8e8e93;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-.paper-note-action svg {
-  width: 14px;
-  height: 14px;
+.paper-note-action svg,
+.paper-note-close svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.8;
 }
 
-.paper-note-action:hover {
-  transform: translateY(-1px);
-  border-color: rgba(136, 111, 64, 0.62);
-  background: rgba(255, 236, 194, 0.96);
-  color: #6e5129;
+.paper-note-action.pin {
+  color: #8c8d93;
+}
+
+.pin-icon-pencil {
+  width: 17px;
+  height: 17px;
+  overflow: visible;
+}
+
+.paper-note-action.pin.active .pin-icon-pencil {
+  filter: drop-shadow(0 0 1px rgba(99, 102, 241, 0.55));
+}
+
+.paper-note-action:hover,
+.paper-note-close:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fafaf9;
+}
+
+.paper-note-action.active {
+  color: #6366f1;
+  background: rgba(99, 102, 241, 0.1);
 }
 
 .paper-note-action.complete:hover {
-  border-color: rgba(77, 133, 70, 0.6);
-  background: rgba(221, 245, 216, 0.94);
-  color: #2f6a2a;
-}
-
-.paper-note-close {
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  border: 1px solid rgba(170, 142, 92, 0.56);
-  background: rgba(255, 248, 224, 0.9);
-  color: #7d5a2d;
-  cursor: pointer;
-  font-size: 15px;
-  line-height: 1;
-  flex-shrink: 0;
-  -webkit-app-region: no-drag;
-  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+  color: #32d583;
+  background: rgba(50, 213, 131, 0.1);
 }
 
 .paper-note-close:hover {
-  transform: translateY(-1px);
-  border-color: rgba(181, 96, 72, 0.62);
-  background: rgba(255, 232, 216, 0.95);
-  color: #97443a;
+  color: #e85a4f;
+  background: rgba(232, 90, 79, 0.1);
 }
 
 .paper-note-editor {
+  flex: 1;
   border: none;
   background: transparent;
+  padding: 16px 20px;
+  color: #fafaf9;
+  font-size: 15px;
+  line-height: 1.6;
   resize: none;
-  flex: 1;
-  min-height: 0;
-  padding: 7px 11px 8px;
-  color: #58411f;
-  font-size: 14px;
-  line-height: 1.62;
-  font-weight: 500;
-  caret-color: #8a632d;
   outline: none;
-}
-
-.paper-note-editor::-webkit-scrollbar {
-  width: 8px;
-}
-
-.paper-note-editor::-webkit-scrollbar-thumb {
-  background: rgba(156, 125, 74, 0.44);
-  border-radius: 999px;
+  font-family: "DM Sans", "Inter", sans-serif;
 }
 
 .paper-note-editor::placeholder {
-  color: rgba(114, 90, 56, 0.56);
+  color: #4a4a50;
+}
+
+.paper-note-editor::-webkit-scrollbar {
+  width: 5px;
+}
+.paper-note-editor::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
 }
 
 .paper-note-footer {
-  min-height: 22px;
-  padding: 0 10px 7px;
+  height: 48px;
+  padding: 0 20px;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.paper-note-footer-right {
+  display: flex;
+  align-items: center;
+}
+
+/* Invisible resize edges */
+.resize-edge {
+  position: absolute;
+  z-index: 100;
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+}
+.resize-top { top: 0; left: 0; right: 0; height: 10px; cursor: n-resize; }
+.resize-bottom { bottom: 0; left: 0; right: 0; height: 10px; cursor: s-resize; }
+.resize-left { top: 0; bottom: 0; left: 0; width: 10px; cursor: w-resize; }
+.resize-right { top: 0; bottom: 0; right: 0; width: 10px; cursor: e-resize; }
+.resize-top-left { top: 0; left: 0; width: 12px; height: 12px; cursor: nw-resize; }
+.resize-top-right { top: 0; right: 0; width: 12px; height: 12px; cursor: ne-resize; }
+.resize-bottom-left { bottom: 0; left: 0; width: 12px; height: 12px; cursor: sw-resize; }
+.resize-bottom-right { bottom: 0; right: 0; width: 12px; height: 12px; cursor: se-resize; }
+
+.paper-note-time {
+  font-size: 12px;
+  color: #6b6b70;
+  font-weight: 500;
+  font-family: "DM Sans", "Inter", sans-serif;
 }
 
 .paper-note-save-hint {
-  font-size: 11px;
-  color: rgba(116, 91, 54, 0.7);
-  letter-spacing: 0.2px;
+  font-size: 12px;
+  color: #6b6b70;
+  font-style: italic;
+  font-family: "DM Sans", "Inter", sans-serif;
 }
 
 .paper-note-save-countdown {
-  display: inline-block;
-  min-width: 1.1em;
-  text-align: center;
-  font-weight: 700;
-  color: rgba(132, 76, 35, 0.92);
-  animation: paper-note-countdown-pulse 0.85s ease-out infinite;
-}
-
-@keyframes paper-note-countdown-pulse {
-  0% {
-    transform: scale(1);
-  }
-  40% {
-    transform: scale(1.18);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-
-.paper-note-header,
-.paper-note-editor,
-.paper-note-footer {
-  position: relative;
-  z-index: 1;
-}
-
-.light-theme .sticky-board {
-  background: transparent;
-  box-shadow: none;
-}
-
-.light-theme .sticky-board::after {
-  background:
-    radial-gradient(120% 115% at 10% -8%, rgba(123, 166, 236, 0.28), transparent 52%),
-    linear-gradient(165deg, #edf3fc, #e5edf9 54%, #dde7f5 100%);
-  box-shadow: 0 16px 28px rgba(57, 88, 128, 0.16);
-}
-
-.light-theme #sticky-note {
-  background: transparent;
-}
-
-html.sticky-note-manager-mode,
-body.sticky-note-manager-mode {
-  background: transparent !important;
-}
-
-html.sticky-note-manager-mode.light-theme,
-body.sticky-note-manager-mode.light-theme {
-  background: transparent !important;
-}
-
-.light-theme .sticky-topbar,
-.light-theme .sticky-task-title {
-  color: rgba(35, 57, 87, 0.95);
-}
-
-.light-theme .sticky-task-panel,
-.light-theme .sticky-canvas {
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-}
-
-.light-theme .sticky-task-item {
-  background: linear-gradient(164deg, #dbe9fb, #cddff6);
-  border-color: rgba(126, 155, 199, 0.74);
-  color: #29466f;
-}
-
-.light-theme .sticky-task-item:hover {
-  background: linear-gradient(164deg, #cde1fb, #bdd4f5);
-  border-color: rgba(102, 136, 188, 0.84);
-}
-
-.light-theme .sticky-task-item.active {
-  background: linear-gradient(164deg, #b8d3f8, #a8c7f3);
-  border-color: rgba(91, 126, 184, 0.92);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.78),
-    0 5px 12px rgba(66, 100, 153, 0.16);
-}
-
-.light-theme .sticky-item-close {
-  background: linear-gradient(165deg, #d8e6f8, #ccdef5);
-  border-color: rgba(126, 155, 199, 0.72);
-  color: #2d496f;
-}
-
-.light-theme .sticky-add-note {
-  background: linear-gradient(160deg, #d8e8fb, #c9ddf6);
-  color: #375983;
-  border-color: rgba(109, 140, 188, 0.78);
-}
-
-.light-theme .sticky-task-search {
-  background: #eaf2ff;
-  color: #2f4d77;
-  border-color: rgba(122, 153, 199, 0.82);
-}
-
-.light-theme .sticky-task-search::placeholder,
-.light-theme .sticky-task-empty,
-.light-theme .sticky-canvas-empty {
-  color: rgba(92, 113, 143, 0.8);
-}
-
-.light-theme .sticky-icon-button {
-  background: linear-gradient(160deg, #d8e8fb, #c9ddf6);
-  color: #375983;
-  border-color: rgba(109, 140, 188, 0.78);
-}
-
-.light-theme .sticky-opacity-control {
-  background: linear-gradient(160deg, #d8e8fb, #c9ddf6);
-  border-color: rgba(109, 140, 188, 0.72);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
-}
-
-.light-theme .sticky-opacity-label,
-.light-theme .sticky-opacity-value {
-  color: #375983;
-}
-
-.light-theme .sticky-context-menu {
-  border-color: rgba(126, 157, 201, 0.72);
-  background: linear-gradient(170deg, rgba(240, 247, 255, 0.98), rgba(229, 240, 255, 0.98));
-  box-shadow: 0 10px 20px rgba(57, 88, 128, 0.16);
-}
-
-.light-theme .sticky-layout {
-  border-top-color: rgba(126, 157, 201, 0.42);
-}
-
-.light-theme .sticky-task-list {
-  scrollbar-color: var(--scroll-thumb) rgba(175, 196, 225, 0.45);
-}
-
-.light-theme .sticky-task-list-frame {
-  border-color: rgba(126, 157, 201, 0.66);
-  background: linear-gradient(180deg, rgba(233, 242, 255, 0.8), rgba(225, 236, 252, 0.72));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.76),
-    inset 0 -1px 0 rgba(161, 186, 222, 0.32);
-}
-
-.light-theme .sticky-task-list-frame::before,
-.light-theme .sticky-task-list-frame::after {
-  background: rgba(175, 196, 225, 0.45);
-}
-
-.light-theme .sticky-task-list::-webkit-scrollbar-track {
-  background: rgba(175, 196, 225, 0.45);
+  color: #e85a4f;
+  font-weight: 600;
 }
 
 .light-theme .paper-note {
-  border-color: rgba(173, 144, 91, 0.54);
-  background:
-    linear-gradient(180deg, rgba(255, 250, 233, 0.99), rgba(252, 242, 207, 0.97)),
-    repeating-linear-gradient(
-      180deg,
-      rgba(125, 101, 65, 0.09) 0,
-      rgba(125, 101, 65, 0.09) 1px,
-      transparent 1px,
-      transparent 25px
-    );
+  background: #ffffff;
+  border-color: #e4e4e7;
   box-shadow:
-    0 14px 24px rgba(106, 84, 44, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    0 12px 24px rgba(0, 0, 0, 0.08),
+    8px 10px 0 -6px rgba(226, 230, 238, 0.96),
+    8px 18px 20px -14px rgba(0, 0, 0, 0.14);
 }
 
-.light-theme .paper-note::after {
-  background: linear-gradient(135deg, rgba(255, 255, 247, 0.94), rgba(232, 211, 160, 0.95));
-  box-shadow: -1px 1px 0 rgba(164, 136, 88, 0.34);
+.light-theme .paper-note-header {
+  border-bottom-color: #f4f4f5;
 }
 
 .light-theme .paper-note-title-input {
-  color: #5e4523;
+  color: #18181b;
 }
 
-.light-theme .paper-note-action {
-  border-color: rgba(168, 137, 82, 0.54);
-  background: rgba(255, 247, 224, 0.92);
-  color: #7a5a2c;
+.light-theme .paper-note-title-input::placeholder {
+  color: #a1a1aa;
+}
+
+.light-theme .paper-note-action,
+.light-theme .paper-note-close {
+  color: #71717a;
+}
+
+.light-theme .paper-note-action:hover,
+.light-theme .paper-note-close:hover {
+  background: #f4f4f5;
+  color: #18181b;
 }
 
 .light-theme .paper-note-editor {
-  color: #574220;
+  color: #18181b;
 }
 
+.light-theme .paper-note-editor::placeholder {
+  color: #d4d4d8;
+}
+
+.light-theme .paper-note-editor::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.light-theme .paper-note-footer {
+  border-top-color: #f4f4f5;
+}
+
+.light-theme .paper-note-time,
 .light-theme .paper-note-save-hint {
-  color: rgba(114, 90, 56, 0.66);
-}
-
-.light-theme .paper-note-save-countdown {
-  color: rgba(132, 78, 35, 0.86);
+  color: #71717a;
 }
 
 @media (max-width: 980px) {
@@ -2165,3 +1992,6 @@ body.sticky-note-manager-mode.light-theme {
 .light-theme .modal-mask {
   background: rgba(15, 23, 42, 0.32);
 }
+
+
+

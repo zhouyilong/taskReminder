@@ -36,7 +36,7 @@
           </svg>
         </button>
         <button
-          class="sticky-icon-button"
+          class="sticky-icon-button close"
           type="button"
           title="关闭"
           :data-tauri-drag-region="props.embedded ? undefined : 'false'"

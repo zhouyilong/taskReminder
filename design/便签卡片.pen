@@ -1,0 +1,417 @@
+{
+  "version": "2.8",
+  "children": [
+    {
+      "type": "frame",
+      "id": "bi8Au",
+      "x": 0,
+      "y": 0,
+      "name": "Frame",
+      "clip": true,
+      "width": 800,
+      "height": 600,
+      "fill": "#FFFFFF",
+      "layout": "none"
+    },
+    {
+      "type": "frame",
+      "id": "Vd2bm",
+      "x": 900,
+      "y": 100,
+      "name": "Desktop Sticky Note",
+      "width": 340,
+      "fill": "$card",
+      "cornerRadius": "$radiusCard",
+      "stroke": {
+        "align": "inside",
+        "thickness": 1,
+        "fill": "$border"
+      },
+      "effect": {
+        "type": "shadow",
+        "shadowType": "outer",
+        "color": "#00000040",
+        "offset": {
+          "x": 0,
+          "y": 8
+        },
+        "blur": 24
+      },
+      "layout": "vertical",
+      "gap": 20,
+      "padding": 24,
+      "children": [
+        {
+          "type": "frame",
+          "id": "0hg2j",
+          "name": "header",
+          "width": "fill_container",
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "ZuBPk",
+              "name": "title",
+              "fill": "$foreground",
+              "content": "Meeting Ideas",
+              "fontFamily": "Fraunces",
+              "fontSize": 20,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "NczBJ",
+              "name": "actions",
+              "gap": 14,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon_font",
+                  "id": "WzLtu",
+                  "name": "pinIcon",
+                  "width": 20,
+                  "height": 20,
+                  "iconFontName": "pin",
+                  "iconFontFamily": "lucide",
+                  "fill": "$mutedForeground"
+                },
+                {
+                  "type": "icon_font",
+                  "id": "VTD50",
+                  "name": "plusDark",
+                  "width": 20,
+                  "height": 20,
+                  "iconFontName": "plus",
+                  "iconFontFamily": "lucide",
+                  "fill": "$mutedForeground"
+                },
+                {
+                  "type": "icon_font",
+                  "id": "4RTUg",
+                  "name": "checkDark",
+                  "width": 20,
+                  "height": 20,
+                  "iconFontName": "check",
+                  "iconFontFamily": "lucide",
+                  "fill": "$mutedForeground"
+                },
+                {
+                  "type": "icon_font",
+                  "id": "ri4hz",
+                  "name": "closeIcon",
+                  "width": 20,
+                  "height": 20,
+                  "iconFontName": "x",
+                  "iconFontFamily": "lucide",
+                  "fill": "$mutedForeground"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "line",
+          "id": "KoQyJ",
+          "name": "divider",
+          "width": "fill_container",
+          "height": 1,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          }
+        },
+        {
+          "type": "text",
+          "id": "QBS6K",
+          "name": "content",
+          "fill": "$foreground",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "1. Redesign the dashboard layout for better clarity.\n2. Add a new 'Quick Add' feature for sticky notes.\n3. Improve the search functionality with filters.\n4. Update the mobile app with a dark theme option.\n\nDon't forget to review the feedback from the QA team by Friday!",
+          "lineHeight": 1.6,
+          "fontFamily": "DM Sans",
+          "fontSize": 15
+        },
+        {
+          "type": "frame",
+          "id": "pQzwi",
+          "name": "footer",
+          "width": "fill_container",
+          "padding": [
+            12,
+            0,
+            0,
+            0
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "Wguam",
+              "name": "dateText",
+              "fill": "$mutedForeground",
+              "content": "Mar 2, 10:45 AM",
+              "fontFamily": "DM Sans",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "wCOoE",
+              "name": "savingDark",
+              "fill": "$mutedForeground",
+              "content": "Saving...",
+              "fontFamily": "$fontSecondary",
+              "fontSize": 13,
+              "fontWeight": "normal",
+              "fontStyle": "italic"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "Q6KeR",
+      "x": 1340,
+      "y": 100,
+      "name": "Light Mode Sticky Note",
+      "width": 340,
+      "fill": "$lightCard",
+      "cornerRadius": "$radiusCard",
+      "stroke": {
+        "align": "inside",
+        "thickness": 1,
+        "fill": "$lightBorder"
+      },
+      "effect": {
+        "type": "shadow",
+        "shadowType": "outer",
+        "color": "#0000000D",
+        "offset": {
+          "x": 0,
+          "y": 4
+        },
+        "blur": 16
+      },
+      "layout": "vertical",
+      "gap": 20,
+      "padding": 24,
+      "children": [
+        {
+          "type": "frame",
+          "id": "ow6Od",
+          "name": "header",
+          "width": "fill_container",
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "4vY7L",
+              "name": "title",
+              "fill": "$lightForeground",
+              "content": "Meeting Ideas",
+              "fontFamily": "Inter",
+              "fontSize": 20,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "31m4O",
+              "name": "actions",
+              "gap": 14,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon_font",
+                  "id": "ONJLh",
+                  "name": "pinIcon",
+                  "width": 20,
+                  "height": 20,
+                  "iconFontName": "pin",
+                  "iconFontFamily": "lucide",
+                  "fill": "$lightIcon"
+                },
+                {
+                  "type": "icon_font",
+                  "id": "yEaBU",
+                  "name": "plusLight",
+                  "width": 20,
+                  "height": 20,
+                  "iconFontName": "plus",
+                  "iconFontFamily": "lucide",
+                  "fill": "$lightIcon"
+                },
+                {
+                  "type": "icon_font",
+                  "id": "4fUjs",
+                  "name": "checkLight",
+                  "width": 20,
+                  "height": 20,
+                  "iconFontName": "check",
+                  "iconFontFamily": "lucide",
+                  "fill": "$lightIcon"
+                },
+                {
+                  "type": "icon_font",
+                  "id": "QNjFR",
+                  "name": "closeIcon",
+                  "width": 20,
+                  "height": 20,
+                  "iconFontName": "x",
+                  "iconFontFamily": "lucide",
+                  "fill": "$lightIcon"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "line",
+          "id": "S0be6",
+          "name": "divider",
+          "width": "fill_container",
+          "height": 1,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$lightBorder"
+          }
+        },
+        {
+          "type": "text",
+          "id": "ve8py",
+          "name": "content",
+          "fill": "$lightForeground",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "1. Redesign the dashboard layout for better clarity.\n2. Add a new 'Quick Add' feature for sticky notes.\n3. Improve the search functionality with filters.\n4. Update the mobile app with a dark theme option.\n\nDon't forget to review the feedback from the QA team by Friday!",
+          "lineHeight": 1.6,
+          "fontFamily": "Inter",
+          "fontSize": 15
+        },
+        {
+          "type": "frame",
+          "id": "Xc6Qq",
+          "name": "footer",
+          "width": "fill_container",
+          "padding": [
+            12,
+            0,
+            0,
+            0
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "NYlKn",
+              "name": "dateText",
+              "fill": "$lightMuted",
+              "content": "Mar 2, 10:45 AM",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "s7rJH",
+              "name": "savingLight",
+              "fill": "$lightMuted",
+              "content": "Saving...",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal",
+              "fontStyle": "italic"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variables": {
+    "background": {
+      "type": "color",
+      "value": "#0B0B0E"
+    },
+    "border": {
+      "type": "color",
+      "value": "#2A2A2E"
+    },
+    "card": {
+      "type": "color",
+      "value": "#16161A"
+    },
+    "elevated": {
+      "type": "color",
+      "value": "#1A1A1E"
+    },
+    "error": {
+      "type": "color",
+      "value": "#E85A4F"
+    },
+    "fontPrimary": {
+      "type": "string",
+      "value": "Fraunces"
+    },
+    "fontSecondary": {
+      "type": "string",
+      "value": "DM Sans"
+    },
+    "foreground": {
+      "type": "color",
+      "value": "#FAFAF9"
+    },
+    "mutedForeground": {
+      "type": "color",
+      "value": "#6B6B70"
+    },
+    "primary": {
+      "type": "color",
+      "value": "#6366F1"
+    },
+    "radiusCard": {
+      "type": "number",
+      "value": 20
+    },
+    "radiusPill": {
+      "type": "number",
+      "value": 31
+    },
+    "success": {
+      "type": "color",
+      "value": "#32D583"
+    },
+    "lightBorder": {
+      "type": "color",
+      "value": "#E4E4E7"
+    },
+    "lightCard": {
+      "type": "color",
+      "value": "#FFFFFF"
+    },
+    "lightError": {
+      "type": "color",
+      "value": "#EF4444"
+    },
+    "lightForeground": {
+      "type": "color",
+      "value": "#18181B"
+    },
+    "lightIcon": {
+      "type": "color",
+      "value": "#A1A1AA"
+    },
+    "lightMuted": {
+      "type": "color",
+      "value": "#71717A"
+    },
+    "lightPrimary": {
+      "type": "color",
+      "value": "#2563EB"
+    }
+  }
+}
