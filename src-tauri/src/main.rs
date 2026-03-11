@@ -33,10 +33,7 @@ use crate::state::AppState;
 use crate::sync::CloudSyncService;
 
 type ApiResult<T> = Result<T, String>;
-const STICKY_NOTE_LABEL: &str = "sticky-note";
 const STICKY_NOTE_ITEM_PREFIX: &str = "sticky-note-item-";
-const STICKY_NOTE_MIN_WIDTH: i64 = 280;
-const STICKY_NOTE_MIN_HEIGHT: i64 = 320;
 const STICKY_NOTE_ITEM_WIDTH: f64 = 284.0;
 const STICKY_NOTE_ITEM_HEIGHT: f64 = 280.0;
 const STICKY_NOTE_ITEM_MIN_WIDTH: f64 = 220.0;
@@ -376,15 +373,13 @@ fn save_settings(
     settings: AppSettings,
 ) -> ApiResult<()> {
     into_api(state.db.save_settings(&settings))?;
-    into_api(sync_sticky_note_window(&app, &settings))?;
+    let mut sanitized_settings = settings.clone();
+    sanitized_settings.sticky_note_opacity =
+        normalize_sticky_note_opacity(sanitized_settings.sticky_note_opacity);
+    let _ = app.emit("sticky-note-settings-updated", sanitized_settings);
     into_api(state.sync.update_settings())?;
     into_api(state.sync.notify_local_change())?;
     Ok(())
-}
-
-#[tauri::command]
-fn list_sticky_notes(state: State<AppState>) -> ApiResult<Vec<StickyNote>> {
-    into_api(state.db.list_sticky_notes())
 }
 
 #[tauri::command]
@@ -555,70 +550,6 @@ fn close_sticky_note_by_window_label(
     let _ = app.emit("sticky-note-changed", note_id);
     into_api(state.sync.notify_local_change())?;
     Ok(())
-}
-
-#[tauri::command]
-fn set_sticky_note_opacity(
-    app: tauri::AppHandle,
-    state: State<AppState>,
-    opacity: f64,
-) -> ApiResult<f64> {
-    let normalized = into_api(state.db.update_sticky_note_opacity(opacity))?;
-    if let Ok(settings) = state.db.load_settings() {
-        let _ = app.emit("sticky-note-settings-updated", settings);
-    }
-    into_api(state.sync.notify_local_change())?;
-    Ok(normalized)
-}
-
-#[tauri::command]
-fn is_sticky_note_window_visible(app: tauri::AppHandle) -> ApiResult<bool> {
-    if let Some(window) = app.get_webview_window(STICKY_NOTE_LABEL) {
-        return window.is_visible().map_err(|err| err.to_string());
-    }
-    Ok(false)
-}
-
-pub(crate) fn trigger_sticky_note_window_visibility(
-    app: &tauri::AppHandle,
-    db: DbManager,
-    visible: bool,
-) {
-    if visible {
-        let app_for_show = app.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Err(err) = show_sticky_note_window_fallback(&app_for_show) {
-                eprintln!("[sticky-note] 开窗失败: {}", err);
-                let _ = app_for_show.emit("sticky-note-visibility", false);
-            }
-        });
-    } else {
-        if let Some(window) = app.get_webview_window(STICKY_NOTE_LABEL) {
-            let _ = window.hide();
-        }
-        let _ = app.emit("sticky-note-visibility", false);
-    }
-
-    std::thread::spawn(move || {
-        let _ = db.update_sticky_note_enabled(visible);
-    });
-    let _ = app.emit("sticky-note-changed", "all");
-}
-
-#[tauri::command]
-fn set_sticky_note_window_visible(
-    app: tauri::AppHandle,
-    state: State<AppState>,
-    visible: bool,
-) -> ApiResult<bool> {
-    trigger_sticky_note_window_visibility(&app, state.db.clone(), visible);
-    Ok(visible)
-}
-
-#[tauri::command]
-fn force_show_sticky_note_window(app: tauri::AppHandle) -> ApiResult<bool> {
-    show_sticky_note_window_fallback(&app).map_err(|e| e.to_string())?;
-    Ok(true)
 }
 
 #[tauri::command]
@@ -806,13 +737,6 @@ fn add_minutes(minutes: i64) -> String {
     dt.format("%Y-%m-%dT%H:%M:%S").to_string()
 }
 
-fn normalize_sticky_note_size(width: i64, height: i64) -> (f64, f64) {
-    (
-        width.max(STICKY_NOTE_MIN_WIDTH) as f64,
-        height.max(STICKY_NOTE_MIN_HEIGHT) as f64,
-    )
-}
-
 fn normalize_sticky_note_opacity(value: f64) -> f64 {
     if !value.is_finite() {
         return STICKY_NOTE_DEFAULT_OPACITY;
@@ -845,82 +769,6 @@ fn promote_sticky_item_over_peers(app: &tauri::AppHandle, target_label: &str) {
     if let Some(target) = app.get_webview_window(target_label) {
         reorder_sticky_item_layer(&target);
     }
-}
-
-fn place_sticky_window_top_right(
-    app: &tauri::AppHandle,
-    window: &tauri::WebviewWindow,
-    width: f64,
-) {
-    const MARGIN_X: f64 = 12.0;
-    const MARGIN_Y: f64 = 68.0;
-    let monitor = app
-        .get_webview_window("main")
-        .and_then(|main_window| {
-            main_window
-                .current_monitor()
-                .ok()
-                .flatten()
-                .or_else(|| main_window.primary_monitor().ok().flatten())
-        })
-        .or_else(|| {
-            window
-                .current_monitor()
-                .ok()
-                .flatten()
-                .or_else(|| window.primary_monitor().ok().flatten())
-        });
-    if let Some(monitor) = monitor {
-        let scale_factor = monitor.scale_factor();
-        let monitor_position = monitor.position().to_logical::<f64>(scale_factor);
-        let monitor_size = monitor.size().to_logical::<f64>(scale_factor);
-        let x = monitor_position.x + (monitor_size.width - width - MARGIN_X).max(0.0);
-        let y = monitor_position.y + MARGIN_Y;
-        let _ = window.set_position(LogicalPosition::new(x, y));
-        return;
-    }
-    let _ = window.set_position(LogicalPosition::new(120.0, 120.0));
-}
-
-fn show_sticky_note_window_fallback(app: &tauri::AppHandle) -> Result<(), AppError> {
-    let width = 360.0;
-    let height = 520.0;
-    let window = if let Some(existing) = app.get_webview_window(STICKY_NOTE_LABEL) {
-        existing
-    } else {
-        WebviewWindowBuilder::new(
-            app,
-            STICKY_NOTE_LABEL,
-            WebviewUrl::App("sticky-note.html".into()),
-        )
-        .title("桌面便签")
-        .inner_size(width, height)
-        .min_inner_size(STICKY_NOTE_MIN_WIDTH as f64, STICKY_NOTE_MIN_HEIGHT as f64)
-        .resizable(true)
-        .decorations(false)
-        .transparent(true)
-        .shadow(false)
-        .always_on_top(false)
-        .skip_taskbar(true)
-        .visible(false)
-        .build()
-        .map_err(|e| AppError::System(e.to_string()))?
-    };
-    let _ = window.set_size(LogicalSize::new(width, height));
-    let _ = window.set_shadow(false);
-    window.show().map_err(|e| AppError::System(e.to_string()))?;
-    let _ = window.unminimize();
-    let _ = window.set_always_on_top(false);
-    let _ = window.set_always_on_bottom(false);
-    let _ = window.set_skip_taskbar(true);
-    let app_for_position = app.clone();
-    tauri::async_runtime::spawn(async move {
-        if let Some(window) = app_for_position.get_webview_window(STICKY_NOTE_LABEL) {
-            place_sticky_window_top_right(&app_for_position, &window, width);
-        }
-    });
-    let _ = app.emit("sticky-note-visibility", true);
-    Ok(())
 }
 
 fn show_sticky_note_item_window(app: &tauri::AppHandle, note: &StickyNote) -> Result<(), AppError> {
@@ -972,63 +820,6 @@ fn restore_open_sticky_note_items(app: &tauri::AppHandle, db: &DbManager) -> Res
     Ok(())
 }
 
-fn sync_sticky_note_window(app: &tauri::AppHandle, settings: &AppSettings) -> Result<(), AppError> {
-    let mut sanitized_settings = settings.clone();
-    sanitized_settings.sticky_note_opacity =
-        normalize_sticky_note_opacity(sanitized_settings.sticky_note_opacity);
-
-    if !settings.sticky_note_enabled {
-        if let Some(window) = app.get_webview_window(STICKY_NOTE_LABEL) {
-            let _ = window.hide();
-        }
-        let _ = app.emit("sticky-note-settings-updated", sanitized_settings);
-        let _ = app.emit("sticky-note-visibility", false);
-        return Ok(());
-    }
-
-    let (width, height) =
-        normalize_sticky_note_size(settings.sticky_note_width, settings.sticky_note_height);
-    let window = if let Some(existing) = app.get_webview_window(STICKY_NOTE_LABEL) {
-        existing
-    } else {
-        WebviewWindowBuilder::new(
-            app,
-            STICKY_NOTE_LABEL,
-            WebviewUrl::App("sticky-note.html".into()),
-        )
-        .title("桌面便签")
-        .inner_size(width, height)
-        .min_inner_size(STICKY_NOTE_MIN_WIDTH as f64, STICKY_NOTE_MIN_HEIGHT as f64)
-        .resizable(true)
-        .decorations(false)
-        .transparent(true)
-        .shadow(false)
-        .always_on_top(false)
-        .skip_taskbar(true)
-        .visible(false)
-        .build()
-        .map_err(|e| AppError::System(e.to_string()))?
-    };
-
-    let _ = window.set_size(LogicalSize::new(width, height));
-    let _ = window.set_resizable(true);
-    let _ = window.set_shadow(false);
-    window.show().map_err(|e| AppError::System(e.to_string()))?;
-    let _ = window.unminimize();
-    let _ = window.set_always_on_top(false);
-    let _ = window.set_always_on_bottom(false);
-    let _ = window.set_skip_taskbar(true);
-    let app_for_position = app.clone();
-    tauri::async_runtime::spawn(async move {
-        if let Some(window) = app_for_position.get_webview_window(STICKY_NOTE_LABEL) {
-            place_sticky_window_top_right(&app_for_position, &window, width);
-        }
-    });
-    let _ = app.emit("sticky-note-settings-updated", sanitized_settings);
-    let _ = app.emit("sticky-note-visibility", true);
-    Ok(())
-}
-
 fn main() {
     tauri::Builder::default()
         .on_window_event(|window, event| {
@@ -1036,37 +827,6 @@ fn main() {
                 if let WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
                     let _ = window.hide();
-                }
-            }
-            if window.label() == STICKY_NOTE_LABEL {
-                match event {
-                    WindowEvent::CloseRequested { api, .. } => {
-                        api.prevent_close();
-                        let _ = window.hide();
-                        if let Some(state) = window.app_handle().try_state::<AppState>() {
-                            let _ = state.db.update_sticky_note_enabled(false);
-                            let _ = state.sync.notify_local_change();
-                        }
-                        let _ = window.app_handle().emit("sticky-note-visibility", false);
-                    }
-                    WindowEvent::Resized(size) => {
-                        if let Some(state) = window.app_handle().try_state::<AppState>() {
-                            let scale_factor = window.scale_factor().unwrap_or(1.0);
-                            let logical = size.to_logical::<f64>(scale_factor);
-                            let _ = state.db.update_sticky_note_size(
-                                logical.width.round() as i64,
-                                logical.height.round() as i64,
-                            );
-                        }
-                    }
-                    WindowEvent::Moved(position) => {
-                        if let Some(state) = window.app_handle().try_state::<AppState>() {
-                            let scale_factor = window.scale_factor().unwrap_or(1.0);
-                            let logical = position.to_logical::<f64>(scale_factor);
-                            let _ = state.db.update_sticky_note_position(logical.x, logical.y);
-                        }
-                    }
-                    _ => {}
                 }
             }
             if window.label().starts_with(STICKY_NOTE_ITEM_PREFIX) {
@@ -1128,7 +888,6 @@ fn main() {
             delete_reminder_records,
             get_settings,
             save_settings,
-            list_sticky_notes,
             get_sticky_note_by_window_label,
             open_sticky_note,
             create_sticky_note,
@@ -1137,10 +896,6 @@ fn main() {
             move_sticky_note,
             close_sticky_note,
             close_sticky_note_by_window_label,
-            set_sticky_note_opacity,
-            is_sticky_note_window_visible,
-            set_sticky_note_window_visible,
-            force_show_sticky_note_window,
             test_webdav,
             sync_now,
             set_autostart,
@@ -1209,7 +964,6 @@ fn main() {
                     notification_snapshot: snapshot,
                 };
                 app.manage(state);
-                sync_sticky_note_window(&app_handle, &settings)?;
                 restore_open_sticky_note_items(&app_handle, &db_for_restore)?;
                 Ok(())
             })();

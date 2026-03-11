@@ -80,9 +80,6 @@ export const api = {
   async saveSettings(settings: AppSettings): Promise<void> {
     return invoke("save_settings", { settings });
   },
-  async listStickyNotes(): Promise<StickyNote[]> {
-    return invoke("list_sticky_notes");
-  },
   async getStickyNoteByWindowLabel(label: string): Promise<StickyNote | null> {
     return invoke("get_sticky_note_by_window_label", { label });
   },
@@ -125,18 +122,6 @@ export const api = {
   },
   async closeStickyNoteByWindowLabel(label: string): Promise<void> {
     return invoke("close_sticky_note_by_window_label", { label });
-  },
-  async setStickyNoteOpacity(opacity: number): Promise<number> {
-    return invoke("set_sticky_note_opacity", { opacity });
-  },
-  async isStickyNoteWindowVisible(): Promise<boolean> {
-    return invoke("is_sticky_note_window_visible");
-  },
-  async setStickyNoteWindowVisible(visible: boolean): Promise<boolean> {
-    return invoke("set_sticky_note_window_visible", { visible });
-  },
-  async forceShowStickyNoteWindow(): Promise<boolean> {
-    return invoke("force_show_sticky_note_window");
   },
   async testWebDav(settings: AppSettings): Promise<{ ok: boolean; message: string }> {
     return invoke("test_webdav", { settings });

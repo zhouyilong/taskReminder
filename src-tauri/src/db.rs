@@ -724,16 +724,6 @@ impl DbManager {
         Ok(())
     }
 
-    pub fn close_all_sticky_notes(&self) -> Result<(), AppError> {
-        let conn = self.get_conn()?;
-        let now = now_string();
-        conn.execute(
-            "UPDATE tasks SET sticky_is_open = 0, updated_at = ? WHERE sticky_is_open = 1",
-            [now],
-        )?;
-        Ok(())
-    }
-
     pub fn load_settings(&self) -> Result<AppSettings, AppError> {
         let conn = self.get_conn()?;
         let sql = "SELECT auto_start_enabled, sound_enabled, snooze_minutes,
@@ -825,43 +815,6 @@ impl DbManager {
             ],
         )?;
         Ok(())
-    }
-
-    pub fn update_sticky_note_size(&self, width: i64, height: i64) -> Result<(), AppError> {
-        let conn = self.get_conn()?;
-        conn.execute(
-            "UPDATE settings SET sticky_note_width = ?, sticky_note_height = ? WHERE id = 1",
-            params![width.max(260), height.max(320)],
-        )?;
-        Ok(())
-    }
-
-    pub fn update_sticky_note_position(&self, x: f64, y: f64) -> Result<(), AppError> {
-        let conn = self.get_conn()?;
-        conn.execute(
-            "UPDATE settings SET sticky_note_x = ?, sticky_note_y = ? WHERE id = 1",
-            params![x, y],
-        )?;
-        Ok(())
-    }
-
-    pub fn update_sticky_note_enabled(&self, enabled: bool) -> Result<(), AppError> {
-        let conn = self.get_conn()?;
-        conn.execute(
-            "UPDATE settings SET sticky_note_enabled = ? WHERE id = 1",
-            [if enabled { 1 } else { 0 }],
-        )?;
-        Ok(())
-    }
-
-    pub fn update_sticky_note_opacity(&self, opacity: f64) -> Result<f64, AppError> {
-        let conn = self.get_conn()?;
-        let normalized = normalize_sticky_note_opacity(Some(opacity));
-        conn.execute(
-            "UPDATE settings SET sticky_note_opacity = ? WHERE id = 1",
-            [normalized],
-        )?;
-        Ok(normalized)
     }
 
     pub fn update_sync_status(

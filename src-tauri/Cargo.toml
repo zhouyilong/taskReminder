@@ -1,6 +1,6 @@
 [package]
 name = "task_reminder_app"
-version = "1.4.5"
+version = "1.4.6"
 edition = "2021"
 
 [build-dependencies]
@@ -30,4 +30,3 @@ windows = { version = "0.52", features = ["UI_ViewManagement", "Win32_Graphics_G
 [features]
 # 使用 Tauri 的自定义协议功能（生产构建或 devPath 指向远程 URL 时需要）
 custom-protocol = ["tauri/custom-protocol"]
-

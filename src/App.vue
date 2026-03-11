@@ -23,10 +23,10 @@
         </button>
         <button
           class="icon-button"
-          :class="{ active: stickyNoteWindowVisible }"
           type="button"
-          :title="stickyNoteToggleTitle"
-          @click="toggleStickyNoteWindow"
+          :title="creatingQuickStickyNote ? '新建便签处理中...' : '新建便签'"
+          :disabled="creatingQuickStickyNote"
+          @click="handleCreateStickyNote"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M5 3h10l4 4v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
@@ -132,14 +132,6 @@
           <div class="section-heading">
             <div class="section-heading-main">
               <div class="section-title">待办事项</div>
-              <button
-                class="button secondary task-note-entry"
-                type="button"
-                :disabled="creatingQuickStickyNote"
-                @click="handleCreateStickyNoteFromTasks"
-              >
-                {{ creatingQuickStickyNote ? "新建中..." : "新建便签" }}
-              </button>
             </div>
             <span class="section-meta">共 {{ tasks.length }} 条任务</span>
           </div>
@@ -627,8 +619,6 @@ const completedTasks = ref<Task[]>([]);
 const recurringTasks = ref<RecurringTask[]>([]);
 const reminderRecords = ref<ReminderRecord[]>([]);
 const syncStatus = ref<SyncStatus | null>(null);
-const stickyNoteWindowVisible = ref(false);
-const stickyNoteSwitching = ref(false);
 const creatingQuickStickyNote = ref(false);
 
 const recurringModeOptions: { value: RecurringMode; label: string }[] = [
@@ -752,12 +742,6 @@ const syncStatusLabel = computed(() => {
 });
 
 const uiScalePercent = computed(() => Math.round(uiScale.value * 100));
-const stickyNoteToggleTitle = computed(() => {
-  if (stickyNoteSwitching.value) {
-    return "桌面便签处理中...";
-  }
-  return stickyNoteWindowVisible.value ? "关闭桌面便签" : "打开桌面便签";
-});
 
 const tasksTotalPages = computed(() => {
   return Math.max(1, Math.ceil(tasks.value.length / tasksPageSize.value));
@@ -1121,7 +1105,7 @@ const openTaskStickyNote = async (task: Task) => {
   }
 };
 
-const handleCreateStickyNoteFromTasks = async () => {
+const handleCreateStickyNote = async () => {
   if (creatingQuickStickyNote.value) {
     return;
   }
@@ -1310,85 +1294,6 @@ const openWebdav = async () => {
   webdavOpen.value = true;
 };
 
-const withInvokeTimeout = async <T,>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  timeoutMessage: string
-): Promise<T> => {
-  let timer = 0;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timer = window.setTimeout(() => {
-          reject(new Error(timeoutMessage));
-        }, timeoutMs);
-      })
-    ]);
-  } finally {
-    if (timer) {
-      window.clearTimeout(timer);
-    }
-  }
-};
-
-const readStickyWindowVisibleSafely = async () => {
-  try {
-    return await withInvokeTimeout(
-      api.isStickyNoteWindowVisible(),
-      2500,
-      "查询桌面便签状态超时"
-    );
-  } catch (error) {
-    console.warn("[main] 查询桌面便签状态失败，改为使用本地状态兜底", error);
-    return null as boolean | null;
-  }
-};
-
-const refreshStickyWindowState = async () => {
-  const visible = await readStickyWindowVisibleSafely();
-  if (visible !== null) {
-    stickyNoteWindowVisible.value = visible;
-  }
-};
-
-const toggleStickyNoteWindow = async () => {
-  if (stickyNoteSwitching.value) {
-    return;
-  }
-  stickyNoteSwitching.value = true;
-  try {
-    const currentVisible = await readStickyWindowVisibleSafely();
-    const shouldClose = currentVisible ?? stickyNoteWindowVisible.value;
-    if (shouldClose) {
-      stickyNoteWindowVisible.value = await withInvokeTimeout(
-        api.setStickyNoteWindowVisible(false),
-        4000,
-        "关闭桌面便签超时"
-      );
-      return;
-    }
-
-    await withInvokeTimeout(
-      api.setStickyNoteWindowVisible(true),
-      5000,
-      "打开桌面便签超时"
-    );
-    const confirmedVisible = await readStickyWindowVisibleSafely();
-    if (confirmedVisible !== null) {
-      stickyNoteWindowVisible.value = confirmedVisible;
-    } else {
-      stickyNoteWindowVisible.value = true;
-    }
-  } catch (error) {
-    console.error("[main] 切换桌面便签失败", error);
-    const message = error instanceof Error ? error.message : String(error);
-    alert(`桌面便签窗口操作失败：${message}`);
-  } finally {
-    stickyNoteSwitching.value = false;
-  }
-};
-
 const saveSettings = async () => {
   await api.saveSettings({ ...settingsDraft });
   await api.setAutoStart(settingsDraft.autoStartEnabled);
@@ -1552,7 +1457,6 @@ onMounted(async () => {
     await refreshAll();
     await loadSettings();
     syncStatus.value = await api.getSyncStatus();
-    await refreshStickyWindowState();
   } catch (error) {
     console.error("[main] 初始化数据失败", error);
   }
@@ -1580,7 +1484,6 @@ onMounted(async () => {
       await refreshAll();
       await loadSettings();
       syncStatus.value = await api.getSyncStatus();
-      await refreshStickyWindowState();
     });
   } catch (error) {
     console.error("[main] 监听 data-updated 失败", error);
@@ -1593,26 +1496,11 @@ onMounted(async () => {
     console.error("[main] 监听 open-sync-settings 失败", error);
   }
   try {
-    await listen("tray-open-sticky-notes", async () => {
-      await api.setStickyNoteWindowVisible(true);
-      await refreshStickyWindowState();
-    });
-  } catch (error) {
-    console.error("[main] 监听 tray-open-sticky-notes 失败", error);
-  }
-  try {
     await listen("tray-create-sticky-note", async () => {
-      await handleCreateStickyNoteFromTasks();
+      await handleCreateStickyNote();
     });
   } catch (error) {
     console.error("[main] 监听 tray-create-sticky-note 失败", error);
-  }
-  try {
-    await listen<boolean>("sticky-note-visibility", event => {
-      stickyNoteWindowVisible.value = event.payload;
-    });
-  } catch (error) {
-    console.error("[main] 监听 sticky-note-visibility 失败", error);
   }
 });
 
