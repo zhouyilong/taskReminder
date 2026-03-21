@@ -1391,7 +1391,7 @@ const openSettingsForUpdate = async () => {
 };
 
 const maybeAutoCheckForUpdates = async () => {
-  if (!shouldAutoCheckForUpdates(updatePreferences)) {
+  if (!updatePreferences.autoCheckEnabled) {
     return;
   }
   await handleCheckForUpdates(false);
@@ -1790,9 +1790,13 @@ onMounted(async () => {
     await loadSettings();
     syncStatus.value = await api.getSyncStatus();
     await refreshStickyWindowState();
-    await maybeAutoCheckForUpdates();
   } catch (error) {
     console.error("[main] 初始化数据失败", error);
+  }
+  try {
+    await maybeAutoCheckForUpdates();
+  } catch (error) {
+    console.error("[main] 自动检查更新失败", error);
   }
   const appWindow = getAppWindow();
   if (appWindow) {
