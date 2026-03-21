@@ -666,7 +666,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from "vue";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
 import type { DownloadEvent, Update } from "@tauri-apps/plugin-updater";
@@ -795,7 +795,7 @@ const initialUpdatePreferences = loadUpdatePreferences();
 const updatePreferences = reactive<UpdatePreferences>({ ...initialUpdatePreferences });
 const updatePreferencesDraft = reactive<UpdatePreferences>({ ...initialUpdatePreferences });
 const availableUpdate = ref<UpdateSummary | null>(null);
-const availableUpdateHandle = ref<Update | null>(null);
+const availableUpdateHandle = shallowRef<Update | null>(null);
 const updateChecking = ref(false);
 const updateInstalling = ref(false);
 const updateCheckError = ref("");
