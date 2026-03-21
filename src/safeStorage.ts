@@ -21,5 +21,15 @@ export const safeStorage = {
     } catch (error) {
       console.warn(`[storage] 写入 ${key} 失败`, error);
     }
+  },
+  removeItem(key: string): void {
+    if (!hasWindow) {
+      return;
+    }
+    try {
+      window.localStorage.removeItem(key);
+    } catch (error) {
+      console.warn(`[storage] 删除 ${key} 失败`, error);
+    }
   }
 };

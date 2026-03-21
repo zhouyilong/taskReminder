@@ -4,6 +4,15 @@
       <div class="titlebar-left" data-tauri-drag-region>
         <span class="app-title">任务提醒 {{ appVersion }}<span v-if="isDevMode" class="dev-tag"> [开发]</span></span>
         <span class="tag">{{ syncStatusLabel }}</span>
+        <button
+          v-if="updateTagLabel"
+          class="tag tag-button update-tag"
+          type="button"
+          :title="updateTagLabel"
+          @click="openSettingsForUpdate"
+        >
+          {{ updateTagLabel }}
+        </button>
       </div>
       <div class="titlebar-actions">
         <button class="icon-button theme-toggle" type="button" title="切换主题" @click="toggleTheme">
@@ -515,6 +524,80 @@
           </select>
         </div>
       </div>
+      <div class="modal-section">
+        <div class="form-row compact" style="gap: 8px;">
+          <label>
+            <input type="checkbox" v-model="updatePreferencesDraft.autoCheckEnabled" /> 启动时自动检查更新
+          </label>
+          <button
+            class="button secondary"
+            type="button"
+            :disabled="updateChecking || updateInstalling"
+            @click="handleCheckForUpdates(true)"
+          >
+            {{ updateChecking ? "检查中..." : "检查更新" }}
+          </button>
+        </div>
+        <div class="form-row compact sync-status-panel update-panel">
+          <div class="sync-status-row">
+            <span class="sync-status-label">当前版本:</span>
+            <span class="sync-status-value">{{ currentVersionLabel }}</span>
+          </div>
+          <div class="sync-status-row">
+            <span class="sync-status-label">最近检查:</span>
+            <span class="sync-status-value">{{ formatDateTime(updatePreferences.lastCheckAt) }}</span>
+          </div>
+          <div class="sync-status-row">
+            <span class="sync-status-label">更新状态:</span>
+            <span class="sync-status-value" :class="{ 'is-error': !!updateCheckError }">{{ updateStatusText }}</span>
+          </div>
+        </div>
+        <div v-if="availableUpdate" class="update-card">
+          <div class="update-card-header">
+            <span class="update-version">发现新版本 {{ formatVersionLabel(availableUpdate.version) }}</span>
+            <span v-if="isUpdateIgnored" class="tag">已忽略</span>
+          </div>
+          <div class="update-meta">
+            <span>当前版本 {{ formatVersionLabel(availableUpdate.currentVersion) }}</span>
+            <span>发布时间 {{ formatDateTime(availableUpdate.date) }}</span>
+          </div>
+          <div class="update-notes">{{ updateNotesText }}</div>
+          <div class="update-actions">
+            <button
+              class="button"
+              type="button"
+              :disabled="updateChecking || updateInstalling"
+              @click="handleInstallUpdate"
+            >
+              {{ updatePrimaryActionLabel }}
+            </button>
+            <button
+              v-if="!isUpdateIgnored"
+              class="button secondary"
+              type="button"
+              :disabled="updateInstalling"
+              @click="ignoreAvailableUpdate"
+            >
+              忽略此版本
+            </button>
+            <button
+              v-else
+              class="button secondary"
+              type="button"
+              :disabled="updateInstalling"
+              @click="restoreIgnoredUpdate"
+            >
+              恢复提醒
+            </button>
+          </div>
+          <div v-if="updateInstalling" class="update-progress">
+            <div class="update-progress-track">
+              <span class="update-progress-fill" :style="{ width: `${updateProgressPercent ?? 8}%` }"></span>
+            </div>
+            <span class="update-progress-text">{{ updateProgressText }}</span>
+          </div>
+        </div>
+      </div>
     </Modal>
 
     <Modal :open="webdavOpen" title="云同步设置" @close="webdavOpen = false" @confirm="saveWebdavSettings">
@@ -586,9 +669,21 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
+import type { DownloadEvent, Update } from "@tauri-apps/plugin-updater";
 import Modal from "./components/Modal.vue";
 import { api } from "./api";
 import { safeStorage } from "./safeStorage";
+import {
+  checkForUpdates,
+  formatVersionLabel,
+  installUpdate,
+  loadUpdatePreferences,
+  saveUpdatePreferences,
+  shouldAutoCheckForUpdates,
+  summarizeUpdate,
+  type UpdatePreferences,
+  type UpdateSummary
+} from "./update";
 import type {
   Task,
   RecurringTask,
@@ -696,6 +791,16 @@ const settingsDraft = reactive<AppSettings>({
   webdavDeviceId: "",
   notificationTheme: "app"
 });
+const initialUpdatePreferences = loadUpdatePreferences();
+const updatePreferences = reactive<UpdatePreferences>({ ...initialUpdatePreferences });
+const updatePreferencesDraft = reactive<UpdatePreferences>({ ...initialUpdatePreferences });
+const availableUpdate = ref<UpdateSummary | null>(null);
+const availableUpdateHandle = ref<Update | null>(null);
+const updateChecking = ref(false);
+const updateInstalling = ref(false);
+const updateCheckError = ref("");
+const updateDownloadedBytes = ref(0);
+const updateContentLength = ref<number | null>(null);
 
 const tasksPageIndex = ref(1);
 const tasksPageSize = ref(20);
@@ -742,6 +847,78 @@ const syncStatusLabel = computed(() => {
 });
 
 const uiScalePercent = computed(() => Math.round(uiScale.value * 100));
+const stickyNoteToggleTitle = computed(() => {
+  if (stickyNoteSwitching.value) {
+    return "桌面便签处理中...";
+  }
+  return stickyNoteWindowVisible.value ? "关闭桌面便签" : "打开桌面便签";
+});
+const currentVersionLabel = computed(() => {
+  if (!appVersion.value) {
+    return "-";
+  }
+  return formatVersionLabel(appVersion.value);
+});
+const isUpdateIgnored = computed(() => {
+  return !!availableUpdate.value && updatePreferences.ignoredVersion === availableUpdate.value.version;
+});
+const updateTagLabel = computed(() => {
+  if (!availableUpdate.value || isUpdateIgnored.value) {
+    return "";
+  }
+  return `新版本 ${formatVersionLabel(availableUpdate.value.version)}`;
+});
+const updateNotesText = computed(() => {
+  const body = availableUpdate.value?.body?.trim();
+  return body || "本次版本未提供更新说明。";
+});
+const updateProgressPercent = computed(() => {
+  if (!updateContentLength.value || updateContentLength.value <= 0) {
+    return null;
+  }
+  return Math.min(100, Math.round((updateDownloadedBytes.value / updateContentLength.value) * 100));
+});
+const updateStatusText = computed(() => {
+  if (updateInstalling.value) {
+    return updateProgressPercent.value !== null
+      ? `正在下载更新 ${updateProgressPercent.value}%`
+      : "正在准备安装更新";
+  }
+  if (updateChecking.value) {
+    return "正在检查更新";
+  }
+  if (availableUpdate.value && !isUpdateIgnored.value) {
+    return `发现新版本 ${formatVersionLabel(availableUpdate.value.version)}`;
+  }
+  if (availableUpdate.value && isUpdateIgnored.value) {
+    return `已忽略 ${formatVersionLabel(availableUpdate.value.version)}`;
+  }
+  if (updateCheckError.value) {
+    return updateCheckError.value;
+  }
+  if (updatePreferences.lastCheckAt) {
+    return `上次检查 ${formatDateTime(updatePreferences.lastCheckAt)}`;
+  }
+  return "尚未检查更新";
+});
+const updatePrimaryActionLabel = computed(() => {
+  if (updateInstalling.value) {
+    return updateProgressPercent.value !== null ? `下载中 ${updateProgressPercent.value}%` : "准备安装...";
+  }
+  return "立即更新";
+});
+const updateProgressText = computed(() => {
+  if (!updateInstalling.value) {
+    return "";
+  }
+  if (updateContentLength.value && updateContentLength.value > 0) {
+    return `${formatBytes(updateDownloadedBytes.value)} / ${formatBytes(updateContentLength.value)}`;
+  }
+  if (updateDownloadedBytes.value > 0) {
+    return `已下载 ${formatBytes(updateDownloadedBytes.value)}`;
+  }
+  return "正在准备安装包...";
+});
 
 const tasksTotalPages = computed(() => {
   return Math.max(1, Math.ceil(tasks.value.length / tasksPageSize.value));
@@ -843,6 +1020,21 @@ const formatDateTime = (value?: string | null) => {
     return "-";
   }
   return value.replace("T", " ");
+};
+
+const formatBytes = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const precision = size >= 10 || unitIndex === 0 ? 0 : 1;
+  return `${size.toFixed(precision)} ${units[unitIndex]}`;
 };
 
 const formatAction = (action: string) => {
@@ -1069,6 +1261,142 @@ const loadSettings = async () => {
   Object.assign(settingsDraft, data);
 };
 
+const persistUpdatePreferencesState = () => {
+  saveUpdatePreferences({
+    autoCheckEnabled: updatePreferences.autoCheckEnabled,
+    ignoredVersion: updatePreferences.ignoredVersion,
+    lastCheckAt: updatePreferences.lastCheckAt,
+  });
+};
+
+const syncUpdatePreferencesDraft = () => {
+  Object.assign(updatePreferencesDraft, updatePreferences);
+};
+
+const resetUpdateProgress = () => {
+  updateDownloadedBytes.value = 0;
+  updateContentLength.value = null;
+};
+
+const releaseAvailableUpdateHandle = async () => {
+  if (!availableUpdateHandle.value) {
+    return;
+  }
+  try {
+    await availableUpdateHandle.value.close();
+  } catch (error) {
+    console.warn("[update] 释放更新句柄失败", error);
+  } finally {
+    availableUpdateHandle.value = null;
+  }
+};
+
+const handleUpdateDownloadEvent = (event: DownloadEvent) => {
+  switch (event.event) {
+    case "Started":
+      updateContentLength.value = event.data.contentLength ?? null;
+      updateDownloadedBytes.value = 0;
+      break;
+    case "Progress":
+      updateDownloadedBytes.value += event.data.chunkLength;
+      break;
+    case "Finished":
+      if (updateContentLength.value) {
+        updateDownloadedBytes.value = updateContentLength.value;
+      }
+      break;
+  }
+};
+
+const handleCheckForUpdates = async (manual = false) => {
+  if (updateChecking.value || updateInstalling.value) {
+    return;
+  }
+  updateChecking.value = true;
+  updateCheckError.value = "";
+  resetUpdateProgress();
+  try {
+    await releaseAvailableUpdateHandle();
+    const update = await checkForUpdates();
+    updatePreferences.lastCheckAt = new Date().toISOString();
+    persistUpdatePreferencesState();
+    if (!update) {
+      availableUpdate.value = null;
+      if (manual) {
+        alert("当前已经是最新版本。");
+      }
+      return;
+    }
+
+    if (updatePreferences.ignoredVersion && updatePreferences.ignoredVersion !== update.version) {
+      updatePreferences.ignoredVersion = null;
+      persistUpdatePreferencesState();
+    }
+
+    availableUpdateHandle.value = update;
+    availableUpdate.value = summarizeUpdate(update);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    updateCheckError.value = `检查更新失败：${message}`;
+    if (manual) {
+      alert(updateCheckError.value);
+    }
+  } finally {
+    updateChecking.value = false;
+  }
+};
+
+const ignoreAvailableUpdate = async () => {
+  if (!availableUpdate.value) {
+    return;
+  }
+  updatePreferences.ignoredVersion = availableUpdate.value.version;
+  persistUpdatePreferencesState();
+  await releaseAvailableUpdateHandle();
+};
+
+const restoreIgnoredUpdate = () => {
+  updatePreferences.ignoredVersion = null;
+  persistUpdatePreferencesState();
+};
+
+const handleInstallUpdate = async () => {
+  if (updateChecking.value || updateInstalling.value) {
+    return;
+  }
+  updateCheckError.value = "";
+  if (!availableUpdateHandle.value) {
+    await handleCheckForUpdates(true);
+    if (!availableUpdateHandle.value) {
+      return;
+    }
+  }
+
+  updateInstalling.value = true;
+  resetUpdateProgress();
+  try {
+    await installUpdate(availableUpdateHandle.value, handleUpdateDownloadEvent);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    updateCheckError.value = `安装更新失败：${message}`;
+    alert(updateCheckError.value);
+  } finally {
+    updateInstalling.value = false;
+    await releaseAvailableUpdateHandle();
+  }
+};
+
+const openSettingsForUpdate = async () => {
+  await openSettings();
+};
+
+const maybeAutoCheckForUpdates = async () => {
+  if (!shouldAutoCheckForUpdates(updatePreferences)) {
+    return;
+  }
+  await handleCheckForUpdates(false);
+};
+
 
 const handleAddTask = async () => {
   if (!newTaskDescription.value.trim()) {
@@ -1285,6 +1613,7 @@ const deleteSelectedRecords = async () => {
 
 const openSettings = async () => {
   await loadSettings();
+  syncUpdatePreferencesDraft();
   settingsOpen.value = true;
 };
 
@@ -1297,6 +1626,8 @@ const openWebdav = async () => {
 const saveSettings = async () => {
   await api.saveSettings({ ...settingsDraft });
   await api.setAutoStart(settingsDraft.autoStartEnabled);
+  updatePreferences.autoCheckEnabled = updatePreferencesDraft.autoCheckEnabled;
+  persistUpdatePreferencesState();
   settingsOpen.value = false;
   syncStatus.value = await api.getSyncStatus();
 };
@@ -1446,6 +1777,7 @@ const openRecordDetail = (record: ReminderRecord) => {
 };
 
 onMounted(async () => {
+  syncUpdatePreferencesDraft();
   try {
     const { getVersion } = await import("@tauri-apps/api/app");
     appVersion.value = await getVersion();
@@ -1457,6 +1789,8 @@ onMounted(async () => {
     await refreshAll();
     await loadSettings();
     syncStatus.value = await api.getSyncStatus();
+    await refreshStickyWindowState();
+    await maybeAutoCheckForUpdates();
   } catch (error) {
     console.error("[main] 初始化数据失败", error);
   }
@@ -1502,10 +1836,26 @@ onMounted(async () => {
   } catch (error) {
     console.error("[main] 监听 tray-create-sticky-note 失败", error);
   }
+  try {
+    await listen("tray-check-update", async () => {
+      await openSettings();
+      await handleCheckForUpdates(true);
+    });
+  } catch (error) {
+    console.error("[main] 监听 tray-check-update 失败", error);
+  }
+  try {
+    await listen<boolean>("sticky-note-visibility", event => {
+      stickyNoteWindowVisible.value = event.payload;
+    });
+  } catch (error) {
+    console.error("[main] 监听 sticky-note-visibility 失败", error);
+  }
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("click", hideContextMenu);
+  void releaseAvailableUpdateHandle();
 });
 
 watch(uiScale, value => {

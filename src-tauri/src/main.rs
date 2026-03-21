@@ -822,6 +822,8 @@ fn restore_open_sticky_note_items(app: &tauri::AppHandle, db: &DbManager) -> Res
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .on_window_event(|window, event| {
             if window.label() == "main" {
                 if let WindowEvent::CloseRequested { api, .. } = event {
