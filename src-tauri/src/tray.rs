@@ -41,7 +41,11 @@ fn create_sticky_note(app: &AppHandle) {
 }
 
 pub fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
-    let dev_tag = if paths::is_dev_mode() { " [开发]" } else { "" };
+    let dev_tag = if paths::is_dev_mode() {
+        " [开发]"
+    } else {
+        ""
+    };
     let menu = MenuBuilder::new(app)
         .text("open", format!("打开{}", dev_tag))
         .text("new_note", "新建便签")

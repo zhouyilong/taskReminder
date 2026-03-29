@@ -1,5 +1,21 @@
 # Task Reminder (Tauri + Vue 3)
 
+## Recent Fix Notes
+### Sticky notes not following main window scale/theme
+- Symptom: after changing the main window zoom or theme, already-open sticky note windows did not update.
+- Root cause: cross-window UI sync relied on a single event path, which was not stable enough across different webview/runtime paths.
+- Fix:
+  - unified `uiScale`, `theme`, and `windowOpacity` into one UI state payload;
+  - broadcast from the main window, keep a backend snapshot, and re-send when sticky note windows are shown;
+  - add a final fallback that injects the current UI state directly into sticky-note webviews and applies it via a browser custom event.
+- Rule: for cross-window UI sync, keep at least “runtime broadcast + new-window replay + final fallback” instead of relying on a single event path.
+
+### Sticky note pinning was being reset
+- Symptom: clicking the pin button appeared to do nothing, or pinning was lost after opening/reordering sticky notes.
+- Root cause: the pin state lived only on the front end while the Rust window-layer logic kept reapplying sticky-note z-order, so show/reorder/restart paths could overwrite or forget the pinned state.
+- Fix: make the Rust backend the source of truth, persist `sticky_is_pinned` in the database, and always re-apply the correct top-most/bottom-most layer from that stored state when a sticky note is pinned, shown, or reordered.
+- Rule: pinning-related window behavior must be backend-owned and persisted; do not rely on a front-end-only `always_on_top(true)` call for durable sticky-note pin state.
+
 一个基于 Tauri + Vue 3 + TypeScript 的桌面任务提醒应用，包含主窗口与通知窗口。
 
 当前技术栈：**Tauri 2 + Vue 3 + TypeScript**。

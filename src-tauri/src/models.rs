@@ -69,6 +69,7 @@ pub struct StickyNote {
     pub width: f64,
     pub height: f64,
     pub is_open: bool,
+    pub is_pinned: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -86,6 +87,7 @@ pub struct AppSettings {
     pub sticky_note_x: Option<f64>,
     pub sticky_note_y: Option<f64>,
     pub sticky_note_opacity: f64,
+    pub window_opacity: f64,
     pub webdav_enabled: bool,
     pub webdav_url: String,
     pub webdav_username: String,
@@ -116,4 +118,12 @@ pub struct SyncStatus {
     pub status: String,
     pub error: Option<String>,
     pub time: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiStatePayload {
+    pub ui_scale: f64,
+    pub theme: String,
+    pub window_opacity: f64,
 }

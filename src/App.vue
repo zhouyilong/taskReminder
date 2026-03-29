@@ -82,7 +82,7 @@
       </div>
     </div>
 
-    <div class="main" :style="{ zoom: uiScale }">
+    <div class="main" :style="{ zoom: uiScale, opacity: windowOpacity }">
       <aside class="sidebar" :class="{ collapsed: isSidebarCollapsed }">
         <div class="sidebar-header">
           <span class="sidebar-title" v-if="!isSidebarCollapsed">菜单</span>
@@ -509,8 +509,13 @@
       <div class="modal-section">
         <div class="form-row compact">
           <label>界面缩放</label>
-          <input class="input" type="range" min="0.8" max="1.2" step="0.05" v-model.number="uiScale" style="flex: 1" />
+          <input class="settings-range" type="range" min="0.8" max="1.2" step="0.05" v-model.number="uiScale" style="flex: 1" />
           <span class="tag">{{ uiScalePercent }}%</span>
+        </div>
+        <div class="form-row compact">
+          <label>整体透明度</label>
+          <input class="settings-range" type="range" min="0.3" max="1" step="0.05" v-model.number="windowOpacity" style="flex: 1" />
+          <span class="tag">{{ windowOpacityPercent }}%</span>
         </div>
       </div>
       <div class="modal-section">
@@ -667,8 +672,9 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from "vue";
-import { emit, listen } from "@tauri-apps/api/event";
+import { emit, emitTo, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
+import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import type { DownloadEvent, Update } from "@tauri-apps/plugin-updater";
 import Modal from "./components/Modal.vue";
 import { api } from "./api";
@@ -690,10 +696,12 @@ import type {
   RecurringMode,
   ReminderRecord,
   AppSettings,
-  SyncStatus
+  SyncStatus,
+  UiStatePayload
 } from "./types";
 
 const activeTab = ref("tasks");
+const STICKY_NOTE_ITEM_PREFIX = "sticky-note-item-";
 const isLightTheme = ref(safeStorage.getItem("appTheme") === "light");
 const appVersion = ref("");
 const isDevMode = ref(false);
@@ -707,6 +715,7 @@ const resolveCurrentWindow = (): TauriWindow | null => {
 };
 const getAppWindow = (): TauriWindow | null => resolveCurrentWindow();
 const uiScale = ref(Number(safeStorage.getItem("uiScale") ?? "1"));
+const windowOpacity = ref(Number(safeStorage.getItem("windowOpacity") ?? "1"));
 const isSidebarCollapsed = ref(safeStorage.getItem("sidebarCollapsed") === "1");
 
 const tasks = ref<Task[]>([]);
@@ -782,6 +791,7 @@ const settingsDraft = reactive<AppSettings>({
   stickyNoteX: null,
   stickyNoteY: null,
   stickyNoteOpacity: 0.95,
+  windowOpacity: 1.0,
   webdavEnabled: false,
   webdavUrl: "",
   webdavUsername: "",
@@ -847,6 +857,8 @@ const syncStatusLabel = computed(() => {
 });
 
 const uiScalePercent = computed(() => Math.round(uiScale.value * 100));
+const windowOpacityPercent = computed(() => Math.round(windowOpacity.value * 100));
+const stickyNoteWindowVisible = ref(false);
 const stickyNoteToggleTitle = computed(() => {
   if (stickyNoteSwitching.value) {
     return "桌面便签处理中...";
@@ -1259,6 +1271,11 @@ const refreshAll = async () => {
 const loadSettings = async () => {
   const data = await api.getSettings();
   Object.assign(settingsDraft, data);
+  windowOpacity.value = data.windowOpacity;
+};
+
+const refreshStickyWindowState = async () => {
+  stickyNoteWindowVisible.value = false;
 };
 
 const persistUpdatePreferencesState = () => {
@@ -1624,6 +1641,7 @@ const openWebdav = async () => {
 };
 
 const saveSettings = async () => {
+  settingsDraft.windowOpacity = windowOpacity.value;
   await api.saveSettings({ ...settingsDraft });
   await api.setAutoStart(settingsDraft.autoStartEnabled);
   updatePreferences.autoCheckEnabled = updatePreferencesDraft.autoCheckEnabled;
@@ -1654,7 +1672,35 @@ const toggleTheme = () => {
   isLightTheme.value = !isLightTheme.value;
   const theme = isLightTheme.value ? "light" : "dark";
   safeStorage.setItem("appTheme", theme);
-  void emit("app-theme-updated", theme);
+  void emitCurrentUiState();
+};
+
+const emitCurrentUiState = async () => {
+  const payload: UiStatePayload = {
+    uiScale: uiScale.value,
+    theme: isLightTheme.value ? "light" : "dark",
+    windowOpacity: windowOpacity.value
+  };
+  try {
+    const stickyWindows = (await getAllWebviewWindows()).filter(window => window.label.startsWith(STICKY_NOTE_ITEM_PREFIX));
+    await Promise.allSettled([
+      emit("ui-state-changed", payload),
+      emit("app-theme-updated", payload.theme),
+      emit("ui-scale-changed", payload.uiScale),
+      emit("window-opacity-changed", payload.windowOpacity),
+      ...stickyWindows.map(window => emitTo(window.label, "ui-state-changed", payload)),
+      ...stickyWindows.map(window => emitTo(window.label, "app-theme-updated", payload.theme)),
+      ...stickyWindows.map(window => emitTo(window.label, "ui-scale-changed", payload.uiScale)),
+      ...stickyWindows.map(window => emitTo(window.label, "window-opacity-changed", payload.windowOpacity))
+    ]);
+  } catch (error) {
+    console.error("[main] 前端同步 UI 状态失败", error);
+  }
+  try {
+    await api.emitUiStateChanged(payload.uiScale, payload.theme, payload.windowOpacity);
+  } catch (error) {
+    console.error("[main] 广播 UI 状态失败", error);
+  }
 };
 
 const handleMinimize = async () => {
@@ -1794,6 +1840,11 @@ onMounted(async () => {
     console.error("[main] 初始化数据失败", error);
   }
   try {
+    await emitCurrentUiState();
+  } catch (error) {
+    console.error("[main] 初始化广播 UI 状态失败", error);
+  }
+  try {
     await maybeAutoCheckForUpdates();
   } catch (error) {
     console.error("[main] 自动检查更新失败", error);
@@ -1864,9 +1915,21 @@ onBeforeUnmount(() => {
 
 watch(uiScale, value => {
   const normalized = Math.min(1.2, Math.max(0.8, Number(value) || 1));
-  if (normalized !== uiScale.value) {
+  if (normalized !== value) {
     uiScale.value = normalized;
+    return;
   }
   safeStorage.setItem("uiScale", normalized.toString());
+  void emitCurrentUiState();
+});
+
+watch(windowOpacity, value => {
+  const normalized = Math.min(1, Math.max(0.3, Number(value) || 1));
+  if (normalized !== value) {
+    windowOpacity.value = normalized;
+    return;
+  }
+  safeStorage.setItem("windowOpacity", normalized.toString());
+  void emitCurrentUiState();
 });
 </script>

@@ -21,6 +21,11 @@ fn normalize_sticky_note_opacity(opacity: Option<f64>) -> f64 {
     value.clamp(0.35, 1.0)
 }
 
+fn normalize_window_opacity(opacity: Option<f64>) -> f64 {
+    let value = opacity.filter(|v| v.is_finite()).unwrap_or(1.0);
+    value.clamp(0.3, 1.0)
+}
+
 const STICKY_NOTE_DEFAULT_POS_X: f64 = 48.0;
 const STICKY_NOTE_DEFAULT_POS_Y: f64 = 76.0;
 const STICKY_NOTE_ITEM_DEFAULT_WIDTH: f64 = 284.0;
@@ -142,12 +147,12 @@ impl DbManager {
             "INSERT OR IGNORE INTO settings (
                 id, auto_start_enabled, sound_enabled, snooze_minutes,
                 sticky_note_enabled, sticky_note_content, sticky_note_width, sticky_note_height,
-                sticky_note_x, sticky_note_y, sticky_note_opacity,
+                sticky_note_x, sticky_note_y, sticky_note_opacity, window_opacity,
                 webdav_enabled, webdav_url, webdav_username, webdav_password, webdav_root_path,
                 webdav_sync_interval_minutes, webdav_last_sync_time, webdav_last_local_change_time,
                 webdav_last_sync_status, webdav_last_sync_error, webdav_device_id, notification_theme
             )
-             VALUES (1, 0, 1, 5, 0, '', 360, 520, NULL, NULL, 0.95, 0, '', '', '', '', 60, NULL, NULL, NULL, NULL, ?, 'app')",
+             VALUES (1, 0, 1, 5, 0, '', 360, 520, NULL, NULL, 0.95, 1.0, 0, '', '', '', '', 60, NULL, NULL, NULL, NULL, ?, 'app')",
             [Uuid::new_v4().to_string()],
         )?;
         Ok(())
@@ -500,7 +505,7 @@ impl DbManager {
     pub fn list_sticky_notes(&self) -> Result<Vec<StickyNote>, AppError> {
         let conn = self.get_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, description, sticky_content, sticky_pos_x, sticky_pos_y, sticky_width, sticky_height, sticky_is_open, created_at, updated_at
+            "SELECT id, description, sticky_content, sticky_pos_x, sticky_pos_y, sticky_width, sticky_height, sticky_is_open, sticky_is_pinned, created_at, updated_at
              FROM tasks
              WHERE deleted_at IS NULL AND status != 'COMPLETED'
              ORDER BY created_at ASC",
@@ -512,7 +517,7 @@ impl DbManager {
     pub fn get_sticky_note(&self, note_id: &str) -> Result<Option<StickyNote>, AppError> {
         let conn = self.get_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, description, sticky_content, sticky_pos_x, sticky_pos_y, sticky_width, sticky_height, sticky_is_open, created_at, updated_at
+            "SELECT id, description, sticky_content, sticky_pos_x, sticky_pos_y, sticky_width, sticky_height, sticky_is_open, sticky_is_pinned, created_at, updated_at
              FROM tasks
              WHERE id = ?",
         )?;
@@ -640,6 +645,7 @@ impl DbManager {
             width,
             height,
             is_open: true,
+            is_pinned: false,
             created_at: now.clone(),
             updated_at: now,
         })
@@ -714,6 +720,33 @@ impl DbManager {
         Ok(())
     }
 
+    pub fn set_sticky_note_pinned(&self, task_id: &str, pinned: bool) -> Result<(), AppError> {
+        let conn = self.get_conn()?;
+        let now = now_string();
+        conn.execute(
+            "UPDATE tasks
+             SET sticky_is_pinned = ?, sticky_is_open = 1, updated_at = ?
+             WHERE id = ?",
+            params![if pinned { 1 } else { 0 }, now, task_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_sticky_note_pinned(&self, task_id: &str) -> Result<bool, AppError> {
+        let conn = self.get_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT sticky_is_pinned
+             FROM tasks
+             WHERE id = ?",
+        )?;
+        let pinned = stmt
+            .query_row([task_id], |row| row.get::<_, Option<i64>>(0))
+            .optional()?
+            .flatten()
+            .unwrap_or(0);
+        Ok(pinned == 1)
+    }
+
     pub fn close_sticky_note(&self, task_id: &str) -> Result<(), AppError> {
         let conn = self.get_conn()?;
         let now = now_string();
@@ -727,7 +760,7 @@ impl DbManager {
     pub fn load_settings(&self) -> Result<AppSettings, AppError> {
         let conn = self.get_conn()?;
         let sql = "SELECT auto_start_enabled, sound_enabled, snooze_minutes,
-                   sticky_note_enabled, sticky_note_content, sticky_note_width, sticky_note_height, sticky_note_x, sticky_note_y, sticky_note_opacity,
+                   sticky_note_enabled, sticky_note_content, sticky_note_width, sticky_note_height, sticky_note_x, sticky_note_y, sticky_note_opacity, window_opacity,
                    webdav_enabled, webdav_url, webdav_username, webdav_password,
                    webdav_root_path, webdav_sync_interval_minutes, webdav_last_sync_time,
                    webdav_last_local_change_time, webdav_last_sync_status, webdav_last_sync_error,
@@ -738,16 +771,17 @@ impl DbManager {
             let sticky_note_width = row.get::<_, Option<i64>>(5)?.unwrap_or(360).max(260);
             let sticky_note_height = row.get::<_, Option<i64>>(6)?.unwrap_or(520).max(320);
             let sticky_note_opacity = normalize_sticky_note_opacity(row.get(9)?);
-            let webdav_url: String = row.get::<_, Option<String>>(11)?.unwrap_or_default();
-            let webdav_username: String = row.get::<_, Option<String>>(12)?.unwrap_or_default();
-            let webdav_password: String = row.get::<_, Option<String>>(13)?.unwrap_or_default();
-            let webdav_root_path: String = row.get::<_, Option<String>>(14)?.unwrap_or_default();
+            let window_opacity = normalize_window_opacity(row.get(10)?);
+            let webdav_url: String = row.get::<_, Option<String>>(12)?.unwrap_or_default();
+            let webdav_username: String = row.get::<_, Option<String>>(13)?.unwrap_or_default();
+            let webdav_password: String = row.get::<_, Option<String>>(14)?.unwrap_or_default();
+            let webdav_root_path: String = row.get::<_, Option<String>>(15)?.unwrap_or_default();
             let webdav_device_id: String = row
-                .get::<_, Option<String>>(20)?
+                .get::<_, Option<String>>(21)?
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or_else(|| Uuid::new_v4().to_string());
             let notification_theme: String = row
-                .get::<_, Option<String>>(21)?
+                .get::<_, Option<String>>(22)?
                 .unwrap_or_else(|| "app".to_string());
             Ok(AppSettings {
                 auto_start_enabled: row.get::<_, i64>(0)? == 1,
@@ -760,16 +794,17 @@ impl DbManager {
                 sticky_note_x: row.get(7)?,
                 sticky_note_y: row.get(8)?,
                 sticky_note_opacity,
-                webdav_enabled: row.get::<_, i64>(10)? == 1,
+                window_opacity,
+                webdav_enabled: row.get::<_, i64>(11)? == 1,
                 webdav_url,
                 webdav_username,
                 webdav_password,
                 webdav_root_path,
-                webdav_sync_interval_minutes: row.get(15)?,
-                webdav_last_sync_time: row.get(16)?,
-                webdav_last_local_change_time: row.get(17)?,
-                webdav_last_sync_status: row.get(18)?,
-                webdav_last_sync_error: row.get(19)?,
+                webdav_sync_interval_minutes: row.get(16)?,
+                webdav_last_sync_time: row.get(17)?,
+                webdav_last_local_change_time: row.get(18)?,
+                webdav_last_sync_status: row.get(19)?,
+                webdav_last_sync_error: row.get(20)?,
                 webdav_device_id,
                 notification_theme,
             })
@@ -783,7 +818,7 @@ impl DbManager {
             "UPDATE settings
              SET auto_start_enabled = ?, sound_enabled = ?, snooze_minutes = ?,
                  sticky_note_enabled = ?, sticky_note_content = ?, sticky_note_width = ?, sticky_note_height = ?,
-                 sticky_note_x = ?, sticky_note_y = ?, sticky_note_opacity = ?,
+                 sticky_note_x = ?, sticky_note_y = ?, sticky_note_opacity = ?, window_opacity = ?,
                  webdav_enabled = ?, webdav_url = ?, webdav_username = ?, webdav_password = ?,
                  webdav_root_path = ?, webdav_sync_interval_minutes = ?, webdav_last_sync_time = ?,
                  webdav_last_local_change_time = ?, webdav_last_sync_status = ?, webdav_last_sync_error = ?,
@@ -800,6 +835,7 @@ impl DbManager {
                 settings.sticky_note_x,
                 settings.sticky_note_y,
                 normalize_sticky_note_opacity(Some(settings.sticky_note_opacity)),
+                normalize_window_opacity(Some(settings.window_opacity)),
                 if settings.webdav_enabled { 1 } else { 0 },
                 settings.webdav_url,
                 settings.webdav_username,
@@ -950,9 +986,10 @@ fn sticky_note_from_task_row(row: &rusqlite::Row<'_>) -> Result<StickyNote, rusq
         width: normalize_sticky_item_width(row.get(5)?),
         height: normalize_sticky_item_height(row.get(6)?),
         is_open: row.get::<_, i64>(7)? == 1,
-        created_at: row.get(8)?,
+        is_pinned: row.get::<_, Option<i64>>(8)?.unwrap_or(0) == 1,
+        created_at: row.get(9)?,
         updated_at: row
-            .get::<_, Option<String>>(9)?
+            .get::<_, Option<String>>(10)?
             .unwrap_or_else(|| now_string()),
     })
 }
@@ -1023,6 +1060,16 @@ fn migration_scripts() -> Vec<MigrationScript> {
             version: "1.4.7".to_string(),
             description: "add sticky note item size".to_string(),
             sql: include_str!("../migrations/V1.4.7__add_sticky_note_item_size.sql"),
+        },
+        MigrationScript {
+            version: "1.4.8".to_string(),
+            description: "add window opacity".to_string(),
+            sql: include_str!("../migrations/V1.4.8__add_window_opacity.sql"),
+        },
+        MigrationScript {
+            version: "1.4.9".to_string(),
+            description: "add sticky note pin state".to_string(),
+            sql: include_str!("../migrations/V1.4.9__add_sticky_note_pin_state.sql"),
         },
     ]
 }

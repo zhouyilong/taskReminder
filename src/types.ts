@@ -62,6 +62,7 @@ export interface StickyNote {
   width: number;
   height: number;
   isOpen: boolean;
+  isPinned: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -77,6 +78,7 @@ export interface AppSettings {
   stickyNoteX?: number | null;
   stickyNoteY?: number | null;
   stickyNoteOpacity: number;
+  windowOpacity: number;
   webdavEnabled: boolean;
   webdavUrl: string;
   webdavUsername: string;
@@ -89,6 +91,12 @@ export interface AppSettings {
   webdavLastSyncError?: string | null;
   webdavDeviceId: string;
   notificationTheme: "system" | "app" | "light" | "dark";
+}
+
+export interface UiStatePayload {
+  uiScale: number;
+  theme: string;
+  windowOpacity: number;
 }
 
 export interface SyncStatus {

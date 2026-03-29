@@ -1347,6 +1347,13 @@ input[type="checkbox"] {
   cursor: pointer;
 }
 
+input[type="range"].settings-range {
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
 .sticky-opacity-value {
   min-width: 34px;
   text-align: right;
@@ -1729,10 +1736,12 @@ input[type="checkbox"] {
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   background: transparent;
   user-select: none;
+  -webkit-app-region: drag;
   cursor: move;
 }
 
 .paper-note-header-pinned {
+  -webkit-app-region: no-drag;
   cursor: default;
 }
 
@@ -1752,6 +1761,7 @@ input[type="checkbox"] {
   outline: none;
   padding: 0;
   margin-right: 12px;
+  -webkit-app-region: no-drag;
 }
 
 .paper-note-title-input::placeholder {
@@ -1763,12 +1773,14 @@ input[type="checkbox"] {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+  -webkit-app-region: no-drag;
 }
 
 .paper-note-action,
 .paper-note-close {
   width: 26px;
   height: 26px;
+  -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1833,6 +1845,7 @@ input[type="checkbox"] {
   resize: none;
   outline: none;
   font-family: "DM Sans", "Inter", sans-serif;
+  -webkit-app-region: no-drag;
 }
 
 .paper-note-editor::placeholder {
@@ -2090,6 +2103,5 @@ input[type="checkbox"] {
 .light-theme .modal-mask {
   background: rgba(15, 23, 42, 0.32);
 }
-
 
 

@@ -1,5 +1,5 @@
 <template>
-  <div class="sticky-note-item-root">
+  <div class="sticky-note-item-root" :style="rootStyle">
     <article v-if="note" class="paper-note paper-note-window">
       <!-- Invisible resize borders -->
       <div class="resize-edge resize-top" @mousedown.stop.prevent="startResize('North')"></div>
@@ -13,8 +13,8 @@
 
       <header
         class="paper-note-header"
+        :data-tauri-drag-region="isPinned ? null : ''"
         :class="{ 'paper-note-header-pinned': isPinned }"
-        :data-tauri-drag-region="isPinned ? undefined : ''"
       >
         <input
           v-model="note.title"
@@ -32,7 +32,7 @@
             type="button"
             :title="isPinned ? '取消锚定（取消置顶并恢复可移动）' : '锚定便签（置顶并锁定位置）'"
             @mousedown.stop.prevent
-            @click.stop="togglePin"
+            @click.stop="handleTogglePin"
           >
             <svg
               viewBox="0 0 1024 1024"
@@ -111,7 +111,7 @@ import { getCurrentWindow, type ResizeDirection } from "@tauri-apps/api/window";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { safeStorage } from "./safeStorage";
 import { api } from "./api";
-import type { AppSettings, StickyNote } from "./types";
+import type { AppSettings, StickyNote, UiStatePayload } from "./types";
 
 const note = ref<StickyNote | null>(null);
 const saveHint = ref("");
@@ -128,10 +128,25 @@ let lastSavedContent = "";
 const MIN_STICKY_OPACITY = 0.35;
 const MAX_STICKY_OPACITY = 1;
 const DEFAULT_STICKY_OPACITY = 0.95;
+const MIN_UI_SCALE = 0.8;
+const MAX_UI_SCALE = 1.2;
+const DEFAULT_UI_SCALE = 1;
+const MIN_WINDOW_OPACITY = 0.3;
+const MAX_WINDOW_OPACITY = 1.0;
+const DEFAULT_WINDOW_OPACITY = 1.0;
 let storageHandler: ((event: StorageEvent) => void) | null = null;
 let unlistenRefresh: UnlistenFn | null = null;
-let unlistenThemeChanged: UnlistenFn | null = null;
 let unlistenSettingsUpdated: UnlistenFn | null = null;
+let unlistenSettingsUpdatedGeneric: UnlistenFn | null = null;
+let unlistenUiStateChanged: UnlistenFn | null = null;
+let unlistenUiStateChangedWindow: UnlistenFn | null = null;
+let unlistenThemeChangedLegacy: UnlistenFn | null = null;
+let unlistenScaleChangedLegacy: UnlistenFn | null = null;
+let unlistenWindowOpacityChangedLegacy: UnlistenFn | null = null;
+let windowUiStateHandler: ((event: Event) => void) | null = null;
+let uiStatePollInterval: number = 0;
+// Tracks last-applied state key for change detection in the poll loop.
+let lastUiStateKey = "";
 
 const formattedCreatedAt = computed(() => {
   if (!note.value?.createdAt) return "";
@@ -170,6 +185,38 @@ const applyStickyOpacity = (value: number) => {
   document.documentElement.style.setProperty("--sticky-note-opacity", normalized.toFixed(2));
 };
 
+const normalizeUiScale = (value: number): number => {
+  if (!Number.isFinite(value)) return DEFAULT_UI_SCALE;
+  return Math.min(MAX_UI_SCALE, Math.max(MIN_UI_SCALE, value));
+};
+
+const uiScale = ref(DEFAULT_UI_SCALE);
+
+const applyUiScale = (value: number) => {
+  uiScale.value = normalizeUiScale(value);
+};
+
+const rootStyle = computed(() => {
+  const scale = uiScale.value || DEFAULT_UI_SCALE;
+  return {
+    zoom: scale,
+    width: `${100 / scale}%`,
+    height: `${100 / scale}%`,
+    opacity: windowOpacity.value
+  };
+});
+
+const normalizeWindowOpacity = (value: number): number => {
+  if (!Number.isFinite(value)) return DEFAULT_WINDOW_OPACITY;
+  return Math.min(MAX_WINDOW_OPACITY, Math.max(MIN_WINDOW_OPACITY, value));
+};
+
+const windowOpacity = ref(DEFAULT_WINDOW_OPACITY);
+
+const applyWindowOpacity = (value: number) => {
+  windowOpacity.value = normalizeWindowOpacity(value);
+};
+
 const normalizeTitle = (title: string) => {
   const resolved = title.trim();
   return resolved ? resolved : "便签";
@@ -177,10 +224,14 @@ const normalizeTitle = (title: string) => {
 
 const syncPinnedState = async () => {
   try {
-    isPinned.value = await windowRef.isAlwaysOnTop();
+    isPinned.value = await api.getStickyNotePinnedByWindowLabel(windowRef.label);
   } catch (error) {
     console.warn("[sticky-note-item] 读取锚定状态失败", error);
-    isPinned.value = false;
+    try {
+      isPinned.value = await windowRef.isAlwaysOnTop();
+    } catch {
+      isPinned.value = false;
+    }
   }
 };
 
@@ -332,6 +383,48 @@ const startResize = async (edge: ResizeDirection) => {
   }
 };
 
+const applyUiState = (payload: UiStatePayload) => {
+  applyUiScale(payload.uiScale);
+  applyTheme(payload.theme === "light");
+  applyWindowOpacity(payload.windowOpacity);
+};
+
+const rememberUiState = (payload: UiStatePayload) => {
+  applyUiState(payload);
+  lastUiStateKey = `${payload.uiScale}:${payload.theme}:${payload.windowOpacity}`;
+};
+
+const resolveUiStatePayload = (value: Partial<UiStatePayload> | null | undefined): UiStatePayload | null => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  return {
+    uiScale: Number(value.uiScale ?? DEFAULT_UI_SCALE),
+    theme: value.theme === "light" ? "light" : "dark",
+    windowOpacity: Number(value.windowOpacity ?? DEFAULT_WINDOW_OPACITY)
+  };
+};
+
+const readInjectedUiState = (): UiStatePayload | null => {
+  const candidate = (window as Window & { __TASKREMINDER_UI_STATE?: Partial<UiStatePayload> }).__TASKREMINDER_UI_STATE;
+  return resolveUiStatePayload(candidate);
+};
+
+const handleTogglePin = async () => {
+  const nextPinned = !isPinned.value;
+  try {
+    const applied = await api.setStickyNotePinnedByWindowLabel(windowRef.label, nextPinned);
+    isPinned.value = applied;
+    if (applied) {
+      await windowRef.setFocus();
+    }
+  } catch (error) {
+    console.warn("[sticky-note-item] 切换锚定状态失败", error);
+    return;
+  }
+  await syncPinnedState();
+};
+
 const resolveCurrentLogicalPosition = async () => {
   try {
     const [scaleFactor, position] = await Promise.all([
@@ -401,16 +494,46 @@ const loadCurrentNote = async () => {
   saveHint.value = "";
 };
 
+const loadCurrentNoteWithRetry = async () => {
+  await loadCurrentNote();
+  if (note.value) {
+    return;
+  }
+  await new Promise(resolve => {
+    window.setTimeout(resolve, 120);
+  });
+  await loadCurrentNote();
+};
+
 onMounted(async () => {
   applyThemeFromStorage();
+  applyUiScale(Number(safeStorage.getItem("uiScale") ?? DEFAULT_UI_SCALE));
+  applyWindowOpacity(Number(safeStorage.getItem("windowOpacity") ?? DEFAULT_WINDOW_OPACITY));
+  const injectedUiState = readInjectedUiState();
+  if (injectedUiState) {
+    rememberUiState(injectedUiState);
+  }
+  windowUiStateHandler = event => {
+    const payload = event instanceof CustomEvent ? resolveUiStatePayload(event.detail as Partial<UiStatePayload>) : null;
+    if (payload) {
+      rememberUiState(payload);
+    }
+  };
+  window.addEventListener("taskreminder-ui-state", windowUiStateHandler as EventListener);
   await syncPinnedState();
-  await loadCurrentNote();
+  try {
+    await loadCurrentNoteWithRetry();
+  } catch (error) {
+    console.error("[sticky-note-item] 读取便签失败", error);
+  }
   try {
     const settings = await api.getSettings();
     applyStickyOpacity(settings.stickyNoteOpacity ?? DEFAULT_STICKY_OPACITY);
+    applyWindowOpacity(settings.windowOpacity ?? DEFAULT_WINDOW_OPACITY);
   } catch (error) {
     console.error("[sticky-note-item] 读取透明度设置失败", error);
     applyStickyOpacity(DEFAULT_STICKY_OPACITY);
+    applyWindowOpacity(DEFAULT_WINDOW_OPACITY);
   }
   unlistenRefresh = await listen<StickyNote>(refreshEventName, event => {
     clearAutoSaveTrackers();
@@ -422,34 +545,122 @@ onMounted(async () => {
   unlistenSettingsUpdated = await listen<AppSettings>("sticky-note-settings-updated", event => {
     applyStickyOpacity(event.payload.stickyNoteOpacity ?? DEFAULT_STICKY_OPACITY);
   });
-  unlistenThemeChanged = await listen<string>("app-theme-updated", event => {
-    applyTheme(event.payload === "light");
+  // Also listen for the generic settings-updated event (used for windowOpacity sync)
+  unlistenSettingsUpdatedGeneric = await listen<AppSettings>("settings-updated", event => {
+    applyStickyOpacity(event.payload.stickyNoteOpacity ?? DEFAULT_STICKY_OPACITY);
+    applyWindowOpacity(event.payload.windowOpacity ?? DEFAULT_WINDOW_OPACITY);
   });
+  try {
+    unlistenUiStateChanged = await listen<UiStatePayload>("ui-state-changed", event => {
+      rememberUiState(event.payload);
+    });
+  } catch (error) {
+    console.warn("[sticky-note-item] 监听 UI 状态变化失败", error);
+  }
+  try {
+    unlistenUiStateChangedWindow = await windowRef.listen<UiStatePayload>("ui-state-changed", event => {
+      rememberUiState(event.payload);
+    });
+  } catch (error) {
+    console.warn("[sticky-note-item] 监听窗口 UI 状态变化失败", error);
+  }
+  try {
+    unlistenThemeChangedLegacy = await listen<string>("app-theme-updated", event => {
+      applyTheme(event.payload === "light");
+      lastUiStateKey = "";
+    });
+  } catch (error) {
+    console.warn("[sticky-note-item] 监听主题变更失败", error);
+  }
+  try {
+    unlistenScaleChangedLegacy = await listen<number>("ui-scale-changed", event => {
+      applyUiScale(event.payload);
+      lastUiStateKey = "";
+    });
+  } catch (error) {
+    console.warn("[sticky-note-item] 监听缩放变更失败", error);
+  }
+  try {
+    unlistenWindowOpacityChangedLegacy = await listen<number>("window-opacity-changed", event => {
+      applyWindowOpacity(event.payload);
+      lastUiStateKey = "";
+    });
+  } catch (error) {
+    console.warn("[sticky-note-item] 监听透明度变更失败", error);
+  }
+  try {
+    const uiState = await api.getUiState();
+    if (uiState) {
+      rememberUiState(uiState);
+    }
+  } catch (error) {
+    console.warn("[sticky-note-item] 读取 UI 状态快照失败", error);
+  }
+  // Poll every 2 s as a reliable fallback in case the push event is missed.
+  uiStatePollInterval = window.setInterval(async () => {
+    try {
+      const uiState = await api.getUiState();
+      if (!uiState) return;
+      const key = `${uiState.uiScale}:${uiState.theme}:${uiState.windowOpacity}`;
+      if (key !== lastUiStateKey) {
+        rememberUiState(uiState);
+      }
+    } catch {
+      // ignore poll errors silently
+    }
+  }, 2000);
   storageHandler = event => {
     if (event.key === "appTheme") {
       applyThemeFromStorage();
+    }
+    if (event.key === "uiScale") {
+      applyUiScale(Number(event.newValue ?? DEFAULT_UI_SCALE));
+    }
+    if (event.key === "windowOpacity") {
+      applyWindowOpacity(Number(event.newValue ?? DEFAULT_WINDOW_OPACITY));
     }
   };
   window.addEventListener("storage", storageHandler);
 });
 
 onBeforeUnmount(() => {
+  if (uiStatePollInterval) {
+    window.clearInterval(uiStatePollInterval);
+    uiStatePollInterval = 0;
+  }
   if (storageHandler) {
     window.removeEventListener("storage", storageHandler);
+  }
+  if (windowUiStateHandler) {
+    window.removeEventListener("taskreminder-ui-state", windowUiStateHandler as EventListener);
   }
   if (unlistenRefresh) {
     unlistenRefresh();
   }
-  if (unlistenThemeChanged) {
-    unlistenThemeChanged();
-  }
   if (unlistenSettingsUpdated) {
     unlistenSettingsUpdated();
+  }
+  if (unlistenSettingsUpdatedGeneric) {
+    unlistenSettingsUpdatedGeneric();
+  }
+  if (unlistenUiStateChanged) {
+    unlistenUiStateChanged();
+  }
+  if (unlistenUiStateChangedWindow) {
+    unlistenUiStateChangedWindow();
+  }
+  if (unlistenThemeChangedLegacy) {
+    unlistenThemeChangedLegacy();
+  }
+  if (unlistenScaleChangedLegacy) {
+    unlistenScaleChangedLegacy();
+  }
+  if (unlistenWindowOpacityChangedLegacy) {
+    unlistenWindowOpacityChangedLegacy();
   }
   clearAutoSaveTrackers();
 });
 </script>
-
 
 
 
