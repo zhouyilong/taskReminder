@@ -17,11 +17,16 @@
       <div class="titlebar-actions">
         <button class="icon-button theme-toggle" type="button" title="切换主题" @click="toggleTheme">
           <transition name="theme" mode="out-in">
-            <svg v-if="isLightTheme" key="sun" viewBox="0 0 24 24" aria-hidden="true" class="theme-icon">
-              <path
-                d="M12 3a1 1 0 0 1 1 1v2.1a1 1 0 1 1-2 0V4a1 1 0 0 1 1-1zM6.2 6.2a1 1 0 0 1 1.4 0l1.5 1.5a1 1 0 0 1-1.4 1.4L6.2 7.6a1 1 0 0 1 0-1.4zM3 12a1 1 0 0 1 1-1h2.1a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1zM6.2 17.8a1 1 0 0 1 1.4 0l1.5 1.5a1 1 0 0 1-1.4 1.4l-1.5-1.5a1 1 0 0 1 0-1.4zM12 17a1 1 0 0 1 1 1v2.1a1 1 0 1 1-2 0V18a1 1 0 0 1 1-1zM17.8 17.8a1 1 0 0 1 1.4 0 1 1 0 0 1 0 1.4l-1.5 1.5a1 1 0 1 1-1.4-1.4l1.5-1.5zM18.7 12a1 1 0 0 1 1-1H22a1 1 0 1 1 0 2h-2.3a1 1 0 0 1-1-1zM17.8 6.2a1 1 0 0 1 1.4 1.4l-1.5 1.5a1 1 0 1 1-1.4-1.4l1.5-1.5z"
-              />
-              <circle cx="12" cy="12" r="4" />
+            <svg v-if="isLightTheme" key="sun" viewBox="0 0 24 24" aria-hidden="true" class="theme-icon theme-icon-sun">
+              <circle cx="12" cy="12" r="4.2" />
+              <path d="M12 2.75V5.1" />
+              <path d="M12 18.9V21.25" />
+              <path d="M2.75 12H5.1" />
+              <path d="M18.9 12H21.25" />
+              <path d="M5.45 5.45L7.1 7.1" />
+              <path d="M16.9 16.9L18.55 18.55" />
+              <path d="M16.9 7.1L18.55 5.45" />
+              <path d="M5.45 18.55L7.1 16.9" />
             </svg>
             <svg v-else key="moon" viewBox="0 0 24 24" aria-hidden="true" class="theme-icon">
               <path

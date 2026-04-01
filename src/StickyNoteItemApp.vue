@@ -199,9 +199,10 @@ const applyUiScale = (value: number) => {
 const rootStyle = computed(() => {
   const scale = uiScale.value || DEFAULT_UI_SCALE;
   return {
-    zoom: scale,
     width: `${100 / scale}%`,
     height: `${100 / scale}%`,
+    transform: `scale(${scale})`,
+    transformOrigin: "top left",
     opacity: windowOpacity.value
   };
 });

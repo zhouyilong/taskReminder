@@ -252,6 +252,14 @@ body.sticky-note-mode {
   height: 16px;
 }
 
+.theme-icon-sun {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .icon-button:hover {
   border-color: var(--primary);
   background: var(--primary-soft);
@@ -1702,6 +1710,7 @@ input[type="range"].settings-range {
   position: relative;
   width: 100%;
   height: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   background: linear-gradient(172deg, #17171b 0%, #131318 54%, #101016 100%);
@@ -1719,6 +1728,9 @@ input[type="range"].settings-range {
 .sticky-note-item-root {
   width: 100vw;
   height: 100vh;
+  overflow: hidden;
+  box-sizing: border-box;
+  transform-origin: top left;
 }
 
 .paper-note-window {
@@ -1807,9 +1819,12 @@ input[type="range"].settings-range {
   width: 17px;
   height: 17px;
   overflow: visible;
+  transform-origin: center;
+  transition: transform 0.2s ease, filter 0.2s ease;
 }
 
 .paper-note-action.pin.active .pin-icon-pencil {
+  transform: rotate(-45deg);
   filter: drop-shadow(0 0 1px rgba(99, 102, 241, 0.55));
 }
 
@@ -1836,6 +1851,7 @@ input[type="range"].settings-range {
 
 .paper-note-editor {
   flex: 1;
+  min-height: 0;
   border: none;
   background: transparent;
   padding: 16px 20px;
@@ -1862,6 +1878,8 @@ input[type="range"].settings-range {
 
 .paper-note-footer {
   height: 48px;
+  flex-shrink: 0;
+  box-sizing: border-box;
   padding: 0 20px;
   display: flex;
   align-items: center;
