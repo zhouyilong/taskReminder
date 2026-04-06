@@ -1,7 +1,7 @@
 {
   "name": "task-reminder-tauri",
   "private": true,
-  "version": "1.5.0",
+  "version": "1.5.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,10 +11,11 @@
     "release:updater": "powershell -ExecutionPolicy Bypass -File scripts/build-updater.ps1"
   },
   "dependencies": {
+    "@milkdown/crepe": "^7.20.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.0",
-    "vue": "^3.4.15"
+    "vue": "3.5.27"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.1",

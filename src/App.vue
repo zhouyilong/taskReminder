@@ -153,9 +153,15 @@
           <div class="form-row compact">
             <label class="field-label">标题</label>
             <input class="input" v-model="newTaskDescription" placeholder="输入任务标题" style="flex: 1" />
-            <label class="field-label">描述</label>
-            <input class="input" v-model="newTaskStickyContent" placeholder="输入任务描述（可选）" style="flex: 1" />
             <button class="button" @click="handleAddTask">添加任务</button>
+          </div>
+          <div class="form-row form-row-markdown task-create-markdown-row">
+            <MarkdownNoteEditor
+              v-model="newTaskStickyContent"
+              class="task-markdown-editor"
+              :theme="isLightTheme ? 'light' : 'dark'"
+              placeholder="输入任务描述，支持 Markdown 所见即所得"
+            />
           </div>
           <div class="subsection-title">待办列表</div>
           <div class="table-card">
@@ -182,7 +188,7 @@
                       <input type="checkbox" :checked="task.status === 'COMPLETED'" @change="toggleTask(task)" />
                     </td>
                     <td class="col-desc" :title="task.description">{{ task.description }}</td>
-                    <td class="col-note" :title="task.stickyContent || '-'">{{ task.stickyContent || "-" }}</td>
+                    <td class="col-note" :title="taskStickyPreview(task.stickyContent)">{{ taskStickyPreview(task.stickyContent) }}</td>
                     <td class="col-datetime" :title="formatDateTime(task.reminderTime)">{{ formatDateTime(task.reminderTime) }}</td>
                     <td class="col-datetime" :title="formatDateTime(task.createdAt)">{{ formatDateTime(task.createdAt) }}</td>
                   </tr>
@@ -237,7 +243,7 @@
                       <input type="checkbox" checked @change="toggleTask(task)" />
                     </td>
                     <td class="col-desc" :title="task.description">{{ task.description }}</td>
-                    <td class="col-note" :title="task.stickyContent || '-'">{{ task.stickyContent || "-" }}</td>
+                    <td class="col-note" :title="taskStickyPreview(task.stickyContent)">{{ taskStickyPreview(task.stickyContent) }}</td>
                     <td class="col-datetime" :title="formatDateTime(task.createdAt)">{{ formatDateTime(task.createdAt) }}</td>
                     <td class="col-datetime" :title="formatDateTime(task.completedAt)">{{ formatDateTime(task.completedAt) }}</td>
                   </tr>
@@ -419,8 +425,13 @@
       <div class="form-row">
         <input class="input" v-model="editTaskDescription" placeholder="任务标题" style="flex: 1" />
       </div>
-      <div class="form-row">
-        <input class="input" v-model="editTaskStickyContent" placeholder="任务描述（可选）" style="flex: 1" />
+      <div class="form-row form-row-markdown">
+        <MarkdownNoteEditor
+          v-model="editTaskStickyContent"
+          class="task-markdown-editor task-markdown-editor-modal"
+          :theme="isLightTheme ? 'light' : 'dark'"
+          placeholder="输入任务描述，支持 Markdown 所见即所得"
+        />
       </div>
       <div class="form-row">
         <input
@@ -682,7 +693,9 @@ import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/wi
 import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import type { DownloadEvent, Update } from "@tauri-apps/plugin-updater";
 import Modal from "./components/Modal.vue";
+import MarkdownNoteEditor from "./components/MarkdownNoteEditor.vue";
 import { api } from "./api";
+import { markdownToPlainText, markdownToPreviewText } from "./markdown";
 import { safeStorage } from "./safeStorage";
 import {
   checkForUpdates,
@@ -937,6 +950,10 @@ const updateProgressText = computed(() => {
   return "正在准备安装包...";
 });
 
+const taskStickyPreview = (value: string | null | undefined) => {
+  return markdownToPreviewText(value);
+};
+
 const tasksTotalPages = computed(() => {
   return Math.max(1, Math.ceil(tasks.value.length / tasksPageSize.value));
 });
@@ -953,7 +970,7 @@ const filteredCompleted = computed(() => {
   }
   return completedTasks.value.filter(task => {
     const descriptionMatched = task.description.toLowerCase().includes(keyword);
-    const stickyContentMatched = (task.stickyContent || "").toLowerCase().includes(keyword);
+    const stickyContentMatched = markdownToPlainText(task.stickyContent).toLowerCase().includes(keyword);
     return descriptionMatched || stickyContentMatched;
   });
 });
@@ -1426,7 +1443,7 @@ const handleAddTask = async () => {
   }
   await api.createTask({
     description: newTaskDescription.value.trim(),
-    stickyContent: newTaskStickyContent.value.trim() || null,
+    stickyContent: newTaskStickyContent.value.trim() ? newTaskStickyContent.value : null,
   });
   newTaskDescription.value = "";
   newTaskStickyContent.value = "";
@@ -1514,7 +1531,7 @@ const saveTaskEdit = async () => {
   await api.updateTask({
     id: editTaskId.value,
     description: editTaskDescription.value,
-    stickyContent: editTaskStickyContent.value.trim() || null,
+    stickyContent: editTaskStickyContent.value.trim() ? editTaskStickyContent.value : null,
     reminderTime: fromDatetimeLocal(editTaskReminder.value)
   });
   editTaskOpen.value = false;
@@ -1809,7 +1826,7 @@ const openDetail = (title: string, items: { label: string; value: string }[]) =>
 const openTaskDetail = (task: Task) => {
   openDetail("任务详情", [
     { label: "标题", value: task.description },
-    { label: "描述", value: task.stickyContent || "-" },
+    { label: "描述", value: markdownToPlainText(task.stickyContent) || "-" },
     { label: "状态", value: task.status === "COMPLETED" ? "已完成" : "待办" },
     { label: "创建时间", value: formatDateTime(task.createdAt) },
     { label: "完成时间", value: formatDateTime(task.completedAt) },

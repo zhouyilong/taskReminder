@@ -82,12 +82,13 @@
           </button>
         </div>
       </header>
-      <textarea
+      <MarkdownNoteEditor
         v-model="note.content"
-        class="paper-note-editor"
+        class="paper-note-editor paper-note-editor-host"
+        variant="ghost"
+        :theme="editorTheme"
         placeholder="在这里写下便签内容..."
-        @mousedown.stop
-        @input="handleContentInput"
+        @update:modelValue="handleContentInput"
       />
       <footer class="paper-note-footer">
         <span class="paper-note-time">{{ formattedCreatedAt }}</span>
@@ -109,6 +110,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getCurrentWindow, type ResizeDirection } from "@tauri-apps/api/window";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import MarkdownNoteEditor from "./components/MarkdownNoteEditor.vue";
 import { safeStorage } from "./safeStorage";
 import { api } from "./api";
 import type { AppSettings, StickyNote, UiStatePayload } from "./types";
@@ -117,6 +119,7 @@ const note = ref<StickyNote | null>(null);
 const saveHint = ref("");
 const saveCountdownSeconds = ref(0);
 const isPinned = ref(false);
+const editorTheme = ref<"light" | "dark">(safeStorage.getItem("appTheme") === "light" ? "light" : "dark");
 const windowRef = getCurrentWindow();
 const refreshEventName = `sticky-note-item-refresh-${windowRef.label.replace(/^sticky-note-item-/, "")}`;
 const AUTO_SAVE_IDLE_MS = 5000;
@@ -167,6 +170,7 @@ const formattedCreatedAt = computed(() => {
 const applyTheme = (useLight: boolean) => {
   document.documentElement.classList.toggle("light-theme", useLight);
   document.body.classList.toggle("light-theme", useLight);
+  editorTheme.value = useLight ? "light" : "dark";
 };
 
 const applyThemeFromStorage = () => {
@@ -199,10 +203,9 @@ const applyUiScale = (value: number) => {
 const rootStyle = computed(() => {
   const scale = uiScale.value || DEFAULT_UI_SCALE;
   return {
-    width: `${100 / scale}%`,
-    height: `${100 / scale}%`,
-    transform: `scale(${scale})`,
-    transformOrigin: "top left",
+    width: "100%",
+    height: "100%",
+    "--sticky-ui-scale": `${scale}`,
     opacity: windowOpacity.value
   };
 });
@@ -350,9 +353,6 @@ const scheduleAutoSave = () => {
 const handleTitleInput = () => {
   if (!note.value) {
     return;
-  }
-  if (!note.value.content.trim()) {
-    note.value.content = note.value.title;
   }
   scheduleAutoSave();
 };
