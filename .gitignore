@@ -28,3 +28,5 @@ Thumbs.db
 
 .github/
 src-tauri/gen/schemas/windows-schema.json
+
+.codex
