@@ -7,7 +7,8 @@ import type {
   StickyNote,
   AppSettings,
   SyncStatus,
-  NotificationPayload
+  NotificationPayload,
+  UiStatePayload
 } from "./types";
 
 export const api = {
@@ -123,6 +124,12 @@ export const api = {
   async closeStickyNoteByWindowLabel(label: string): Promise<void> {
     return invoke("close_sticky_note_by_window_label", { label });
   },
+  async setStickyNotePinnedByWindowLabel(label: string, pinned: boolean): Promise<boolean> {
+    return invoke("set_sticky_note_pinned_by_window_label", { label, pinned });
+  },
+  async getStickyNotePinnedByWindowLabel(label: string): Promise<boolean> {
+    return invoke("get_sticky_note_pinned_by_window_label", { label });
+  },
   async testWebDav(settings: AppSettings): Promise<{ ok: boolean; message: string }> {
     return invoke("test_webdav", { settings });
   },
@@ -154,5 +161,11 @@ export const api = {
   },
   async isDevMode(): Promise<boolean> {
     return invoke("is_dev_mode");
+  },
+  async emitUiStateChanged(uiScale: number, theme: string, windowOpacity: number): Promise<void> {
+    return invoke("emit_ui_state_changed", { uiScale, theme, windowOpacity });
+  },
+  async getUiState(): Promise<UiStatePayload | null> {
+    return invoke("get_ui_state");
   },
 };

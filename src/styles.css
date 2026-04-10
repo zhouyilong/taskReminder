@@ -158,6 +158,26 @@ body.sticky-note-mode {
   color: #7ee2ae;
 }
 
+.tag-button {
+  appearance: none;
+  border: 1px solid transparent;
+  background: inherit;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  -webkit-app-region: no-drag;
+}
+
+.tag-button:hover {
+  border-color: rgba(126, 226, 174, 0.38);
+}
+
+.update-tag {
+  background: rgba(255, 184, 77, 0.18) !important;
+  color: #ffd48b !important;
+}
+
 .titlebar-controls {
   display: flex;
   align-items: center;
@@ -230,6 +250,14 @@ body.sticky-note-mode {
 .theme-icon {
   width: 16px;
   height: 16px;
+}
+
+.theme-icon-sun {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .icon-button:hover {
@@ -530,6 +558,23 @@ textarea:focus-visible {
 .form-row.compact {
   gap: 8px;
   align-items: center;
+}
+
+.form-row-markdown {
+  align-items: flex-start;
+}
+
+.task-create-markdown-row {
+  margin-top: -4px;
+}
+
+.task-markdown-editor {
+  flex: 1 1 100%;
+  min-height: 160px;
+}
+
+.task-markdown-editor-modal {
+  min-height: 220px;
 }
 
 .field-label {
@@ -905,6 +950,84 @@ input[type="checkbox"] {
   gap: 8px;
 }
 
+.update-panel {
+  align-items: stretch;
+}
+
+.sync-status-value.is-error {
+  color: #ff9f9f;
+}
+
+.update-card {
+  margin-top: 10px;
+  border: 1px solid rgba(255, 184, 77, 0.24);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 184, 77, 0.08);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.update-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.update-version {
+  color: var(--text-title);
+  font-size: var(--font-body);
+  font-weight: 700;
+}
+
+.update-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--text-muted);
+  font-size: var(--font-meta);
+}
+
+.update-notes {
+  white-space: pre-wrap;
+  color: var(--text-base);
+  line-height: 1.6;
+}
+
+.update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.update-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.update-progress-track {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.update-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ffb84d, #ffd48b);
+}
+
+.update-progress-text {
+  color: var(--text-muted);
+  font-size: var(--font-meta);
+}
+
 .modal .form-row {
   margin-bottom: 0;
 }
@@ -1246,6 +1369,13 @@ input[type="checkbox"] {
   height: 3px;
   border-radius: 999px;
   accent-color: rgba(176, 212, 255, 0.96);
+  cursor: pointer;
+}
+
+input[type="range"].settings-range {
+  padding: 0;
+  border: none;
+  background: transparent;
   cursor: pointer;
 }
 
@@ -1597,6 +1727,7 @@ input[type="checkbox"] {
   position: relative;
   width: 100%;
   height: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   background: linear-gradient(172deg, #17171b 0%, #131318 54%, #101016 100%);
@@ -1612,8 +1743,11 @@ input[type="checkbox"] {
 }
 
 .sticky-note-item-root {
+  --sticky-ui-scale: 1;
   width: 100vw;
   height: 100vh;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .paper-note-window {
@@ -1623,18 +1757,20 @@ input[type="checkbox"] {
 }
 
 .paper-note-header {
-  height: 56px;
-  padding: 0 14px 0 20px;
+  height: calc(56px * var(--sticky-ui-scale));
+  padding: 0 calc(14px * var(--sticky-ui-scale)) 0 calc(20px * var(--sticky-ui-scale));
   display: flex;
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   background: transparent;
   user-select: none;
+  -webkit-app-region: drag;
   cursor: move;
 }
 
 .paper-note-header-pinned {
+  -webkit-app-region: no-drag;
   cursor: default;
 }
 
@@ -1649,11 +1785,12 @@ input[type="checkbox"] {
   background: transparent;
   color: #fafaf9;
   font-family: "Fraunces", serif;
-  font-size: 20px;
+  font-size: calc(20px * var(--sticky-ui-scale));
   font-weight: 600;
   outline: none;
   padding: 0;
-  margin-right: 12px;
+  margin-right: calc(12px * var(--sticky-ui-scale));
+  -webkit-app-region: no-drag;
 }
 
 .paper-note-title-input::placeholder {
@@ -1663,29 +1800,31 @@ input[type="checkbox"] {
 .paper-note-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--sticky-ui-scale));
   flex-shrink: 0;
+  -webkit-app-region: no-drag;
 }
 
 .paper-note-action,
 .paper-note-close {
-  width: 26px;
-  height: 26px;
+  width: calc(26px * var(--sticky-ui-scale));
+  height: calc(26px * var(--sticky-ui-scale));
+  -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
   justify-content: center;
   border: none;
   background: transparent;
   color: #8e8e93;
-  border-radius: 6px;
+  border-radius: calc(6px * var(--sticky-ui-scale));
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .paper-note-action svg,
 .paper-note-close svg {
-  width: 16px;
-  height: 16px;
+  width: calc(16px * var(--sticky-ui-scale));
+  height: calc(16px * var(--sticky-ui-scale));
   stroke-width: 1.8;
 }
 
@@ -1694,12 +1833,15 @@ input[type="checkbox"] {
 }
 
 .pin-icon-pencil {
-  width: 17px;
-  height: 17px;
+  width: calc(17px * var(--sticky-ui-scale));
+  height: calc(17px * var(--sticky-ui-scale));
   overflow: visible;
+  transform-origin: center;
+  transition: transform 0.2s ease, filter 0.2s ease;
 }
 
 .paper-note-action.pin.active .pin-icon-pencil {
+  transform: rotate(-45deg);
   filter: drop-shadow(0 0 1px rgba(99, 102, 241, 0.55));
 }
 
@@ -1726,32 +1868,59 @@ input[type="checkbox"] {
 
 .paper-note-editor {
   flex: 1;
+  min-height: 0;
   border: none;
   background: transparent;
-  padding: 16px 20px;
+  padding: calc(16px * var(--sticky-ui-scale)) calc(20px * var(--sticky-ui-scale));
   color: #fafaf9;
-  font-size: 15px;
+  font-size: calc(15px * var(--sticky-ui-scale));
   line-height: 1.6;
   resize: none;
   outline: none;
   font-family: "DM Sans", "Inter", sans-serif;
+  -webkit-app-region: no-drag;
+}
+
+.paper-note-editor-host {
+  overflow: hidden;
+}
+
+.paper-note-editor-host .markdown-note-editor-root {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+.paper-note-editor-host .milkdown,
+.paper-note-editor-host .ProseMirror {
+  min-height: 100%;
 }
 
 .paper-note-editor::placeholder {
   color: #4a4a50;
 }
 
-.paper-note-editor::-webkit-scrollbar {
-  width: 5px;
+.paper-note-editor-host .markdown-note-editor-root::-webkit-scrollbar {
+  width: 6px;
 }
-.paper-note-editor::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+
+.paper-note-editor-host .markdown-note-editor-root::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
   border-radius: 10px;
 }
 
+.paper-note-editor-host .markdown-note-editor-root::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .paper-note-footer {
-  height: 48px;
-  padding: 0 20px;
+  height: calc(48px * var(--sticky-ui-scale));
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 0 calc(20px * var(--sticky-ui-scale));
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1834,12 +2003,16 @@ input[type="checkbox"] {
   color: #18181b;
 }
 
+.light-theme .paper-note-editor-host .markdown-note-editor-root {
+  scrollbar-color: rgba(24, 24, 27, 0.18) transparent;
+}
+
 .light-theme .paper-note-editor::placeholder {
   color: #d4d4d8;
 }
 
-.light-theme .paper-note-editor::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.05);
+.light-theme .paper-note-editor-host .markdown-note-editor-root::-webkit-scrollbar-thumb {
+  background: rgba(24, 24, 27, 0.18);
 }
 
 .light-theme .paper-note-footer {
@@ -1992,6 +2165,5 @@ input[type="checkbox"] {
 .light-theme .modal-mask {
   background: rgba(15, 23, 42, 0.32);
 }
-
 
 

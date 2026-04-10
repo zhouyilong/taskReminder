@@ -26,6 +26,7 @@ use crate::db::DbManager;
 use crate::errors::AppError;
 use crate::models::{
     AppSettings, NotificationPayload, RecurringTask, ReminderRecord, StickyNote, SyncStatus, Task,
+    UiStatePayload,
 };
 use crate::scheduler::ReminderScheduler;
 use crate::single_instance::InstanceLock;
@@ -41,6 +42,9 @@ const STICKY_NOTE_ITEM_MIN_HEIGHT: f64 = 180.0;
 const STICKY_NOTE_MIN_OPACITY: f64 = 0.35;
 const STICKY_NOTE_MAX_OPACITY: f64 = 1.0;
 const STICKY_NOTE_DEFAULT_OPACITY: f64 = 0.95;
+const WINDOW_MIN_OPACITY: f64 = 0.3;
+const WINDOW_MAX_OPACITY: f64 = 1.0;
+const WINDOW_DEFAULT_OPACITY: f64 = 1.0;
 
 fn into_api<T>(result: Result<T, AppError>) -> ApiResult<T> {
     result.map_err(|e| e.to_string())
@@ -376,7 +380,9 @@ fn save_settings(
     let mut sanitized_settings = settings.clone();
     sanitized_settings.sticky_note_opacity =
         normalize_sticky_note_opacity(sanitized_settings.sticky_note_opacity);
-    let _ = app.emit("sticky-note-settings-updated", sanitized_settings);
+    sanitized_settings.window_opacity = normalize_window_opacity(sanitized_settings.window_opacity);
+    let _ = app.emit("sticky-note-settings-updated", sanitized_settings.clone());
+    let _ = app.emit("settings-updated", sanitized_settings);
     into_api(state.sync.update_settings())?;
     into_api(state.sync.notify_local_change())?;
     Ok(())
@@ -553,6 +559,35 @@ fn close_sticky_note_by_window_label(
 }
 
 #[tauri::command]
+fn set_sticky_note_pinned_by_window_label(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    label: String,
+    pinned: bool,
+) -> ApiResult<bool> {
+    let Some(note_id) = note_id_from_item_label(&label) else {
+        return Ok(false);
+    };
+    into_api(state.db.set_sticky_note_pinned(&note_id, pinned))?;
+    if let Some(window) = app.get_webview_window(&label) {
+        apply_sticky_item_layer(&window, pinned);
+    }
+    promote_sticky_item_over_peers(&app, &label);
+    Ok(pinned)
+}
+
+#[tauri::command]
+fn get_sticky_note_pinned_by_window_label(
+    state: State<AppState>,
+    label: String,
+) -> ApiResult<bool> {
+    let Some(note_id) = note_id_from_item_label(&label) else {
+        return Ok(false);
+    };
+    into_api(state.db.get_sticky_note_pinned(&note_id))
+}
+
+#[tauri::command]
 fn test_webdav(settings: AppSettings) -> ApiResult<WebDavTestResult> {
     match sync::test_webdav(&settings) {
         Ok((ok, message)) => Ok(WebDavTestResult { ok, message }),
@@ -675,6 +710,34 @@ fn is_dev_mode() -> bool {
     paths::is_dev_mode()
 }
 
+/// 向所有窗口广播 UI 状态变化（缩放、主题、透明度）
+/// 使用 Rust emit 确保 dev 模式下外部 webview 也能接收
+#[tauri::command]
+fn emit_ui_state_changed(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    ui_scale: f64,
+    theme: String,
+    window_opacity: f64,
+) -> ApiResult<()> {
+    let payload = UiStatePayload {
+        ui_scale,
+        theme,
+        window_opacity,
+    };
+    let mut snapshot = state.ui_state.lock().map_err(|e| e.to_string())?;
+    *snapshot = Some(payload.clone());
+    drop(snapshot);
+    emit_ui_state_to_sticky_windows(&app, &payload);
+    Ok(())
+}
+
+#[tauri::command]
+fn get_ui_state(state: State<AppState>) -> ApiResult<Option<UiStatePayload>> {
+    let snapshot = state.ui_state.lock().map_err(|e| e.to_string())?;
+    Ok(snapshot.clone())
+}
+
 #[tauri::command]
 fn get_current_theme(window: tauri::Window) -> ApiResult<String> {
     #[cfg(target_os = "windows")]
@@ -744,40 +807,135 @@ fn normalize_sticky_note_opacity(value: f64) -> f64 {
     value.clamp(STICKY_NOTE_MIN_OPACITY, STICKY_NOTE_MAX_OPACITY)
 }
 
-fn enforce_sticky_item_layer(window: &tauri::WebviewWindow) {
-    let _ = window.set_always_on_top(false);
-    let _ = window.set_always_on_bottom(true);
+fn normalize_window_opacity(value: f64) -> f64 {
+    if !value.is_finite() {
+        return WINDOW_DEFAULT_OPACITY;
+    }
+    value.clamp(WINDOW_MIN_OPACITY, WINDOW_MAX_OPACITY)
+}
+
+fn is_sticky_item_pinned(state: &AppState, note_id: &str) -> bool {
+    state.db.get_sticky_note_pinned(note_id).unwrap_or(false)
+}
+
+fn apply_sticky_item_layer(window: &tauri::WebviewWindow, is_pinned: bool) {
+    if is_pinned {
+        // Preserve pinned notes as top-most instead of forcing them back to the desktop layer.
+        let _ = window.set_always_on_bottom(false);
+        let _ = window.set_always_on_top(true);
+    } else {
+        let _ = window.set_always_on_top(false);
+        let _ = window.set_always_on_bottom(false);
+        let _ = window.set_always_on_bottom(true);
+    }
     let _ = window.set_skip_taskbar(true);
 }
 
-fn reorder_sticky_item_layer(window: &tauri::WebviewWindow) {
-    // Re-apply bottom-most flags to force z-order refresh within sticky-note windows.
-    let _ = window.set_always_on_top(false);
-    let _ = window.set_always_on_bottom(false);
-    let _ = window.set_always_on_bottom(true);
-    let _ = window.set_skip_taskbar(true);
+fn enforce_sticky_item_layer(window: &tauri::WebviewWindow, is_pinned: bool) {
+    apply_sticky_item_layer(window, is_pinned);
+}
+
+fn reorder_sticky_item_layer(window: &tauri::WebviewWindow, is_pinned: bool) {
+    // Re-apply the correct layer so unpinned notes stay on the desktop layer
+    // while pinned notes keep their top-most state.
+    apply_sticky_item_layer(window, is_pinned);
 }
 
 fn promote_sticky_item_over_peers(app: &tauri::AppHandle, target_label: &str) {
     // Keep all sticky item windows on desktop layer, but re-order peers first,
     // then place the target last so it appears above previous notes.
+    let pinned_state = app.try_state::<AppState>();
     for (label, window) in app.webview_windows() {
         if label.starts_with(STICKY_NOTE_ITEM_PREFIX) && label != target_label {
-            reorder_sticky_item_layer(&window);
+            let is_pinned = pinned_state
+                .as_ref()
+                .and_then(|state| {
+                    note_id_from_item_label(&label)
+                        .map(|note_id| is_sticky_item_pinned(state, &note_id))
+                })
+                .unwrap_or_else(|| window.is_always_on_top().unwrap_or(false));
+            reorder_sticky_item_layer(&window, is_pinned);
         }
     }
     if let Some(target) = app.get_webview_window(target_label) {
-        reorder_sticky_item_layer(&target);
+        let is_pinned = pinned_state
+            .as_ref()
+            .and_then(|state| {
+                note_id_from_item_label(target_label)
+                    .map(|note_id| is_sticky_item_pinned(state, &note_id))
+            })
+            .unwrap_or_else(|| target.is_always_on_top().unwrap_or(false));
+        reorder_sticky_item_layer(&target, is_pinned);
+    }
+}
+
+fn apply_ui_state_via_eval(window: &tauri::WebviewWindow, payload: &UiStatePayload) {
+    let Ok(payload_json) = serde_json::to_string(payload) else {
+        return;
+    };
+    let script = format!(
+        r#"(function () {{
+  try {{
+    const payload = {payload_json};
+    window.__TASKREMINDER_UI_STATE = payload;
+    try {{
+      window.localStorage.setItem("appTheme", payload.theme);
+      window.localStorage.setItem("uiScale", String(payload.uiScale));
+      window.localStorage.setItem("windowOpacity", String(payload.windowOpacity));
+    }} catch (_storageError) {{}}
+    window.dispatchEvent(new CustomEvent("taskreminder-ui-state", {{ detail: payload }}));
+  }} catch (error) {{
+    console.error("[taskreminder] apply ui state failed", error);
+  }}
+}})();"#,
+    );
+    let _ = window.eval(script);
+}
+
+fn emit_ui_state_to_sticky_windows(app: &tauri::AppHandle, payload: &UiStatePayload) {
+    // Use app-level broadcast so all webview windows (including external dev-mode URLs)
+    // receive the event via their `listen("ui-state-changed")` handlers — same mechanism
+    // used by the working `settings-updated` broadcast.
+    let _ = app.emit("ui-state-changed", payload.clone());
+    for (label, window) in app.webview_windows() {
+        if label.starts_with(STICKY_NOTE_ITEM_PREFIX) {
+            let _ = window.emit("ui-state-changed", payload.clone());
+            apply_ui_state_via_eval(&window, payload);
+        }
+    }
+}
+
+fn emit_cached_ui_state_to_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let Ok(snapshot) = state.ui_state.lock() else {
+        return;
+    };
+    if let Some(payload) = snapshot.clone() {
+        let _ = window.emit("ui-state-changed", payload.clone());
+        apply_ui_state_via_eval(window, &payload);
     }
 }
 
 fn show_sticky_note_item_window(app: &tauri::AppHandle, note: &StickyNote) -> Result<(), AppError> {
     let label = sticky_note_item_label(&note.task_id);
     let refresh_event = sticky_note_item_refresh_event(&note.task_id);
+    let is_pinned = note.is_pinned;
     let window = if let Some(existing) = app.get_webview_window(&label) {
         existing
     } else {
-        WebviewWindowBuilder::new(app, &label, WebviewUrl::App("sticky-note-item.html".into()))
+        // dev 模式下使用 Vite dev server URL，生产模式使用内置 HTML
+        let url = if paths::is_dev_mode() {
+            WebviewUrl::External(
+                "http://127.0.0.1:5173/sticky-note-item.html"
+                    .parse()
+                    .unwrap(),
+            )
+        } else {
+            WebviewUrl::App("sticky-note-item.html".into())
+        };
+        WebviewWindowBuilder::new(app, &label, url)
             .title("便签")
             .inner_size(STICKY_NOTE_ITEM_WIDTH, STICKY_NOTE_ITEM_HEIGHT)
             .min_inner_size(STICKY_NOTE_ITEM_MIN_WIDTH, STICKY_NOTE_ITEM_MIN_HEIGHT)
@@ -798,8 +956,9 @@ fn show_sticky_note_item_window(app: &tauri::AppHandle, note: &StickyNote) -> Re
     let _ = window.set_size(LogicalSize::new(width, height));
     let _ = window.set_position(LogicalPosition::new(note.pos_x, note.pos_y));
     let _ = window.set_shadow(false);
-    enforce_sticky_item_layer(&window);
+    enforce_sticky_item_layer(&window, is_pinned);
     let _ = window.emit(&refresh_event, note.clone());
+    emit_cached_ui_state_to_window(app, &window);
     window.show().map_err(|e| AppError::System(e.to_string()))?;
     promote_sticky_item_over_peers(app, &label);
     Ok(())
@@ -822,6 +981,8 @@ fn restore_open_sticky_note_items(app: &tauri::AppHandle, db: &DbManager) -> Res
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .on_window_event(|window, event| {
             if window.label() == "main" {
                 if let WindowEvent::CloseRequested { api, .. } = event {
@@ -896,6 +1057,8 @@ fn main() {
             move_sticky_note,
             close_sticky_note,
             close_sticky_note_by_window_label,
+            set_sticky_note_pinned_by_window_label,
+            get_sticky_note_pinned_by_window_label,
             test_webdav,
             sync_now,
             set_autostart,
@@ -905,7 +1068,9 @@ fn main() {
             get_notification_snapshot,
             get_current_theme,
             get_debug_info,
-            is_dev_mode
+            is_dev_mode,
+            emit_ui_state_changed,
+            get_ui_state
         ])
         .setup(|app| {
             let result: Result<(), AppError> = (|| {
@@ -962,6 +1127,7 @@ fn main() {
                     scheduler,
                     sync,
                     notification_snapshot: snapshot,
+                    ui_state: Arc::new(Mutex::new(None)),
                 };
                 app.manage(state);
                 restore_open_sticky_note_items(&app_handle, &db_for_restore)?;

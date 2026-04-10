@@ -1,5 +1,21 @@
 # Task Reminder (Tauri + Vue 3)
 
+## Recent Fix Notes
+### Sticky notes not following main window scale/theme
+- Symptom: after changing the main window zoom or theme, already-open sticky note windows did not update.
+- Root cause: cross-window UI sync relied on a single event path, which was not stable enough across different webview/runtime paths.
+- Fix:
+  - unified `uiScale`, `theme`, and `windowOpacity` into one UI state payload;
+  - broadcast from the main window, keep a backend snapshot, and re-send when sticky note windows are shown;
+  - add a final fallback that injects the current UI state directly into sticky-note webviews and applies it via a browser custom event.
+- Rule: for cross-window UI sync, keep at least “runtime broadcast + new-window replay + final fallback” instead of relying on a single event path.
+
+### Sticky note pinning was being reset
+- Symptom: clicking the pin button appeared to do nothing, or pinning was lost after opening/reordering sticky notes.
+- Root cause: the pin state lived only on the front end while the Rust window-layer logic kept reapplying sticky-note z-order, so show/reorder/restart paths could overwrite or forget the pinned state.
+- Fix: make the Rust backend the source of truth, persist `sticky_is_pinned` in the database, and always re-apply the correct top-most/bottom-most layer from that stored state when a sticky note is pinned, shown, or reordered.
+- Rule: pinning-related window behavior must be backend-owned and persisted; do not rely on a front-end-only `always_on_top(true)` call for durable sticky-note pin state.
+
 一个基于 Tauri + Vue 3 + TypeScript 的桌面任务提醒应用，包含主窗口与通知窗口。
 
 当前技术栈：**Tauri 2 + Vue 3 + TypeScript**。
@@ -120,6 +136,45 @@ Tauri 的打包通常需要在目标操作系统上执行：
 pnpm tauri build --bundles msi
 ```
 产物在 `src-tauri/target/release/bundle/msi/`。
+
+### 自动更新发布（GitHub Releases）
+项目已接入 Tauri 官方 updater，Windows 客户端会从 GitHub Releases 检查新版本。
+
+当前更新清单地址固定为：
+```
+https://github.com/zhouyilong/taskReminder/releases/latest/download/latest.json
+```
+
+其中 `latest.json` 会指向当前版本对应的 MSI 安装包，例如：
+```
+https://github.com/zhouyilong/taskReminder/releases/download/v1.4.7/TaskReminderApp_1.4.7_x64_zh-CN.msi
+```
+
+建议使用下面的命令生成自动更新产物：
+```
+pnpm release:updater
+```
+
+该命令会：
+- 读取 `$env:USERPROFILE\.tauri\taskReminder-updater.key`
+- 执行 `pnpm tauri build --bundles msi`
+- 生成 MSI 对应的签名文件 `.sig`
+- 在 `src-tauri/target/release/bundle/msi/` 中生成 `latest.json`
+
+每次发布新版本时，需要把以下 3 个文件上传到对应版本号的 GitHub Release：
+- `TaskReminderApp_<version>_x64_zh-CN.msi`
+- `TaskReminderApp_<version>_x64_zh-CN.msi.sig`
+- `latest.json`
+
+发布要求：
+- GitHub Release 标签需使用 `v<version>` 格式，例如 `v1.4.7`
+- `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 中的版本号应保持一致
+- `latest.json` 必须上传到“最新版本”对应的 Release，客户端才会通过 `releases/latest/download/latest.json` 获取到更新
+
+如需填写更新说明，可在执行命令时传入：
+```
+powershell -ExecutionPolicy Bypass -File scripts/build-updater.ps1 -ReleaseNotes "1. 新增自动更新`n2. 优化提醒体验"
+```
 
 ## 分发打包后的文件
 打包后在 `src-tauri/target/release/bundle/` 中按平台生成安装包或可执行文件，常见形式：

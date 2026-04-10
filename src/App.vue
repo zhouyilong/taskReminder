@@ -4,15 +4,29 @@
       <div class="titlebar-left" data-tauri-drag-region>
         <span class="app-title">任务提醒 {{ appVersion }}<span v-if="isDevMode" class="dev-tag"> [开发]</span></span>
         <span class="tag">{{ syncStatusLabel }}</span>
+        <button
+          v-if="updateTagLabel"
+          class="tag tag-button update-tag"
+          type="button"
+          :title="updateTagLabel"
+          @click="openSettingsForUpdate"
+        >
+          {{ updateTagLabel }}
+        </button>
       </div>
       <div class="titlebar-actions">
         <button class="icon-button theme-toggle" type="button" title="切换主题" @click="toggleTheme">
           <transition name="theme" mode="out-in">
-            <svg v-if="isLightTheme" key="sun" viewBox="0 0 24 24" aria-hidden="true" class="theme-icon">
-              <path
-                d="M12 3a1 1 0 0 1 1 1v2.1a1 1 0 1 1-2 0V4a1 1 0 0 1 1-1zM6.2 6.2a1 1 0 0 1 1.4 0l1.5 1.5a1 1 0 0 1-1.4 1.4L6.2 7.6a1 1 0 0 1 0-1.4zM3 12a1 1 0 0 1 1-1h2.1a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1zM6.2 17.8a1 1 0 0 1 1.4 0l1.5 1.5a1 1 0 0 1-1.4 1.4l-1.5-1.5a1 1 0 0 1 0-1.4zM12 17a1 1 0 0 1 1 1v2.1a1 1 0 1 1-2 0V18a1 1 0 0 1 1-1zM17.8 17.8a1 1 0 0 1 1.4 0 1 1 0 0 1 0 1.4l-1.5 1.5a1 1 0 1 1-1.4-1.4l1.5-1.5zM18.7 12a1 1 0 0 1 1-1H22a1 1 0 1 1 0 2h-2.3a1 1 0 0 1-1-1zM17.8 6.2a1 1 0 0 1 1.4 1.4l-1.5 1.5a1 1 0 1 1-1.4-1.4l1.5-1.5z"
-              />
-              <circle cx="12" cy="12" r="4" />
+            <svg v-if="isLightTheme" key="sun" viewBox="0 0 24 24" aria-hidden="true" class="theme-icon theme-icon-sun">
+              <circle cx="12" cy="12" r="4.2" />
+              <path d="M12 2.75V5.1" />
+              <path d="M12 18.9V21.25" />
+              <path d="M2.75 12H5.1" />
+              <path d="M18.9 12H21.25" />
+              <path d="M5.45 5.45L7.1 7.1" />
+              <path d="M16.9 16.9L18.55 18.55" />
+              <path d="M16.9 7.1L18.55 5.45" />
+              <path d="M5.45 18.55L7.1 16.9" />
             </svg>
             <svg v-else key="moon" viewBox="0 0 24 24" aria-hidden="true" class="theme-icon">
               <path
@@ -73,7 +87,7 @@
       </div>
     </div>
 
-    <div class="main" :style="{ zoom: uiScale }">
+    <div class="main" :style="{ zoom: uiScale, opacity: windowOpacity }">
       <aside class="sidebar" :class="{ collapsed: isSidebarCollapsed }">
         <div class="sidebar-header">
           <span class="sidebar-title" v-if="!isSidebarCollapsed">菜单</span>
@@ -139,9 +153,15 @@
           <div class="form-row compact">
             <label class="field-label">标题</label>
             <input class="input" v-model="newTaskDescription" placeholder="输入任务标题" style="flex: 1" />
-            <label class="field-label">描述</label>
-            <input class="input" v-model="newTaskStickyContent" placeholder="输入任务描述（可选）" style="flex: 1" />
             <button class="button" @click="handleAddTask">添加任务</button>
+          </div>
+          <div class="form-row form-row-markdown task-create-markdown-row">
+            <MarkdownNoteEditor
+              v-model="newTaskStickyContent"
+              class="task-markdown-editor"
+              :theme="isLightTheme ? 'light' : 'dark'"
+              placeholder="输入任务描述，支持 Markdown 所见即所得"
+            />
           </div>
           <div class="subsection-title">待办列表</div>
           <div class="table-card">
@@ -168,7 +188,7 @@
                       <input type="checkbox" :checked="task.status === 'COMPLETED'" @change="toggleTask(task)" />
                     </td>
                     <td class="col-desc" :title="task.description">{{ task.description }}</td>
-                    <td class="col-note" :title="task.stickyContent || '-'">{{ task.stickyContent || "-" }}</td>
+                    <td class="col-note" :title="taskStickyPreview(task.stickyContent)">{{ taskStickyPreview(task.stickyContent) }}</td>
                     <td class="col-datetime" :title="formatDateTime(task.reminderTime)">{{ formatDateTime(task.reminderTime) }}</td>
                     <td class="col-datetime" :title="formatDateTime(task.createdAt)">{{ formatDateTime(task.createdAt) }}</td>
                   </tr>
@@ -223,7 +243,7 @@
                       <input type="checkbox" checked @change="toggleTask(task)" />
                     </td>
                     <td class="col-desc" :title="task.description">{{ task.description }}</td>
-                    <td class="col-note" :title="task.stickyContent || '-'">{{ task.stickyContent || "-" }}</td>
+                    <td class="col-note" :title="taskStickyPreview(task.stickyContent)">{{ taskStickyPreview(task.stickyContent) }}</td>
                     <td class="col-datetime" :title="formatDateTime(task.createdAt)">{{ formatDateTime(task.createdAt) }}</td>
                     <td class="col-datetime" :title="formatDateTime(task.completedAt)">{{ formatDateTime(task.completedAt) }}</td>
                   </tr>
@@ -405,8 +425,13 @@
       <div class="form-row">
         <input class="input" v-model="editTaskDescription" placeholder="任务标题" style="flex: 1" />
       </div>
-      <div class="form-row">
-        <input class="input" v-model="editTaskStickyContent" placeholder="任务描述（可选）" style="flex: 1" />
+      <div class="form-row form-row-markdown">
+        <MarkdownNoteEditor
+          v-model="editTaskStickyContent"
+          class="task-markdown-editor task-markdown-editor-modal"
+          :theme="isLightTheme ? 'light' : 'dark'"
+          placeholder="输入任务描述，支持 Markdown 所见即所得"
+        />
       </div>
       <div class="form-row">
         <input
@@ -500,8 +525,13 @@
       <div class="modal-section">
         <div class="form-row compact">
           <label>界面缩放</label>
-          <input class="input" type="range" min="0.8" max="1.2" step="0.05" v-model.number="uiScale" style="flex: 1" />
+          <input class="settings-range" type="range" min="0.8" max="1.2" step="0.05" v-model.number="uiScale" style="flex: 1" />
           <span class="tag">{{ uiScalePercent }}%</span>
+        </div>
+        <div class="form-row compact">
+          <label>整体透明度</label>
+          <input class="settings-range" type="range" min="0.3" max="1" step="0.05" v-model.number="windowOpacity" style="flex: 1" />
+          <span class="tag">{{ windowOpacityPercent }}%</span>
         </div>
       </div>
       <div class="modal-section">
@@ -513,6 +543,80 @@
             <option value="light">浅色</option>
             <option value="dark">深色</option>
           </select>
+        </div>
+      </div>
+      <div class="modal-section">
+        <div class="form-row compact" style="gap: 8px;">
+          <label>
+            <input type="checkbox" v-model="updatePreferencesDraft.autoCheckEnabled" /> 启动时自动检查更新
+          </label>
+          <button
+            class="button secondary"
+            type="button"
+            :disabled="updateChecking || updateInstalling"
+            @click="handleCheckForUpdates(true)"
+          >
+            {{ updateChecking ? "检查中..." : "检查更新" }}
+          </button>
+        </div>
+        <div class="form-row compact sync-status-panel update-panel">
+          <div class="sync-status-row">
+            <span class="sync-status-label">当前版本:</span>
+            <span class="sync-status-value">{{ currentVersionLabel }}</span>
+          </div>
+          <div class="sync-status-row">
+            <span class="sync-status-label">最近检查:</span>
+            <span class="sync-status-value">{{ formatDateTime(updatePreferences.lastCheckAt) }}</span>
+          </div>
+          <div class="sync-status-row">
+            <span class="sync-status-label">更新状态:</span>
+            <span class="sync-status-value" :class="{ 'is-error': !!updateCheckError }">{{ updateStatusText }}</span>
+          </div>
+        </div>
+        <div v-if="availableUpdate" class="update-card">
+          <div class="update-card-header">
+            <span class="update-version">发现新版本 {{ formatVersionLabel(availableUpdate.version) }}</span>
+            <span v-if="isUpdateIgnored" class="tag">已忽略</span>
+          </div>
+          <div class="update-meta">
+            <span>当前版本 {{ formatVersionLabel(availableUpdate.currentVersion) }}</span>
+            <span>发布时间 {{ formatDateTime(availableUpdate.date) }}</span>
+          </div>
+          <div class="update-notes">{{ updateNotesText }}</div>
+          <div class="update-actions">
+            <button
+              class="button"
+              type="button"
+              :disabled="updateChecking || updateInstalling"
+              @click="handleInstallUpdate"
+            >
+              {{ updatePrimaryActionLabel }}
+            </button>
+            <button
+              v-if="!isUpdateIgnored"
+              class="button secondary"
+              type="button"
+              :disabled="updateInstalling"
+              @click="ignoreAvailableUpdate"
+            >
+              忽略此版本
+            </button>
+            <button
+              v-else
+              class="button secondary"
+              type="button"
+              :disabled="updateInstalling"
+              @click="restoreIgnoredUpdate"
+            >
+              恢复提醒
+            </button>
+          </div>
+          <div v-if="updateInstalling" class="update-progress">
+            <div class="update-progress-track">
+              <span class="update-progress-fill" :style="{ width: `${updateProgressPercent ?? 8}%` }"></span>
+            </div>
+            <span class="update-progress-text">{{ updateProgressText }}</span>
+          </div>
         </div>
       </div>
     </Modal>
@@ -583,22 +687,39 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { emit, listen } from "@tauri-apps/api/event";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from "vue";
+import { emit, emitTo, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
+import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
+import type { DownloadEvent, Update } from "@tauri-apps/plugin-updater";
 import Modal from "./components/Modal.vue";
+import MarkdownNoteEditor from "./components/MarkdownNoteEditor.vue";
 import { api } from "./api";
+import { markdownToPlainText, markdownToPreviewText } from "./markdown";
 import { safeStorage } from "./safeStorage";
+import {
+  checkForUpdates,
+  formatVersionLabel,
+  installUpdate,
+  loadUpdatePreferences,
+  saveUpdatePreferences,
+  shouldAutoCheckForUpdates,
+  summarizeUpdate,
+  type UpdatePreferences,
+  type UpdateSummary
+} from "./update";
 import type {
   Task,
   RecurringTask,
   RecurringMode,
   ReminderRecord,
   AppSettings,
-  SyncStatus
+  SyncStatus,
+  UiStatePayload
 } from "./types";
 
 const activeTab = ref("tasks");
+const STICKY_NOTE_ITEM_PREFIX = "sticky-note-item-";
 const isLightTheme = ref(safeStorage.getItem("appTheme") === "light");
 const appVersion = ref("");
 const isDevMode = ref(false);
@@ -612,6 +733,7 @@ const resolveCurrentWindow = (): TauriWindow | null => {
 };
 const getAppWindow = (): TauriWindow | null => resolveCurrentWindow();
 const uiScale = ref(Number(safeStorage.getItem("uiScale") ?? "1"));
+const windowOpacity = ref(Number(safeStorage.getItem("windowOpacity") ?? "1"));
 const isSidebarCollapsed = ref(safeStorage.getItem("sidebarCollapsed") === "1");
 
 const tasks = ref<Task[]>([]);
@@ -687,6 +809,7 @@ const settingsDraft = reactive<AppSettings>({
   stickyNoteX: null,
   stickyNoteY: null,
   stickyNoteOpacity: 0.95,
+  windowOpacity: 1.0,
   webdavEnabled: false,
   webdavUrl: "",
   webdavUsername: "",
@@ -696,6 +819,16 @@ const settingsDraft = reactive<AppSettings>({
   webdavDeviceId: "",
   notificationTheme: "app"
 });
+const initialUpdatePreferences = loadUpdatePreferences();
+const updatePreferences = reactive<UpdatePreferences>({ ...initialUpdatePreferences });
+const updatePreferencesDraft = reactive<UpdatePreferences>({ ...initialUpdatePreferences });
+const availableUpdate = ref<UpdateSummary | null>(null);
+const availableUpdateHandle = shallowRef<Update | null>(null);
+const updateChecking = ref(false);
+const updateInstalling = ref(false);
+const updateCheckError = ref("");
+const updateDownloadedBytes = ref(0);
+const updateContentLength = ref<number | null>(null);
 
 const tasksPageIndex = ref(1);
 const tasksPageSize = ref(20);
@@ -742,6 +875,84 @@ const syncStatusLabel = computed(() => {
 });
 
 const uiScalePercent = computed(() => Math.round(uiScale.value * 100));
+const windowOpacityPercent = computed(() => Math.round(windowOpacity.value * 100));
+const stickyNoteWindowVisible = ref(false);
+const stickyNoteToggleTitle = computed(() => {
+  if (stickyNoteSwitching.value) {
+    return "桌面便签处理中...";
+  }
+  return stickyNoteWindowVisible.value ? "关闭桌面便签" : "打开桌面便签";
+});
+const currentVersionLabel = computed(() => {
+  if (!appVersion.value) {
+    return "-";
+  }
+  return formatVersionLabel(appVersion.value);
+});
+const isUpdateIgnored = computed(() => {
+  return !!availableUpdate.value && updatePreferences.ignoredVersion === availableUpdate.value.version;
+});
+const updateTagLabel = computed(() => {
+  if (!availableUpdate.value || isUpdateIgnored.value) {
+    return "";
+  }
+  return `新版本 ${formatVersionLabel(availableUpdate.value.version)}`;
+});
+const updateNotesText = computed(() => {
+  const body = availableUpdate.value?.body?.trim();
+  return body || "本次版本未提供更新说明。";
+});
+const updateProgressPercent = computed(() => {
+  if (!updateContentLength.value || updateContentLength.value <= 0) {
+    return null;
+  }
+  return Math.min(100, Math.round((updateDownloadedBytes.value / updateContentLength.value) * 100));
+});
+const updateStatusText = computed(() => {
+  if (updateInstalling.value) {
+    return updateProgressPercent.value !== null
+      ? `正在下载更新 ${updateProgressPercent.value}%`
+      : "正在准备安装更新";
+  }
+  if (updateChecking.value) {
+    return "正在检查更新";
+  }
+  if (availableUpdate.value && !isUpdateIgnored.value) {
+    return `发现新版本 ${formatVersionLabel(availableUpdate.value.version)}`;
+  }
+  if (availableUpdate.value && isUpdateIgnored.value) {
+    return `已忽略 ${formatVersionLabel(availableUpdate.value.version)}`;
+  }
+  if (updateCheckError.value) {
+    return updateCheckError.value;
+  }
+  if (updatePreferences.lastCheckAt) {
+    return `上次检查 ${formatDateTime(updatePreferences.lastCheckAt)}`;
+  }
+  return "尚未检查更新";
+});
+const updatePrimaryActionLabel = computed(() => {
+  if (updateInstalling.value) {
+    return updateProgressPercent.value !== null ? `下载中 ${updateProgressPercent.value}%` : "准备安装...";
+  }
+  return "立即更新";
+});
+const updateProgressText = computed(() => {
+  if (!updateInstalling.value) {
+    return "";
+  }
+  if (updateContentLength.value && updateContentLength.value > 0) {
+    return `${formatBytes(updateDownloadedBytes.value)} / ${formatBytes(updateContentLength.value)}`;
+  }
+  if (updateDownloadedBytes.value > 0) {
+    return `已下载 ${formatBytes(updateDownloadedBytes.value)}`;
+  }
+  return "正在准备安装包...";
+});
+
+const taskStickyPreview = (value: string | null | undefined) => {
+  return markdownToPreviewText(value);
+};
 
 const tasksTotalPages = computed(() => {
   return Math.max(1, Math.ceil(tasks.value.length / tasksPageSize.value));
@@ -759,7 +970,7 @@ const filteredCompleted = computed(() => {
   }
   return completedTasks.value.filter(task => {
     const descriptionMatched = task.description.toLowerCase().includes(keyword);
-    const stickyContentMatched = (task.stickyContent || "").toLowerCase().includes(keyword);
+    const stickyContentMatched = markdownToPlainText(task.stickyContent).toLowerCase().includes(keyword);
     return descriptionMatched || stickyContentMatched;
   });
 });
@@ -843,6 +1054,21 @@ const formatDateTime = (value?: string | null) => {
     return "-";
   }
   return value.replace("T", " ");
+};
+
+const formatBytes = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const precision = size >= 10 || unitIndex === 0 ? 0 : 1;
+  return `${size.toFixed(precision)} ${units[unitIndex]}`;
 };
 
 const formatAction = (action: string) => {
@@ -1067,6 +1293,147 @@ const refreshAll = async () => {
 const loadSettings = async () => {
   const data = await api.getSettings();
   Object.assign(settingsDraft, data);
+  windowOpacity.value = data.windowOpacity;
+};
+
+const refreshStickyWindowState = async () => {
+  stickyNoteWindowVisible.value = false;
+};
+
+const persistUpdatePreferencesState = () => {
+  saveUpdatePreferences({
+    autoCheckEnabled: updatePreferences.autoCheckEnabled,
+    ignoredVersion: updatePreferences.ignoredVersion,
+    lastCheckAt: updatePreferences.lastCheckAt,
+  });
+};
+
+const syncUpdatePreferencesDraft = () => {
+  Object.assign(updatePreferencesDraft, updatePreferences);
+};
+
+const resetUpdateProgress = () => {
+  updateDownloadedBytes.value = 0;
+  updateContentLength.value = null;
+};
+
+const releaseAvailableUpdateHandle = async () => {
+  if (!availableUpdateHandle.value) {
+    return;
+  }
+  try {
+    await availableUpdateHandle.value.close();
+  } catch (error) {
+    console.warn("[update] 释放更新句柄失败", error);
+  } finally {
+    availableUpdateHandle.value = null;
+  }
+};
+
+const handleUpdateDownloadEvent = (event: DownloadEvent) => {
+  switch (event.event) {
+    case "Started":
+      updateContentLength.value = event.data.contentLength ?? null;
+      updateDownloadedBytes.value = 0;
+      break;
+    case "Progress":
+      updateDownloadedBytes.value += event.data.chunkLength;
+      break;
+    case "Finished":
+      if (updateContentLength.value) {
+        updateDownloadedBytes.value = updateContentLength.value;
+      }
+      break;
+  }
+};
+
+const handleCheckForUpdates = async (manual = false) => {
+  if (updateChecking.value || updateInstalling.value) {
+    return;
+  }
+  updateChecking.value = true;
+  updateCheckError.value = "";
+  resetUpdateProgress();
+  try {
+    await releaseAvailableUpdateHandle();
+    const update = await checkForUpdates();
+    updatePreferences.lastCheckAt = new Date().toISOString();
+    persistUpdatePreferencesState();
+    if (!update) {
+      availableUpdate.value = null;
+      if (manual) {
+        alert("当前已经是最新版本。");
+      }
+      return;
+    }
+
+    if (updatePreferences.ignoredVersion && updatePreferences.ignoredVersion !== update.version) {
+      updatePreferences.ignoredVersion = null;
+      persistUpdatePreferencesState();
+    }
+
+    availableUpdateHandle.value = update;
+    availableUpdate.value = summarizeUpdate(update);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    updateCheckError.value = `检查更新失败：${message}`;
+    if (manual) {
+      alert(updateCheckError.value);
+    }
+  } finally {
+    updateChecking.value = false;
+  }
+};
+
+const ignoreAvailableUpdate = async () => {
+  if (!availableUpdate.value) {
+    return;
+  }
+  updatePreferences.ignoredVersion = availableUpdate.value.version;
+  persistUpdatePreferencesState();
+  await releaseAvailableUpdateHandle();
+};
+
+const restoreIgnoredUpdate = () => {
+  updatePreferences.ignoredVersion = null;
+  persistUpdatePreferencesState();
+};
+
+const handleInstallUpdate = async () => {
+  if (updateChecking.value || updateInstalling.value) {
+    return;
+  }
+  updateCheckError.value = "";
+  if (!availableUpdateHandle.value) {
+    await handleCheckForUpdates(true);
+    if (!availableUpdateHandle.value) {
+      return;
+    }
+  }
+
+  updateInstalling.value = true;
+  resetUpdateProgress();
+  try {
+    await installUpdate(availableUpdateHandle.value, handleUpdateDownloadEvent);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    updateCheckError.value = `安装更新失败：${message}`;
+    alert(updateCheckError.value);
+  } finally {
+    updateInstalling.value = false;
+    await releaseAvailableUpdateHandle();
+  }
+};
+
+const openSettingsForUpdate = async () => {
+  await openSettings();
+};
+
+const maybeAutoCheckForUpdates = async () => {
+  if (!updatePreferences.autoCheckEnabled) {
+    return;
+  }
+  await handleCheckForUpdates(false);
 };
 
 
@@ -1076,7 +1443,7 @@ const handleAddTask = async () => {
   }
   await api.createTask({
     description: newTaskDescription.value.trim(),
-    stickyContent: newTaskStickyContent.value.trim() || null,
+    stickyContent: newTaskStickyContent.value.trim() ? newTaskStickyContent.value : null,
   });
   newTaskDescription.value = "";
   newTaskStickyContent.value = "";
@@ -1164,7 +1531,7 @@ const saveTaskEdit = async () => {
   await api.updateTask({
     id: editTaskId.value,
     description: editTaskDescription.value,
-    stickyContent: editTaskStickyContent.value.trim() || null,
+    stickyContent: editTaskStickyContent.value.trim() ? editTaskStickyContent.value : null,
     reminderTime: fromDatetimeLocal(editTaskReminder.value)
   });
   editTaskOpen.value = false;
@@ -1285,6 +1652,7 @@ const deleteSelectedRecords = async () => {
 
 const openSettings = async () => {
   await loadSettings();
+  syncUpdatePreferencesDraft();
   settingsOpen.value = true;
 };
 
@@ -1295,8 +1663,11 @@ const openWebdav = async () => {
 };
 
 const saveSettings = async () => {
+  settingsDraft.windowOpacity = windowOpacity.value;
   await api.saveSettings({ ...settingsDraft });
   await api.setAutoStart(settingsDraft.autoStartEnabled);
+  updatePreferences.autoCheckEnabled = updatePreferencesDraft.autoCheckEnabled;
+  persistUpdatePreferencesState();
   settingsOpen.value = false;
   syncStatus.value = await api.getSyncStatus();
 };
@@ -1323,7 +1694,35 @@ const toggleTheme = () => {
   isLightTheme.value = !isLightTheme.value;
   const theme = isLightTheme.value ? "light" : "dark";
   safeStorage.setItem("appTheme", theme);
-  void emit("app-theme-updated", theme);
+  void emitCurrentUiState();
+};
+
+const emitCurrentUiState = async () => {
+  const payload: UiStatePayload = {
+    uiScale: uiScale.value,
+    theme: isLightTheme.value ? "light" : "dark",
+    windowOpacity: windowOpacity.value
+  };
+  try {
+    const stickyWindows = (await getAllWebviewWindows()).filter(window => window.label.startsWith(STICKY_NOTE_ITEM_PREFIX));
+    await Promise.allSettled([
+      emit("ui-state-changed", payload),
+      emit("app-theme-updated", payload.theme),
+      emit("ui-scale-changed", payload.uiScale),
+      emit("window-opacity-changed", payload.windowOpacity),
+      ...stickyWindows.map(window => emitTo(window.label, "ui-state-changed", payload)),
+      ...stickyWindows.map(window => emitTo(window.label, "app-theme-updated", payload.theme)),
+      ...stickyWindows.map(window => emitTo(window.label, "ui-scale-changed", payload.uiScale)),
+      ...stickyWindows.map(window => emitTo(window.label, "window-opacity-changed", payload.windowOpacity))
+    ]);
+  } catch (error) {
+    console.error("[main] 前端同步 UI 状态失败", error);
+  }
+  try {
+    await api.emitUiStateChanged(payload.uiScale, payload.theme, payload.windowOpacity);
+  } catch (error) {
+    console.error("[main] 广播 UI 状态失败", error);
+  }
 };
 
 const handleMinimize = async () => {
@@ -1427,7 +1826,7 @@ const openDetail = (title: string, items: { label: string; value: string }[]) =>
 const openTaskDetail = (task: Task) => {
   openDetail("任务详情", [
     { label: "标题", value: task.description },
-    { label: "描述", value: task.stickyContent || "-" },
+    { label: "描述", value: markdownToPlainText(task.stickyContent) || "-" },
     { label: "状态", value: task.status === "COMPLETED" ? "已完成" : "待办" },
     { label: "创建时间", value: formatDateTime(task.createdAt) },
     { label: "完成时间", value: formatDateTime(task.completedAt) },
@@ -1446,6 +1845,7 @@ const openRecordDetail = (record: ReminderRecord) => {
 };
 
 onMounted(async () => {
+  syncUpdatePreferencesDraft();
   try {
     const { getVersion } = await import("@tauri-apps/api/app");
     appVersion.value = await getVersion();
@@ -1457,8 +1857,19 @@ onMounted(async () => {
     await refreshAll();
     await loadSettings();
     syncStatus.value = await api.getSyncStatus();
+    await refreshStickyWindowState();
   } catch (error) {
     console.error("[main] 初始化数据失败", error);
+  }
+  try {
+    await emitCurrentUiState();
+  } catch (error) {
+    console.error("[main] 初始化广播 UI 状态失败", error);
+  }
+  try {
+    await maybeAutoCheckForUpdates();
+  } catch (error) {
+    console.error("[main] 自动检查更新失败", error);
   }
   const appWindow = getAppWindow();
   if (appWindow) {
@@ -1502,17 +1913,45 @@ onMounted(async () => {
   } catch (error) {
     console.error("[main] 监听 tray-create-sticky-note 失败", error);
   }
+  try {
+    await listen("tray-check-update", async () => {
+      await openSettings();
+      await handleCheckForUpdates(true);
+    });
+  } catch (error) {
+    console.error("[main] 监听 tray-check-update 失败", error);
+  }
+  try {
+    await listen<boolean>("sticky-note-visibility", event => {
+      stickyNoteWindowVisible.value = event.payload;
+    });
+  } catch (error) {
+    console.error("[main] 监听 sticky-note-visibility 失败", error);
+  }
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("click", hideContextMenu);
+  void releaseAvailableUpdateHandle();
 });
 
 watch(uiScale, value => {
   const normalized = Math.min(1.2, Math.max(0.8, Number(value) || 1));
-  if (normalized !== uiScale.value) {
+  if (normalized !== value) {
     uiScale.value = normalized;
+    return;
   }
   safeStorage.setItem("uiScale", normalized.toString());
+  void emitCurrentUiState();
+});
+
+watch(windowOpacity, value => {
+  const normalized = Math.min(1, Math.max(0.3, Number(value) || 1));
+  if (normalized !== value) {
+    windowOpacity.value = normalized;
+    return;
+  }
+  safeStorage.setItem("windowOpacity", normalized.toString());
+  void emitCurrentUiState();
 });
 </script>

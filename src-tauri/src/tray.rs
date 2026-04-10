@@ -49,6 +49,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
     let menu = MenuBuilder::new(app)
         .text("open", format!("打开{}", dev_tag))
         .text("new_note", "新建便签")
+        .text("check_update", "检查更新")
         .text("sync_now", "立即同步")
         .separator()
         .text("quit", "退出")
@@ -63,6 +64,10 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
             }
             "new_note" => {
                 create_sticky_note(app);
+            }
+            "check_update" => {
+                show_main(app);
+                let _ = app.emit("tray-check-update", ());
             }
             "sync_now" => {
                 if let Some(state) = app.try_state::<AppState>() {
