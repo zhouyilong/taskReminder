@@ -1103,7 +1103,9 @@ fn main() {
                     }
                 }
 
-                let db = DbManager::new(paths::db_path(&data_dir))?;
+                let db_path = paths::db_path(&data_dir);
+                let is_first_launch = !db_path.exists();
+                let db = DbManager::new(db_path)?;
                 let snapshot = Arc::new(Mutex::new(None));
                 let sync = CloudSyncService::new(app_handle.clone(), db.clone());
                 let scheduler = ReminderScheduler::new(
@@ -1116,9 +1118,20 @@ fn main() {
                 sync.start()?;
                 maintenance::start_maintenance(db.clone());
 
-                let settings = db.load_settings()?;
-                if settings.auto_start_enabled {
+                let mut settings = db.load_settings()?;
+                let autostart_enabled = autostart::is_autostart_enabled().unwrap_or(false);
+                if !dev_mode && is_first_launch && !autostart_enabled {
+                    settings.auto_start_enabled = true;
+                    let _ = db.save_settings(&settings);
                     let _ = autostart::enable_autostart();
+                } else {
+                    if settings.auto_start_enabled != autostart_enabled {
+                        settings.auto_start_enabled = autostart_enabled;
+                        let _ = db.save_settings(&settings);
+                    }
+                    if settings.auto_start_enabled && !autostart_enabled {
+                        let _ = autostart::enable_autostart();
+                    }
                 }
                 let db_for_restore = db.clone();
 

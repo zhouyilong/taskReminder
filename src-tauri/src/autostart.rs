@@ -3,6 +3,14 @@ use std::path::PathBuf;
 
 use crate::errors::AppError;
 
+fn autostart_entry_name() -> &'static str {
+    if crate::paths::is_dev_mode() {
+        "TaskReminderApp-Dev"
+    } else {
+        "TaskReminderApp"
+    }
+}
+
 pub fn enable_autostart() -> Result<(), AppError> {
     #[cfg(windows)]
     {
@@ -14,7 +22,7 @@ pub fn enable_autostart() -> Result<(), AppError> {
             .create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
             .map_err(|e| AppError::System(e.to_string()))?;
         let exe = std::env::current_exe().map_err(|e| AppError::System(e.to_string()))?;
-        key.set_value("TaskReminderApp", &exe.to_string_lossy().to_string())
+        key.set_value(autostart_entry_name(), &exe.to_string_lossy().to_string())
             .map_err(|e| AppError::System(e.to_string()))?;
         return Ok(());
     }
@@ -28,12 +36,13 @@ pub fn enable_autostart() -> Result<(), AppError> {
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
 <plist version=\"1.0\">\n\
 <dict>\n\
-  <key>Label</key><string>com.taskreminder.app</string>\n\
+  <key>Label</key><string>{}</string>\n\
   <key>ProgramArguments</key>\n\
   <array><string>{}</string></array>\n\
   <key>RunAtLoad</key><true/>\n\
 </dict>\n\
 </plist>\n",
+            macos_launch_label(),
             exe.to_string_lossy()
         );
         std::fs::create_dir_all(plist_path.parent().unwrap())?;
@@ -69,7 +78,7 @@ pub fn disable_autostart() -> Result<(), AppError> {
             "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
             KEY_ALL_ACCESS,
         ) {
-            let _ = key.delete_value("TaskReminderApp");
+            let _ = key.delete_value(autostart_entry_name());
         }
         return Ok(());
     }
@@ -107,7 +116,7 @@ pub fn is_autostart_enabled() -> Result<bool, AppError> {
             "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
             KEY_READ,
         ) {
-            let value: Result<String, _> = key.get_value("TaskReminderApp");
+            let value: Result<String, _> = key.get_value(autostart_entry_name());
             return Ok(value.is_ok());
         }
         return Ok(false);
@@ -136,7 +145,16 @@ fn macos_plist_path() -> Result<PathBuf, AppError> {
     Ok(home
         .join("Library")
         .join("LaunchAgents")
-        .join("com.taskreminder.app.plist"))
+        .join(format!("{}.plist", macos_launch_label())))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_launch_label() -> &'static str {
+    if crate::paths::is_dev_mode() {
+        "com.taskreminder.app.dev"
+    } else {
+        "com.taskreminder.app"
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -146,5 +164,5 @@ fn linux_desktop_path() -> Result<PathBuf, AppError> {
     Ok(home
         .join(".config")
         .join("autostart")
-        .join("TaskReminderApp.desktop"))
+        .join(format!("{}.desktop", autostart_entry_name())))
 }

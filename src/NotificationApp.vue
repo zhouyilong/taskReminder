@@ -2,10 +2,29 @@
   <div class="notification-shell" :class="{ 'light-theme': isLightTheme, 'linux-platform': isLinuxPlatform }">
     <div class="notification-window" v-if="visible">
       <div class="notification-header">
-        <div class="notification-title">任务提醒</div>
+        <div class="notification-heading">
+          <div class="notification-eyebrow">
+            <span class="notification-pulse-dot" aria-hidden="true"></span>
+            <span class="notification-status">提醒进行中</span>
+          </div>
+          <div class="notification-title">任务提醒</div>
+        </div>
         <button class="notification-close" type="button" @click="handleDismiss">✕</button>
       </div>
       <div class="notification-body">{{ payload?.description }}</div>
+      <div class="notification-meta">
+        <div class="notification-meta-item">
+          <span class="notification-meta-label">已停留</span>
+          <strong class="notification-meta-value">{{ elapsedLabel }}</strong>
+        </div>
+        <div class="notification-meta-item">
+          <span class="notification-meta-label">剩余</span>
+          <strong class="notification-meta-value">{{ remainingLabel }}</strong>
+        </div>
+      </div>
+      <div class="notification-progress" aria-hidden="true">
+        <div class="notification-progress-bar" :style="{ width: `${progressPercent}%` }"></div>
+      </div>
       <div class="notification-actions">
         <button class="button secondary" @click="handleAcknowledge">知道了</button>
         <button class="button" @click="handleSnooze">稍后提醒</button>
@@ -15,7 +34,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { listen, TauriEvent } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
@@ -25,10 +44,13 @@ import type { NotificationPayload } from "./types";
 
 type NotificationThemeMode = "system" | "app" | "light" | "dark";
 
+const AUTO_CLOSE_MS = 15 * 60 * 1000;
 const payload = ref<NotificationPayload | null>(null);
 const visible = ref(false);
 const isLightTheme = ref(false);
 const notificationTheme = ref<NotificationThemeMode>("app");
+const shownAt = ref<number | null>(null);
+const nowTick = ref(Date.now());
 const isLinuxPlatform =
   typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent);
 const resolveCurrentWindow = (): TauriWindow | null => {
@@ -40,6 +62,7 @@ const resolveCurrentWindow = (): TauriWindow | null => {
 };
 const appWindow = resolveCurrentWindow();
 let timer: number | null = null;
+let elapsedTicker: number | null = null;
 let unlistenTheme: (() => void) | null = null;
 let unlistenThemeEvent: (() => void) | null = null;
 let unlistenDataUpdated: (() => void) | null = null;
@@ -48,13 +71,63 @@ let mediaHandler: ((event: MediaQueryListEvent) => void) | null = null;
 let themePoll: number | null = null;
 let storageHandler: ((event: StorageEvent) => void) | null = null;
 
-const startAutoClose = () => {
-  if (timer) {
-    clearTimeout(timer);
+const formatDuration = (totalMs: number) => {
+  const totalSeconds = Math.max(0, Math.floor(totalMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
   }
+
+  return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+};
+
+const elapsedMs = computed(() => {
+  if (!shownAt.value) {
+    return 0;
+  }
+  return Math.max(0, nowTick.value - shownAt.value);
+});
+
+const remainingMs = computed(() => Math.max(0, AUTO_CLOSE_MS - elapsedMs.value));
+const elapsedLabel = computed(() => formatDuration(elapsedMs.value));
+const remainingLabel = computed(() => formatDuration(remainingMs.value));
+const progressPercent = computed(() => {
+  if (!shownAt.value) {
+    return 0;
+  }
+  return Math.min(100, (elapsedMs.value / AUTO_CLOSE_MS) * 100);
+});
+
+const stopAutoClose = () => {
+  if (timer !== null) {
+    clearTimeout(timer);
+    timer = null;
+  }
+};
+
+const stopElapsedTicker = () => {
+  if (elapsedTicker !== null) {
+    clearInterval(elapsedTicker);
+    elapsedTicker = null;
+  }
+};
+
+const startElapsedTicker = () => {
+  stopElapsedTicker();
+  nowTick.value = Date.now();
+  elapsedTicker = window.setInterval(() => {
+    nowTick.value = Date.now();
+  }, 1000);
+};
+
+const startAutoClose = () => {
+  stopAutoClose();
   timer = window.setTimeout(() => {
-    handleDismiss();
-  }, 180000);
+    void handleDismiss();
+  }, AUTO_CLOSE_MS);
 };
 
 const setThemeClass = (useLight: boolean) => {
@@ -204,17 +277,23 @@ const stopThemePolling = () => {
 
 const show = async (data: NotificationPayload) => {
   payload.value = data;
+  shownAt.value = Date.now();
+  nowTick.value = shownAt.value;
   visible.value = true;
   await loadNotificationTheme();
   await applyThemeByMode();
   if (appWindow) {
     await appWindow.show();
   }
+  startElapsedTicker();
   startAutoClose();
 };
 
 const hide = async () => {
   visible.value = false;
+  shownAt.value = null;
+  stopAutoClose();
+  stopElapsedTicker();
   stopThemePolling();
   if (appWindow) {
     await appWindow.hide();
@@ -311,6 +390,8 @@ onBeforeUnmount(() => {
   if (storageHandler) {
     window.removeEventListener("storage", storageHandler);
   }
+  stopAutoClose();
+  stopElapsedTicker();
   stopThemePolling();
 });
 </script>
