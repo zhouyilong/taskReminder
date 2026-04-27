@@ -442,12 +442,50 @@ const resolveCurrentLogicalPosition = async () => {
   }
 };
 
+const resolveCurrentLogicalSize = async () => {
+  try {
+    const [scaleFactor, size] = await Promise.all([
+      windowRef.scaleFactor(),
+      windowRef.innerSize()
+    ]);
+    return {
+      width: size.width / scaleFactor,
+      height: size.height / scaleFactor
+    };
+  } catch (error) {
+    console.warn("[sticky-note-item] 读取当前窗口大小失败", error);
+    return null;
+  }
+};
+
 const createSiblingNote = async () => {
-  const position = await resolveCurrentLogicalPosition();
-  const payload: { defaultX?: number; defaultY?: number } = {};
+  const [position, size] = await Promise.all([
+    resolveCurrentLogicalPosition(),
+    resolveCurrentLogicalSize()
+  ]);
+  const payload: {
+    title?: string;
+    content?: string;
+    width?: number;
+    height?: number;
+    defaultX?: number;
+    defaultY?: number;
+  } = {};
   if (position) {
     payload.defaultX = Math.max(0, position.x + 26);
-    payload.defaultY = Math.max(0, position.y - 22);
+    payload.defaultY = Math.max(0, position.y + 26);
+  }
+  if (size) {
+    payload.width = size.width;
+    payload.height = size.height;
+  } else if (note.value) {
+    payload.width = note.value.width;
+    payload.height = note.value.height;
+  }
+  if (note.value) {
+    const baseTitle = note.value.title?.trim() || "新便签";
+    payload.title = `${baseTitle}【拷贝】`;
+    payload.content = note.value.content;
   }
   try {
     await api.createStickyNote(payload);

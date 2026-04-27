@@ -32,7 +32,7 @@ fn show_main(app: &AppHandle) {
 
 fn create_sticky_note(app: &AppHandle) {
     if let Some(state) = app.try_state::<AppState>() {
-        if let Err(err) = create_custom_sticky_note_via_app(app, state.inner(), "", None, None) {
+        if let Err(err) = create_custom_sticky_note_via_app(app, state.inner(), "", None, None, None, None, None) {
             eprintln!("[tray] 新建便签失败: {}", err);
         }
     } else {

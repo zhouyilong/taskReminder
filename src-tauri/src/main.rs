@@ -164,6 +164,9 @@ struct MoveStickyNotePayload {
 #[serde(rename_all = "camelCase")]
 struct CreateStickyNotePayload {
     title: Option<String>,
+    content: Option<String>,
+    width: Option<f64>,
+    height: Option<f64>,
     default_x: Option<f64>,
     default_y: Option<f64>,
 }
@@ -444,8 +447,11 @@ fn create_sticky_note(
         &app,
         state.inner(),
         payload.title.as_deref().unwrap_or(""),
+        payload.content.as_deref(),
         payload.default_x,
         payload.default_y,
+        payload.width,
+        payload.height,
     ))
 }
 
@@ -453,12 +459,15 @@ pub(crate) fn create_custom_sticky_note_via_app(
     app: &tauri::AppHandle,
     state: &AppState,
     title: &str,
+    content: Option<&str>,
     default_x: Option<f64>,
     default_y: Option<f64>,
+    default_width: Option<f64>,
+    default_height: Option<f64>,
 ) -> Result<StickyNote, AppError> {
     let note = state
         .db
-        .create_custom_sticky_note(title, default_x, default_y)?;
+        .create_custom_sticky_note(title, content, default_x, default_y, default_width, default_height)?;
     {
         let app_for_show = app.clone();
         let note_for_show = note.clone();

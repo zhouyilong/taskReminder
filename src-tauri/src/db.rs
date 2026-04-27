@@ -606,8 +606,11 @@ impl DbManager {
     pub fn create_custom_sticky_note(
         &self,
         title: &str,
+        content: Option<&str>,
         default_x: Option<f64>,
         default_y: Option<f64>,
+        default_width: Option<f64>,
+        default_height: Option<f64>,
     ) -> Result<StickyNote, AppError> {
         let conn = self.get_conn()?;
         let now = now_string();
@@ -620,26 +623,31 @@ impl DbManager {
             .filter(|value| value.is_finite())
             .unwrap_or(STICKY_NOTE_DEFAULT_POS_Y)
             .max(0.0);
-        let width = STICKY_NOTE_ITEM_DEFAULT_WIDTH;
-        let height = STICKY_NOTE_ITEM_DEFAULT_HEIGHT;
+        let width = default_width
+            .filter(|v| v.is_finite() && *v >= STICKY_NOTE_ITEM_MIN_WIDTH)
+            .unwrap_or(STICKY_NOTE_ITEM_DEFAULT_WIDTH);
+        let height = default_height
+            .filter(|v| v.is_finite() && *v >= STICKY_NOTE_ITEM_MIN_HEIGHT)
+            .unwrap_or(STICKY_NOTE_ITEM_DEFAULT_HEIGHT);
         let resolved_title = if title.trim().is_empty() {
             "新便签".to_string()
         } else {
             title.trim().to_string()
         };
+        let resolved_content = content.unwrap_or("").to_string();
         conn.execute(
             "INSERT INTO tasks (
                 id, description, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at,
                 sticky_content, sticky_pos_x, sticky_pos_y, sticky_width, sticky_height, sticky_is_open
             )
-             VALUES (?, ?, 'ONE_TIME', 'PENDING', ?, NULL, NULL, ?, NULL, '', ?, ?, ?, ?, 1)",
-            params![id, resolved_title, now, now, x, y, width, height],
+             VALUES (?, ?, 'ONE_TIME', 'PENDING', ?, NULL, NULL, ?, NULL, ?, ?, ?, ?, ?, 1)",
+            params![id, resolved_title, now, now, resolved_content, x, y, width, height],
         )?;
         Ok(StickyNote {
             task_id: id,
             title: resolved_title,
             note_type: "TASK".to_string(),
-            content: String::new(),
+            content: resolved_content,
             pos_x: x,
             pos_y: y,
             width,

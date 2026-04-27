@@ -94,6 +94,9 @@ export const api = {
   },
   async createStickyNote(payload: {
     title?: string | null;
+    content?: string | null;
+    width?: number | null;
+    height?: number | null;
     defaultX?: number | null;
     defaultY?: number | null;
   }): Promise<StickyNote> {
