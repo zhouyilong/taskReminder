@@ -49,10 +49,13 @@
 - **解决**：使用 `shallowRef` 代替 `ref` 存储 Tauri 插件返回的类实例对象，避免 Vue 深度代理。
 - **规则**：**凡是 Tauri 插件返回的类实例（如 `Update`、`Channel` 等），一律使用 `shallowRef` 而非 `ref` 存储。**
 
-### 构建签名环境变量传递
-- **问题**：PowerShell 中通过 `$env:TAURI_SIGNING_PRIVATE_KEY` 设置环境变量后，直接调用 `pnpm.cmd` 可能导致子进程环境变量丢失，构建卡住。
-- **解决**：① 用 `.Trim()` 清除密钥尾部换行；② 设置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""` 避免交互等待；③ 用 `cmd /c` 包装 `pnpm.cmd` 调用确保环境变量继承。
-- **规则**：在 bash 中构建时，直接 `export` 两个环境变量后调用 `pnpm tauri build`，最可靠。
+### github release / GitHub Release 更新发布与签名构建
+- **关键词**：github release、GitHub Release、Tauri updater、MSI、latest.json、TAURI_SIGNING_PRIVATE_KEY。
+- 发布更新时，先同步三处版本号：`package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`。
+- PowerShell 推荐直接执行 `pnpm release:updater`。该脚本会读取 `~/.tauri/taskReminder-updater.key`，用 `.Trim()` 清除签名私钥尾部换行，设置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""` 避免交互等待，并通过 `cmd /c "pnpm.cmd tauri build --bundles msi"` 确保子进程继承签名环境变量。
+- 构建产物位于 `src-tauri/target/release/bundle/msi/`，GitHub Release 必须上传三个文件：`TaskReminderApp_{version}_x64_zh-CN.msi`、`TaskReminderApp_{version}_x64_zh-CN.msi.sig`、`latest.json`。
+- 创建 GitHub Release 时直接使用当前版本号执行：`gh release create v{version} src-tauri/target/release/bundle/msi/TaskReminderApp_{version}_x64_zh-CN.msi src-tauri/target/release/bundle/msi/TaskReminderApp_{version}_x64_zh-CN.msi.sig src-tauri/target/release/bundle/msi/latest.json --title "v{version}" --notes "{release notes}"`。
+- 在 bash 中构建时，直接 `export TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 后调用 `pnpm tauri build --bundles msi`，再运行 `node scripts/write-updater-manifest.mjs` 生成 `latest.json`。
 
 ### onMounted 中异步操作的异常隔离
 - **问题**：多个异步操作放在同一个 `try` 块中，前面的操作抛异常会导致后面的操作被跳过（如自动更新检查被数据初始化异常阻断）。
