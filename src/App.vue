@@ -559,6 +559,15 @@
             {{ updateChecking ? "检查中..." : "检查更新" }}
           </button>
         </div>
+        <div class="form-row compact">
+          <label>更新代理（仅更新）</label>
+          <input
+            class="input"
+            v-model="updatePreferencesDraft.proxyUrl"
+            placeholder="http://127.0.0.1:7890，仅用于检查和下载更新"
+            style="flex: 1"
+          />
+        </div>
         <div class="form-row compact sync-status-panel update-panel">
           <div class="sync-status-row">
             <span class="sync-status-label">当前版本:</span>
@@ -702,6 +711,8 @@ import {
   formatVersionLabel,
   installUpdate,
   loadUpdatePreferences,
+  normalizeUpdateProxyUrl,
+  resolveUpdateNetworkOptions,
   saveUpdatePreferences,
   shouldAutoCheckForUpdates,
   summarizeUpdate,
@@ -1305,6 +1316,7 @@ const persistUpdatePreferencesState = () => {
     autoCheckEnabled: updatePreferences.autoCheckEnabled,
     ignoredVersion: updatePreferences.ignoredVersion,
     lastCheckAt: updatePreferences.lastCheckAt,
+    proxyUrl: updatePreferences.proxyUrl,
   });
 };
 
@@ -1356,7 +1368,7 @@ const handleCheckForUpdates = async (manual = false) => {
   resetUpdateProgress();
   try {
     await releaseAvailableUpdateHandle();
-    const update = await checkForUpdates();
+    const update = await checkForUpdates(resolveUpdateNetworkOptions(updatePreferences.proxyUrl));
     updatePreferences.lastCheckAt = new Date().toISOString();
     persistUpdatePreferencesState();
     if (!update) {
@@ -1414,7 +1426,11 @@ const handleInstallUpdate = async () => {
   updateInstalling.value = true;
   resetUpdateProgress();
   try {
-    await installUpdate(availableUpdateHandle.value, handleUpdateDownloadEvent);
+    await installUpdate(
+      availableUpdateHandle.value,
+      handleUpdateDownloadEvent,
+      resolveUpdateNetworkOptions(updatePreferences.proxyUrl)
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     updateCheckError.value = `安装更新失败：${message}`;
@@ -1667,6 +1683,7 @@ const saveSettings = async () => {
   await api.saveSettings({ ...settingsDraft });
   await api.setAutoStart(settingsDraft.autoStartEnabled);
   updatePreferences.autoCheckEnabled = updatePreferencesDraft.autoCheckEnabled;
+  updatePreferences.proxyUrl = normalizeUpdateProxyUrl(updatePreferencesDraft.proxyUrl);
   persistUpdatePreferencesState();
   settingsOpen.value = false;
   syncStatus.value = await api.getSyncStatus();

@@ -1,16 +1,24 @@
 import { relaunch } from "@tauri-apps/plugin-process";
-import { check, type CheckOptions, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
+import {
+  check,
+  type CheckOptions,
+  type DownloadEvent,
+  type DownloadOptions,
+  type Update
+} from "@tauri-apps/plugin-updater";
 import { safeStorage } from "./safeStorage";
 
 const AUTO_CHECK_KEY = "update.autoCheckEnabled";
 const IGNORED_VERSION_KEY = "update.ignoredVersion";
 const LAST_CHECK_KEY = "update.lastCheckAt";
+const PROXY_URL_KEY = "update.proxyUrl";
 const AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 export interface UpdatePreferences {
   autoCheckEnabled: boolean;
   ignoredVersion: string | null;
   lastCheckAt: string | null;
+  proxyUrl: string | null;
 }
 
 export interface UpdateSummary {
@@ -20,11 +28,29 @@ export interface UpdateSummary {
   body?: string;
 }
 
+type UpdateNetworkOptions = Pick<CheckOptions, "proxy"> & Pick<DownloadOptions, "proxy">;
+
+export function normalizeUpdateProxyUrl(proxyUrl: string | null | undefined): string | null {
+  const normalized = proxyUrl?.trim();
+  return normalized ? normalized : null;
+}
+
+export function resolveUpdateNetworkOptions(
+  proxyUrl: string | null | undefined
+): UpdateNetworkOptions | undefined {
+  const normalizedProxyUrl = normalizeUpdateProxyUrl(proxyUrl);
+  if (!normalizedProxyUrl) {
+    return undefined;
+  }
+  return { proxy: normalizedProxyUrl };
+}
+
 export function loadUpdatePreferences(): UpdatePreferences {
   return {
     autoCheckEnabled: safeStorage.getItem(AUTO_CHECK_KEY) !== "0",
     ignoredVersion: safeStorage.getItem(IGNORED_VERSION_KEY),
     lastCheckAt: safeStorage.getItem(LAST_CHECK_KEY),
+    proxyUrl: normalizeUpdateProxyUrl(safeStorage.getItem(PROXY_URL_KEY)),
   };
 }
 
@@ -39,6 +65,12 @@ export function saveUpdatePreferences(preferences: UpdatePreferences): void {
     safeStorage.setItem(LAST_CHECK_KEY, preferences.lastCheckAt);
   } else {
     safeStorage.removeItem(LAST_CHECK_KEY);
+  }
+  const normalizedProxyUrl = normalizeUpdateProxyUrl(preferences.proxyUrl);
+  if (normalizedProxyUrl) {
+    safeStorage.setItem(PROXY_URL_KEY, normalizedProxyUrl);
+  } else {
+    safeStorage.removeItem(PROXY_URL_KEY);
   }
 }
 
@@ -74,9 +106,10 @@ export async function checkForUpdates(options?: CheckOptions): Promise<Update | 
 
 export async function installUpdate(
   update: Update,
-  onEvent?: (event: DownloadEvent) => void
+  onEvent?: (event: DownloadEvent) => void,
+  options?: DownloadOptions
 ): Promise<void> {
-  await update.downloadAndInstall(onEvent);
+  await update.downloadAndInstall(onEvent, options);
   await relaunch();
 }
 

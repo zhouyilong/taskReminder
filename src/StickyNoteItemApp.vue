@@ -458,6 +458,35 @@ const resolveCurrentLogicalSize = async () => {
   }
 };
 
+const COPY_SUFFIX = "【拷贝】";
+const DATE_PREFIX_PATTERN = /^(\d{4})-(\d{2})-(\d{2})(.*)$/;
+
+const formatDatePart = (value: number) => String(value).padStart(2, "0");
+
+const buildCopiedTitle = (title: string) => {
+  const baseTitle = title.trim() || "新便签";
+  const matched = DATE_PREFIX_PATTERN.exec(baseTitle);
+  if (!matched) {
+    return `${baseTitle}${COPY_SUFFIX}`;
+  }
+
+  const [, yearText, monthText, dayText, restTitle] = matched;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const sourceDate = new Date(Date.UTC(year, month - 1, day));
+  if (
+    sourceDate.getUTCFullYear() !== year ||
+    sourceDate.getUTCMonth() !== month - 1 ||
+    sourceDate.getUTCDate() !== day
+  ) {
+    return `${baseTitle}${COPY_SUFFIX}`;
+  }
+
+  sourceDate.setUTCDate(sourceDate.getUTCDate() + 1);
+  return `${sourceDate.getUTCFullYear()}-${formatDatePart(sourceDate.getUTCMonth() + 1)}-${formatDatePart(sourceDate.getUTCDate())}${restTitle}`;
+};
+
 const createSiblingNote = async () => {
   const [position, size] = await Promise.all([
     resolveCurrentLogicalPosition(),
@@ -483,8 +512,7 @@ const createSiblingNote = async () => {
     payload.height = note.value.height;
   }
   if (note.value) {
-    const baseTitle = note.value.title?.trim() || "新便签";
-    payload.title = `${baseTitle}【拷贝】`;
+    payload.title = buildCopiedTitle(note.value.title || "");
     payload.content = note.value.content;
   }
   try {

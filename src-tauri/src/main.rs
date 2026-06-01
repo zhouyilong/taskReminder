@@ -1105,6 +1105,13 @@ fn main() {
 
                 tray::setup_tray(&app_handle).map_err(|e| AppError::System(e.to_string()))?;
 
+                if autostart::launched_from_autostart() {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.minimize();
+                        let _ = window.hide();
+                    }
+                }
+
                 // 开发模式：窗口标题加 [开发] 标识
                 if dev_mode {
                     if let Some(window) = app.get_webview_window("main") {
@@ -1129,6 +1136,8 @@ fn main() {
 
                 let mut settings = db.load_settings()?;
                 let autostart_enabled = autostart::is_autostart_enabled().unwrap_or(false);
+                let autostart_current =
+                    autostart::is_autostart_configuration_current().unwrap_or(false);
                 if !dev_mode && is_first_launch && !autostart_enabled {
                     settings.auto_start_enabled = true;
                     let _ = db.save_settings(&settings);
@@ -1138,7 +1147,7 @@ fn main() {
                         settings.auto_start_enabled = autostart_enabled;
                         let _ = db.save_settings(&settings);
                     }
-                    if settings.auto_start_enabled && !autostart_enabled {
+                    if settings.auto_start_enabled && !autostart_current {
                         let _ = autostart::enable_autostart();
                     }
                 }
