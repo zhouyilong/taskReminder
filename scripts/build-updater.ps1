@@ -25,7 +25,7 @@ Write-Host "[updater] Starting tauri build..."
 
 # Use Start-Process to ensure env vars propagate correctly, or invoke directly
 # pnpm.cmd is a batch wrapper; call it via cmd /c to guarantee env inheritance
-cmd /c "pnpm.cmd tauri build --bundles msi"
+cmd /c "pnpm.cmd tauri build --bundles msi --config src-tauri/tauri.updater.conf.json"
 
 if ($LASTEXITCODE -ne 0) {
   throw "tauri build failed with exit code $LASTEXITCODE"

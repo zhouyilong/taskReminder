@@ -20,7 +20,7 @@
 - `pnpm build`：将前端打包到 `dist/`。
 - `pnpm preview`：本地预览生产构建。
 - `pnpm tauri dev`：以开发模式运行完整的 Tauri 桌面应用。
-- `pnpm tauri build`：生成生产环境桌面应用包。
+- `pnpm tauri build`：生成生产环境桌面应用包，不生成 updater 签名产物。
   - 若 `pnpm tauri dev` 仍显示旧界面，可先执行 `pnpm build` 再运行 `pnpm tauri dev`，避免回退到过期的 `dist/`。
 - `pnpm release:updater`：执行完整的更新器构建流程（签名 + MSI + latest.json）。
 
@@ -30,8 +30,8 @@
 
 ## 自动更新发布流程
 1. 修改三处版本号
-2. 构建：设置 `TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 环境变量后运行 `pnpm tauri build --bundles msi`
-3. 生成清单：`node scripts/write-updater-manifest.mjs`
+2. 构建：推荐直接执行 `pnpm release:updater`；若手动构建，则需设置 `TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 后运行 `pnpm tauri build --bundles msi --config src-tauri/tauri.updater.conf.json`
+3. 生成清单：`pnpm release:updater` 会自动生成；若手动构建，则执行 `node scripts/write-updater-manifest.mjs`
 4. 发布：`gh release create v{version}` 上传 MSI + .sig + latest.json
 5. 签名私钥位于 `~/.tauri/taskReminder-updater.key`
 
@@ -52,10 +52,11 @@
 ### github release / GitHub Release 更新发布与签名构建
 - **关键词**：github release、GitHub Release、Tauri updater、MSI、latest.json、TAURI_SIGNING_PRIVATE_KEY。
 - 发布更新时，先同步三处版本号：`package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`。
-- PowerShell 推荐直接执行 `pnpm release:updater`。该脚本会读取 `~/.tauri/taskReminder-updater.key`，用 `.Trim()` 清除签名私钥尾部换行，设置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""` 避免交互等待，并通过 `cmd /c "pnpm.cmd tauri build --bundles msi"` 确保子进程继承签名环境变量。
+- 普通 `pnpm tauri build` 不会生成 updater 签名产物，因此不要求设置 `TAURI_SIGNING_PRIVATE_KEY`。
+- PowerShell 推荐直接执行 `pnpm release:updater`。该脚本会读取 `~/.tauri/taskReminder-updater.key`，用 `.Trim()` 清除签名私钥尾部换行，设置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""` 避免交互等待，并通过 `cmd /c "pnpm.cmd tauri build --bundles msi --config src-tauri/tauri.updater.conf.json"` 确保子进程继承签名环境变量。
 - 构建产物位于 `src-tauri/target/release/bundle/msi/`，GitHub Release 必须上传三个文件：`TaskReminderApp_{version}_x64_zh-CN.msi`、`TaskReminderApp_{version}_x64_zh-CN.msi.sig`、`latest.json`。
 - 创建 GitHub Release 时直接使用当前版本号执行：`gh release create v{version} src-tauri/target/release/bundle/msi/TaskReminderApp_{version}_x64_zh-CN.msi src-tauri/target/release/bundle/msi/TaskReminderApp_{version}_x64_zh-CN.msi.sig src-tauri/target/release/bundle/msi/latest.json --title "v{version}" --notes "{release notes}"`。
-- 在 bash 中构建时，直接 `export TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 后调用 `pnpm tauri build --bundles msi`，再运行 `node scripts/write-updater-manifest.mjs` 生成 `latest.json`。
+- 在 bash 中构建时，直接 `export TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 后调用 `pnpm tauri build --bundles msi --config src-tauri/tauri.updater.conf.json`，再运行 `node scripts/write-updater-manifest.mjs` 生成 `latest.json`。
 
 ### onMounted 中异步操作的异常隔离
 - **问题**：多个异步操作放在同一个 `try` 块中，前面的操作抛异常会导致后面的操作被跳过（如自动更新检查被数据初始化异常阻断）。

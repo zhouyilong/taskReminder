@@ -137,6 +137,8 @@ pnpm tauri build --bundles msi
 ```
 产物在 `src-tauri/target/release/bundle/msi/`。
 
+普通 `pnpm tauri build` 只生成安装包，不会生成 updater 所需的 `.sig` 和 `latest.json`，因此也不要求配置 `TAURI_SIGNING_PRIVATE_KEY`。
+
 ### 自动更新发布（GitHub Releases）
 项目已接入 Tauri 官方 updater，Windows 客户端会从 GitHub Releases 检查新版本。
 
@@ -157,7 +159,7 @@ pnpm release:updater
 
 该命令会：
 - 读取 `$env:USERPROFILE\.tauri\taskReminder-updater.key`
-- 执行 `pnpm tauri build --bundles msi`
+- 执行 `pnpm tauri build --bundles msi --config src-tauri/tauri.updater.conf.json`
 - 生成 MSI 对应的签名文件 `.sig`
 - 在 `src-tauri/target/release/bundle/msi/` 中生成 `latest.json`
 
