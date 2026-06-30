@@ -108,6 +108,14 @@ impl ReminderScheduler {
             return Ok(());
         }
         let now = Local::now().naive_local();
+        // 计时器可能因精度或系统休眠/唤醒而提前触发；若尚未到达本次计划触发时间，
+        // 则仅重新排程而不触发提醒，避免在同一秒内反复触发产生大量重复记录。
+        if let Ok(scheduled) = parse_datetime(&task.next_trigger) {
+            if now < scheduled {
+                self.schedule_recurring(task)?;
+                return Ok(());
+            }
+        }
         if !should_trigger_now(&task, now)? {
             task.next_trigger = compute_next_trigger(&task, Some(now))?;
             self.db.update_recurring_task(&task)?;
@@ -226,8 +234,13 @@ fn emit_notification(app: &AppHandle, payload: &NotificationPayload) -> Result<(
 fn seconds_until(value: &str) -> Result<u64, AppError> {
     let target = parse_datetime(value)?;
     let now = Local::now().naive_local();
-    let diff = target.signed_duration_since(now).num_seconds();
-    Ok(diff.max(0) as u64)
+    let millis = target.signed_duration_since(now).num_milliseconds();
+    if millis <= 0 {
+        return Ok(0);
+    }
+    // 向上取整到整秒，避免毫秒被截断导致计时器在目标时间前被唤醒，
+    // 进而在同一秒内反复触发、产生大量重复记录。
+    Ok(((millis + 999) / 1000) as u64)
 }
 
 fn parse_datetime(value: &str) -> Result<NaiveDateTime, AppError> {

@@ -714,12 +714,20 @@ textarea:focus {
   width: 172px;
 }
 
-.tasks-table th:first-child,
-.tasks-table td:first-child,
-.completed-table th:first-child,
-.completed-table td:first-child {
+.table .col-select {
   width: 72px;
   min-width: 72px;
+}
+
+.table td.col-select {
+  overflow: visible;
+  text-overflow: clip;
+  font-size: 0;
+}
+
+.table td.col-select input[type="checkbox"] {
+  display: block;
+  margin: 0;
 }
 
 .tasks-table .col-datetime,

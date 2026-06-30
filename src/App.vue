@@ -169,7 +169,7 @@
               <table class="table tasks-table">
                 <thead>
                   <tr>
-                    <th>完成</th>
+                    <th class="col-select">完成</th>
                     <th class="col-desc">标题</th>
                     <th class="col-note">描述</th>
                     <th class="col-datetime">提醒时间</th>
@@ -184,7 +184,7 @@
                     @dblclick="openEditTask(task)"
                     @contextmenu.prevent.stop="openTaskMenu($event, task)"
                   >
-                    <td>
+                    <td class="col-select">
                       <input type="checkbox" :checked="task.status === 'COMPLETED'" @change="toggleTask(task)" />
                     </td>
                     <td class="col-desc" :title="task.description">{{ task.description }}</td>
@@ -224,7 +224,7 @@
               <table class="table completed-table">
                 <thead>
                   <tr>
-                    <th>取消完成</th>
+                    <th class="col-select">取消完成</th>
                     <th class="col-desc">标题</th>
                     <th class="col-note">描述</th>
                     <th class="col-datetime">创建时间</th>
@@ -239,7 +239,7 @@
                     @dblclick="openTaskDetail(task)"
                     @contextmenu.prevent.stop="openCompletedMenu($event, task)"
                   >
-                    <td>
+                    <td class="col-select">
                       <input type="checkbox" checked @change="toggleTask(task)" />
                     </td>
                     <td class="col-desc" :title="task.description">{{ task.description }}</td>
@@ -376,7 +376,7 @@
               <table class="table records-table">
                 <thead>
                   <tr>
-                    <th>选择</th>
+                    <th class="col-select">选择</th>
                     <th class="col-desc">描述</th>
                     <th class="col-type">类型</th>
                     <th class="col-datetime">触发时间</th>
@@ -392,10 +392,10 @@
                     @dblclick="openRecordDetail(record)"
                     @contextmenu.prevent.stop="openRecordMenu($event, record)"
                   >
-                    <td>
+                    <td class="col-select">
                       <input type="checkbox" v-model="selectedRecords" :value="record.id" />
                     </td>
-                    <td class="col-desc" :title="record.description">{{ record.description }}</td>
+                    <td class="col-desc" :title="recordDescription(record.description)">{{ recordDescription(record.description) }}</td>
                     <td class="col-type" :title="record.type === 'TASK' ? '任务' : '循环'">{{ record.type === 'TASK' ? '任务' : '循环' }}</td>
                     <td class="col-datetime" :title="formatDateTime(record.triggerTime)">{{ formatDateTime(record.triggerTime) }}</td>
                     <td class="col-datetime" :title="formatDateTime(record.closeTime)">{{ formatDateTime(record.closeTime) }}</td>
@@ -704,7 +704,7 @@ import type { DownloadEvent, Update } from "@tauri-apps/plugin-updater";
 import Modal from "./components/Modal.vue";
 import MarkdownNoteEditor from "./components/MarkdownNoteEditor.vue";
 import { api } from "./api";
-import { markdownToPlainText, markdownToPreviewText } from "./markdown";
+import { markdownToPlainText, markdownToPreviewText, stripLeadingListMarker } from "./markdown";
 import { safeStorage } from "./safeStorage";
 import {
   checkForUpdates,
@@ -963,6 +963,13 @@ const updateProgressText = computed(() => {
 
 const taskStickyPreview = (value: string | null | undefined) => {
   return markdownToPreviewText(value);
+};
+
+const recordDescription = (value: string | null | undefined) => {
+  // 提醒记录里有些描述来自 Markdown 列表，前面可能还夹带零宽字符，
+  // 这里统一去掉前导列表标记，避免复选框和描述之间出现多余的点。
+  const text = stripLeadingListMarker(markdownToPreviewText(value, ""));
+  return text || "-";
 };
 
 const tasksTotalPages = computed(() => {
@@ -1853,7 +1860,7 @@ const openTaskDetail = (task: Task) => {
 
 const openRecordDetail = (record: ReminderRecord) => {
   openDetail("提醒记录详情", [
-    { label: "描述", value: record.description },
+    { label: "描述", value: recordDescription(record.description) },
     { label: "类型", value: record.type === "TASK" ? "任务" : "循环" },
     { label: "触发时间", value: formatDateTime(record.triggerTime) },
     { label: "关闭时间", value: formatDateTime(record.closeTime) },

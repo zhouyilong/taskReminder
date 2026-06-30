@@ -2,10 +2,13 @@ const LINK_PATTERN = /!?\[([^\]]*)\]\(([^)]+)\)/g;
 const CODE_FENCE_PATTERN = /```[\s\S]*?```/g;
 const INLINE_CODE_PATTERN = /`([^`]+)`/g;
 const HEADING_PATTERN = /^\s{0,3}#{1,6}\s+/gm;
-const BLOCK_PREFIX_PATTERN = /^\s{0,3}(?:>+\s*|[-*+]\s+|\d+\.\s+|[-*+]\s+\[(?: |x|X)\]\s+)/gm;
+const BLOCK_PREFIX_PATTERN = /^\s{0,3}(?:>+\s*|[-*+]\s+\[(?: |x|X)\]\s+|[-*+]\s+|\d+\.\s+)/gm;
 const HTML_TAG_PATTERN = /<[^>]+>/g;
 const EMPHASIS_PATTERN = /(\*\*|__|\*|_|~~)/g;
 const MULTI_SPACE_PATTERN = /\s+/g;
+const LINE_START_INVISIBLE_PATTERN = /^[\u200B\uFEFF]+/gm;
+const LEADING_LIST_MARKER_PATTERN =
+  /^[\s\u00A0\u200B\uFEFF]*(?:(?:[•·‣◦∙▪▫◉○●]\s*)|(?:[-*+]\s*(?:\[(?: |x|X)\])?\s+)|(?:\[(?: |x|X)\]\s+)|(?:\d+[.)]\s+))/;
 
 export const markdownToPlainText = (value: string | null | undefined): string => {
   if (!value) {
@@ -13,6 +16,7 @@ export const markdownToPlainText = (value: string | null | undefined): string =>
   }
 
   return value
+    .replace(LINE_START_INVISIBLE_PATTERN, "")
     .replace(CODE_FENCE_PATTERN, match =>
       match
         .replace(/```/g, "")
@@ -26,6 +30,14 @@ export const markdownToPlainText = (value: string | null | undefined): string =>
     .replace(EMPHASIS_PATTERN, "")
     .replace(MULTI_SPACE_PATTERN, " ")
     .trim();
+};
+
+export const stripLeadingListMarker = (value: string | null | undefined): string => {
+  if (!value) {
+    return "";
+  }
+
+  return value.replace(LEADING_LIST_MARKER_PATTERN, "").trimStart();
 };
 
 export const markdownToPreviewText = (value: string | null | undefined, fallback = "-"): string => {

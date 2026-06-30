@@ -11,7 +11,7 @@
         </div>
         <button class="notification-close" type="button" @click="handleDismiss">✕</button>
       </div>
-      <div class="notification-body">{{ payload?.description }}</div>
+      <div class="notification-body">{{ notificationDescription }}</div>
       <div class="notification-meta">
         <div class="notification-meta-item">
           <span class="notification-meta-label">已停留</span>
@@ -39,6 +39,7 @@ import { listen, TauriEvent } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
+import { markdownToPreviewText, stripLeadingListMarker } from "./markdown";
 import { safeStorage } from "./safeStorage";
 import type { NotificationPayload } from "./types";
 
@@ -94,6 +95,10 @@ const elapsedMs = computed(() => {
 const remainingMs = computed(() => Math.max(0, AUTO_CLOSE_MS - elapsedMs.value));
 const elapsedLabel = computed(() => formatDuration(elapsedMs.value));
 const remainingLabel = computed(() => formatDuration(remainingMs.value));
+const notificationDescription = computed(() => {
+  const text = stripLeadingListMarker(markdownToPreviewText(payload.value?.description, ""));
+  return text || "-";
+});
 const progressPercent = computed(() => {
   if (!shownAt.value) {
     return 0;
