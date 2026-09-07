@@ -77,18 +77,12 @@ fn sticky_note_item_refresh_event(note_id: &str) -> String {
     format!("sticky-note-item-refresh-{}", encode_note_id(note_id))
 }
 
-fn sticky_note_item_url(note: &StickyNote) -> WebviewUrl {
-    if paths::is_dev_mode() {
-        let url = format!(
-            "http://127.0.0.1:5173/sticky-note-item.html?noteId={}",
-            note.task_id
-        );
-        WebviewUrl::External(url.parse().expect("sticky note dev url"))
-    } else {
-        // Keep the production custom-protocol path query-free: `WebviewUrl::App`
-        // is backed by PathBuf, and `?` is not a valid path character on Windows.
-        WebviewUrl::App("sticky-note-item.html".into())
-    }
+fn sticky_note_item_url() -> WebviewUrl {
+    // Use App URL on every platform. In `tauri dev` Tauri rewrites this to
+    // `build.devUrl`, which keeps the sticky-note window on the same origin as
+    // the main window so Linux WebKitGTK still grants IPC. An External
+    // localhost URL is treated as remote on Linux and then invoke/save fail.
+    WebviewUrl::App("sticky-note-item.html".into())
 }
 
 fn sticky_note_bootstrap_script(note: &StickyNote) -> Option<String> {
@@ -983,7 +977,7 @@ fn show_sticky_note_item_window(app: &tauri::AppHandle, note: &StickyNote) -> Re
         // first frame, so the "载入便签..." placeholder can stay on screen even
         // after the note payload arrives. Keep Windows (and other platforms)
         // transparent so the floating paper look is unchanged there.
-        let mut builder = WebviewWindowBuilder::new(app, &label, sticky_note_item_url(note))
+        let mut builder = WebviewWindowBuilder::new(app, &label, sticky_note_item_url())
             .title("便签")
             .inner_size(STICKY_NOTE_ITEM_WIDTH, STICKY_NOTE_ITEM_HEIGHT)
             .min_inner_size(STICKY_NOTE_ITEM_MIN_WIDTH, STICKY_NOTE_ITEM_MIN_HEIGHT)
@@ -1244,6 +1238,16 @@ mod tests {
             note_id_from_item_label(&sticky_note_item_label(id)).as_deref(),
             Some(id)
         );
+    }
+
+    #[test]
+    fn sticky_note_item_url_uses_app_protocol() {
+        match sticky_note_item_url() {
+            WebviewUrl::App(path) => {
+                assert_eq!(path.to_string_lossy(), "sticky-note-item.html");
+            }
+            _ => panic!("sticky note windows must use WebviewUrl::App"),
+        }
     }
 
     #[test]
