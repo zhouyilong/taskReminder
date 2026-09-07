@@ -4,6 +4,10 @@ import { renderStartupError } from "./startupError";
 
 document.documentElement.classList.add("sticky-note-mode");
 document.body.classList.add("sticky-note-mode");
+if (typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent)) {
+  document.documentElement.classList.add("is-linux");
+  document.body.classList.add("is-linux");
+}
 
 const bootstrap = async () => {
   try {

@@ -77,6 +77,16 @@ body.sticky-note-mode {
   background: transparent !important;
 }
 
+html.sticky-note-mode.is-linux,
+body.sticky-note-mode.is-linux {
+  background: #131318 !important;
+}
+
+html.sticky-note-mode.is-linux.light-theme,
+body.sticky-note-mode.is-linux.light-theme {
+  background: #ffffff !important;
+}
+
 body.sticky-note-mode {
   overflow: hidden;
 }
@@ -93,6 +103,14 @@ body.sticky-note-mode {
   width: 100vw;
   height: 100vh;
   background: transparent;
+}
+
+html.sticky-note-mode.is-linux #sticky-note-item {
+  background: #131318;
+}
+
+html.sticky-note-mode.is-linux.light-theme #sticky-note-item {
+  background: #ffffff;
 }
 
 .app {
@@ -1909,6 +1927,21 @@ input[type="range"].settings-range {
   width: 100%;
   height: 100%;
   min-height: 0;
+}
+
+html.sticky-note-mode.is-linux .paper-note {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.sticky-item-loading {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
 .paper-note-header {

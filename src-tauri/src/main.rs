@@ -77,6 +77,41 @@ fn sticky_note_item_refresh_event(note_id: &str) -> String {
     format!("sticky-note-item-refresh-{}", encode_note_id(note_id))
 }
 
+fn sticky_note_item_url(note: &StickyNote) -> WebviewUrl {
+    if paths::is_dev_mode() {
+        let url = format!(
+            "http://127.0.0.1:5173/sticky-note-item.html?noteId={}",
+            note.task_id
+        );
+        WebviewUrl::External(url.parse().expect("sticky note dev url"))
+    } else {
+        // Keep the production custom-protocol path query-free: `WebviewUrl::App`
+        // is backed by PathBuf, and `?` is not a valid path character on Windows.
+        WebviewUrl::App("sticky-note-item.html".into())
+    }
+}
+
+fn sticky_note_bootstrap_script(note: &StickyNote) -> Option<String> {
+    let payload_json = serde_json::to_string(note).ok()?;
+    Some(format!(
+        r#"(function () {{
+  try {{
+    const payload = {payload_json};
+    window.__TASKREMINDER_STICKY_NOTE = payload;
+    window.dispatchEvent(new CustomEvent("taskreminder-sticky-note", {{ detail: payload }}));
+  }} catch (error) {{
+    console.error("[taskreminder] apply sticky note failed", error);
+  }}
+}})();"#
+    ))
+}
+
+fn apply_sticky_note_via_eval(window: &tauri::WebviewWindow, note: &StickyNote) {
+    if let Some(script) = sticky_note_bootstrap_script(note) {
+        let _ = window.eval(script);
+    }
+}
+
 fn note_id_from_item_label(label: &str) -> Option<String> {
     label
         .strip_prefix(STICKY_NOTE_ITEM_PREFIX)
@@ -403,6 +438,11 @@ fn get_sticky_note_by_window_label(
 }
 
 #[tauri::command]
+fn get_sticky_note(state: State<AppState>, note_id: String) -> ApiResult<Option<StickyNote>> {
+    into_api(state.db.get_sticky_note(&note_id))
+}
+
+#[tauri::command]
 fn open_sticky_note(
     app: tauri::AppHandle,
     state: State<AppState>,
@@ -465,9 +505,14 @@ pub(crate) fn create_custom_sticky_note_via_app(
     default_width: Option<f64>,
     default_height: Option<f64>,
 ) -> Result<StickyNote, AppError> {
-    let note = state
-        .db
-        .create_custom_sticky_note(title, content, default_x, default_y, default_width, default_height)?;
+    let note = state.db.create_custom_sticky_note(
+        title,
+        content,
+        default_x,
+        default_y,
+        default_width,
+        default_height,
+    )?;
     {
         let app_for_show = app.clone();
         let note_for_show = note.clone();
@@ -934,28 +979,26 @@ fn show_sticky_note_item_window(app: &tauri::AppHandle, note: &StickyNote) -> Re
     let window = if let Some(existing) = app.get_webview_window(&label) {
         existing
     } else {
-        // dev 模式下使用 Vite dev server URL，生产模式使用内置 HTML
-        let url = if paths::is_dev_mode() {
-            WebviewUrl::External(
-                "http://127.0.0.1:5173/sticky-note-item.html"
-                    .parse()
-                    .unwrap(),
-            )
-        } else {
-            WebviewUrl::App("sticky-note-item.html".into())
-        };
-        WebviewWindowBuilder::new(app, &label, url)
+        // Linux WebKitGTK does not reliably repaint transparent windows after the
+        // first frame, so the "载入便签..." placeholder can stay on screen even
+        // after the note payload arrives. Keep Windows (and other platforms)
+        // transparent so the floating paper look is unchanged there.
+        let mut builder = WebviewWindowBuilder::new(app, &label, sticky_note_item_url(note))
             .title("便签")
             .inner_size(STICKY_NOTE_ITEM_WIDTH, STICKY_NOTE_ITEM_HEIGHT)
             .min_inner_size(STICKY_NOTE_ITEM_MIN_WIDTH, STICKY_NOTE_ITEM_MIN_HEIGHT)
             .resizable(true)
             .focused(false)
             .decorations(false)
-            .transparent(true)
+            .transparent(!cfg!(target_os = "linux"))
             .shadow(false)
             .always_on_bottom(true)
             .skip_taskbar(true)
-            .visible(false)
+            .visible(false);
+        if let Some(script) = sticky_note_bootstrap_script(note) {
+            builder = builder.initialization_script(script);
+        }
+        builder
             .build()
             .map_err(|e| AppError::System(e.to_string()))?
     };
@@ -967,6 +1010,7 @@ fn show_sticky_note_item_window(app: &tauri::AppHandle, note: &StickyNote) -> Re
     let _ = window.set_shadow(false);
     enforce_sticky_item_layer(&window, is_pinned);
     let _ = window.emit(&refresh_event, note.clone());
+    apply_sticky_note_via_eval(&window, note);
     emit_cached_ui_state_to_window(app, &window);
     window.show().map_err(|e| AppError::System(e.to_string()))?;
     promote_sticky_item_over_peers(app, &label);
@@ -1059,6 +1103,7 @@ fn main() {
             get_settings,
             save_settings,
             get_sticky_note_by_window_label,
+            get_sticky_note,
             open_sticky_note,
             create_sticky_note,
             save_sticky_note_content,
@@ -1168,4 +1213,45 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用失败");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_note() -> StickyNote {
+        StickyNote {
+            task_id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+            title: "便签".to_string(),
+            note_type: "CUSTOM".to_string(),
+            content: "hello".to_string(),
+            pos_x: 48.0,
+            pos_y: 76.0,
+            width: 284.0,
+            height: 280.0,
+            is_open: true,
+            is_pinned: false,
+            created_at: "2026-01-01T00:00:00".to_string(),
+            updated_at: "2026-01-01T00:00:00".to_string(),
+        }
+    }
+
+    #[test]
+    fn encode_decode_note_id_roundtrip() {
+        let id = "550e8400-e29b-41d4-a716-446655440000";
+        assert_eq!(decode_note_id(&encode_note_id(id)).as_deref(), Some(id));
+        assert_eq!(
+            note_id_from_item_label(&sticky_note_item_label(id)).as_deref(),
+            Some(id)
+        );
+    }
+
+    #[test]
+    fn sticky_note_bootstrap_script_includes_payload() {
+        let note = sample_note();
+        let script = sticky_note_bootstrap_script(&note).expect("script");
+        assert!(script.contains(&note.task_id));
+        assert!(script.contains("__TASKREMINDER_STICKY_NOTE"));
+        assert!(script.contains("taskreminder-sticky-note"));
+    }
 }

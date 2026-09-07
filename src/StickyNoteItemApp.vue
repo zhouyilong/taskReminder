@@ -115,7 +115,31 @@ import { safeStorage } from "./safeStorage";
 import { api } from "./api";
 import type { AppSettings, StickyNote, UiStatePayload } from "./types";
 
-const note = ref<StickyNote | null>(null);
+type StickyNoteHostWindow = Window & {
+  __TASKREMINDER_STICKY_NOTE?: StickyNote;
+};
+
+const readInjectedStickyNote = (): StickyNote | null => {
+  const candidate = (window as StickyNoteHostWindow).__TASKREMINDER_STICKY_NOTE;
+  if (!candidate || typeof candidate !== "object" || !candidate.taskId) {
+    return null;
+  }
+  return candidate;
+};
+
+const noteIdFromLocation = (): string | null => {
+  try {
+    const fromQuery = new URLSearchParams(window.location.search).get("noteId");
+    if (fromQuery && fromQuery.trim()) {
+      return fromQuery.trim();
+    }
+  } catch {
+    // ignore malformed search strings
+  }
+  return null;
+};
+
+const note = ref<StickyNote | null>(readInjectedStickyNote());
 const saveHint = ref("");
 const saveCountdownSeconds = ref(0);
 const isPinned = ref(false);
@@ -147,6 +171,7 @@ let unlistenThemeChangedLegacy: UnlistenFn | null = null;
 let unlistenScaleChangedLegacy: UnlistenFn | null = null;
 let unlistenWindowOpacityChangedLegacy: UnlistenFn | null = null;
 let windowUiStateHandler: ((event: Event) => void) | null = null;
+let stickyNoteHandler: ((event: Event) => void) | null = null;
 let uiStatePollInterval: number = 0;
 // Tracks last-applied state key for change detection in the poll loop.
 let lastUiStateKey = "";
@@ -225,6 +250,11 @@ const normalizeTitle = (title: string) => {
   const resolved = title.trim();
   return resolved ? resolved : "便签";
 };
+
+if (note.value) {
+  lastSavedTitle = normalizeTitle(note.value.title);
+  lastSavedContent = note.value.content;
+}
 
 const syncPinnedState = async () => {
   try {
@@ -547,21 +577,41 @@ const completeAndCloseNote = async () => {
   }
 };
 
-const loadCurrentNote = async () => {
-  const row = await api.getStickyNoteByWindowLabel(windowRef.label);
-  note.value = row;
-  if (row) {
-    lastSavedTitle = normalizeTitle(row.title);
-    lastSavedContent = row.content;
-  } else {
-    lastSavedTitle = "";
-    lastSavedContent = "";
+const applyLoadedNote = (row: StickyNote | null | undefined) => {
+  if (!row || !row.taskId) {
+    return false;
   }
+  note.value = row;
+  lastSavedTitle = normalizeTitle(row.title);
+  lastSavedContent = row.content;
   clearSaveCountdownTimer();
   saveHint.value = "";
+  return true;
+};
+
+const loadCurrentNote = async () => {
+  try {
+    const row = await api.getStickyNoteByWindowLabel(windowRef.label);
+    if (applyLoadedNote(row)) {
+      return;
+    }
+  } catch (error) {
+    console.warn("[sticky-note-item] 按窗口标签读取便签失败", error);
+  }
+  const noteId = noteIdFromLocation();
+  if (!noteId) {
+    return;
+  }
+  try {
+    const row = await api.getStickyNote(noteId);
+    applyLoadedNote(row);
+  } catch (error) {
+    console.warn("[sticky-note-item] 按便签 ID 读取失败", error);
+  }
 };
 
 const loadCurrentNoteWithRetry = async () => {
+  applyLoadedNote(readInjectedStickyNote());
   await loadCurrentNote();
   if (note.value) {
     return;
@@ -569,6 +619,7 @@ const loadCurrentNoteWithRetry = async () => {
   await new Promise(resolve => {
     window.setTimeout(resolve, 120);
   });
+  applyLoadedNote(readInjectedStickyNote());
   await loadCurrentNote();
 };
 
@@ -587,6 +638,11 @@ onMounted(async () => {
     }
   };
   window.addEventListener("taskreminder-ui-state", windowUiStateHandler as EventListener);
+  stickyNoteHandler = event => {
+    const payload = event instanceof CustomEvent ? (event.detail as StickyNote | undefined) : undefined;
+    applyLoadedNote(payload ?? readInjectedStickyNote());
+  };
+  window.addEventListener("taskreminder-sticky-note", stickyNoteHandler);
   await syncPinnedState();
   try {
     await loadCurrentNoteWithRetry();
@@ -700,6 +756,9 @@ onBeforeUnmount(() => {
   }
   if (windowUiStateHandler) {
     window.removeEventListener("taskreminder-ui-state", windowUiStateHandler as EventListener);
+  }
+  if (stickyNoteHandler) {
+    window.removeEventListener("taskreminder-sticky-note", stickyNoteHandler);
   }
   if (unlistenRefresh) {
     unlistenRefresh();
