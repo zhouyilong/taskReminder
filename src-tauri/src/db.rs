@@ -505,7 +505,7 @@ impl DbManager {
     pub fn list_sticky_notes(&self) -> Result<Vec<StickyNote>, AppError> {
         let conn = self.get_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, description, sticky_content, sticky_pos_x, sticky_pos_y, sticky_width, sticky_height, sticky_is_open, sticky_is_pinned, created_at, updated_at
+            "SELECT id, description, sticky_content, sticky_pos_x, sticky_pos_y, sticky_width, sticky_height, sticky_is_open, sticky_is_pinned, created_at, updated_at, reminder_time
              FROM tasks
              WHERE deleted_at IS NULL AND status != 'COMPLETED'
              ORDER BY created_at ASC",
@@ -517,7 +517,7 @@ impl DbManager {
     pub fn get_sticky_note(&self, note_id: &str) -> Result<Option<StickyNote>, AppError> {
         let conn = self.get_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, description, sticky_content, sticky_pos_x, sticky_pos_y, sticky_width, sticky_height, sticky_is_open, sticky_is_pinned, created_at, updated_at
+            "SELECT id, description, sticky_content, sticky_pos_x, sticky_pos_y, sticky_width, sticky_height, sticky_is_open, sticky_is_pinned, created_at, updated_at, reminder_time
              FROM tasks
              WHERE id = ?",
         )?;
@@ -656,6 +656,7 @@ impl DbManager {
             is_pinned: false,
             created_at: now.clone(),
             updated_at: now,
+            reminder_time: None,
         })
     }
 
@@ -690,6 +691,20 @@ impl DbManager {
                  updated_at = ?
              WHERE id = ?",
             params![resolved_title, resolved_title, now, task_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_task_reminder_time(
+        &self,
+        task_id: &str,
+        reminder_time: Option<&str>,
+    ) -> Result<(), AppError> {
+        let conn = self.get_conn()?;
+        let now = now_string();
+        conn.execute(
+            "UPDATE tasks SET reminder_time = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+            params![reminder_time, now, task_id],
         )?;
         Ok(())
     }
@@ -999,6 +1014,7 @@ fn sticky_note_from_task_row(row: &rusqlite::Row<'_>) -> Result<StickyNote, rusq
         updated_at: row
             .get::<_, Option<String>>(10)?
             .unwrap_or_else(|| now_string()),
+        reminder_time: row.get(11)?,
     })
 }
 

@@ -99,6 +99,46 @@
             </template>
             <template v-else-if="saveHint">{{ saveHint }}</template>
           </span>
+          <div class="paper-note-reminder">
+            <button
+              class="paper-note-reminder-trigger"
+              :class="{
+                'is-upcoming': reminderPhase === 'upcoming',
+                'is-past': reminderPhase === 'past'
+              }"
+              type="button"
+              :title="reminderTitle"
+              @mousedown.stop
+              @click.stop="openReminderPicker"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="8"></circle>
+                <polyline points="12 8 12 12 15 14"></polyline>
+              </svg>
+              <span>{{ reminderLabel }}</span>
+            </button>
+            <button
+              v-if="note.reminderTime"
+              class="paper-note-reminder-clear"
+              type="button"
+              title="清除提醒"
+              @mousedown.stop
+              @click.stop="clearReminder"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+            <input
+              ref="reminderInput"
+              class="paper-note-reminder-input"
+              type="datetime-local"
+              tabindex="-1"
+              :value="reminderInputValue"
+              @change="handleReminderInput"
+            />
+          </div>
         </div>
       </footer>
     </article>
@@ -170,6 +210,7 @@ let unlistenUiStateChangedWindow: UnlistenFn | null = null;
 let unlistenThemeChangedLegacy: UnlistenFn | null = null;
 let unlistenScaleChangedLegacy: UnlistenFn | null = null;
 let unlistenWindowOpacityChangedLegacy: UnlistenFn | null = null;
+let unlistenReminderUpdated: UnlistenFn | null = null;
 let windowUiStateHandler: ((event: Event) => void) | null = null;
 let stickyNoteHandler: ((event: Event) => void) | null = null;
 let uiStatePollInterval: number = 0;
@@ -191,6 +232,129 @@ const formattedCreatedAt = computed(() => {
     return "";
   }
 });
+
+const reminderInput = ref<HTMLInputElement | null>(null);
+const reminderClock = ref(Date.now());
+let reminderSaveSeq = 0;
+let reminderClockTimer = 0;
+
+const toDatetimeLocal = (value?: string | null) => {
+  if (!value) {
+    return "";
+  }
+  return value.slice(0, 16);
+};
+
+const fromDatetimeLocal = (value: string) => {
+  if (!value) {
+    return null;
+  }
+  return value.length === 16 ? `${value}:00` : value;
+};
+
+const reminderInputValue = computed(() => toDatetimeLocal(note.value?.reminderTime));
+
+const parsedReminder = computed(() => {
+  const value = note.value?.reminderTime;
+  if (!value) {
+    return null;
+  }
+  const time = Date.parse(value);
+  if (Number.isNaN(time)) {
+    return null;
+  }
+  return new Date(time);
+});
+
+const reminderPhase = computed(() => {
+  const date = parsedReminder.value;
+  if (!date) {
+    return "empty" as const;
+  }
+  return date.getTime() > reminderClock.value ? "upcoming" as const : "past" as const;
+});
+
+const reminderLabel = computed(() => {
+  const date = parsedReminder.value;
+  if (!date) {
+    return "提醒";
+  }
+  const now = new Date(reminderClock.value);
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const timeText = `${hours}:${minutes}`;
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  if (sameDay) {
+    return timeText;
+  }
+  return `${date.getMonth() + 1}/${date.getDate()} ${timeText}`;
+});
+
+const reminderTitle = computed(() => {
+  const date = parsedReminder.value;
+  if (!date) {
+    return "设置提醒时间";
+  }
+  const text = date.toLocaleString("zh-CN", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+  return reminderPhase.value === "past" ? `提醒已过：${text}` : `提醒时间：${text}`;
+});
+
+const openReminderPicker = () => {
+  const input = reminderInput.value;
+  if (!input) {
+    return;
+  }
+  try {
+    if (typeof input.showPicker === "function") {
+      input.showPicker();
+      return;
+    }
+  } catch (error) {
+    console.warn("[sticky-note-item] 打开提醒时间选择器失败", error);
+  }
+  input.focus();
+  input.click();
+};
+
+const saveReminderTime = async (reminderTime: string | null) => {
+  if (!note.value) {
+    return;
+  }
+  const taskId = note.value.taskId;
+  const previous = note.value.reminderTime ?? null;
+  if ((previous ?? null) === (reminderTime ?? null)) {
+    return;
+  }
+  const seq = ++reminderSaveSeq;
+  note.value = { ...note.value, reminderTime };
+  try {
+    await api.updateStickyNoteReminder({ taskId, reminderTime });
+  } catch (error) {
+    if (seq === reminderSaveSeq && note.value?.taskId === taskId) {
+      note.value = { ...note.value, reminderTime: previous };
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    alert(`设置提醒失败：${message}`);
+  }
+};
+
+const handleReminderInput = (event: Event) => {
+  const value = event.target instanceof HTMLInputElement ? event.target.value : "";
+  void saveReminderTime(fromDatetimeLocal(value));
+};
+
+const clearReminder = () => {
+  void saveReminderTime(null);
+};
 
 const applyTheme = (useLight: boolean) => {
   document.documentElement.classList.toggle("light-theme", useLight);
@@ -658,6 +822,25 @@ onMounted(async () => {
     applyStickyOpacity(DEFAULT_STICKY_OPACITY);
     applyWindowOpacity(DEFAULT_WINDOW_OPACITY);
   }
+  reminderClockTimer = window.setInterval(() => {
+    reminderClock.value = Date.now();
+  }, 15000);
+  try {
+    unlistenReminderUpdated = await listen<{ taskId: string; reminderTime?: string | null }>(
+      "sticky-note-reminder-updated",
+      event => {
+        if (!note.value || event.payload.taskId !== note.value.taskId) {
+          return;
+        }
+        note.value = {
+          ...note.value,
+          reminderTime: event.payload.reminderTime ?? null
+        };
+      }
+    );
+  } catch (error) {
+    console.warn("[sticky-note-item] 监听提醒时间变更失败", error);
+  }
   unlistenRefresh = await listen<StickyNote>(refreshEventName, event => {
     clearAutoSaveTrackers();
     note.value = event.payload;
@@ -747,6 +930,10 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  if (reminderClockTimer) {
+    window.clearInterval(reminderClockTimer);
+    reminderClockTimer = 0;
+  }
   if (uiStatePollInterval) {
     window.clearInterval(uiStatePollInterval);
     uiStatePollInterval = 0;
@@ -759,6 +946,9 @@ onBeforeUnmount(() => {
   }
   if (stickyNoteHandler) {
     window.removeEventListener("taskreminder-sticky-note", stickyNoteHandler);
+  }
+  if (unlistenReminderUpdated) {
+    unlistenReminderUpdated();
   }
   if (unlistenRefresh) {
     unlistenRefresh();

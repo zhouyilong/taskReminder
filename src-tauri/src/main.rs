@@ -106,6 +106,37 @@ fn apply_sticky_note_via_eval(window: &tauri::WebviewWindow, note: &StickyNote) 
     }
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StickyNoteReminderPayload {
+    task_id: String,
+    reminder_time: Option<String>,
+}
+
+fn emit_sticky_note_reminder(app: &tauri::AppHandle, task_id: &str, reminder_time: Option<String>) {
+    let Some(window) = app.get_webview_window(&sticky_note_item_label(task_id)) else {
+        return;
+    };
+    let _ = window.emit(
+        "sticky-note-reminder-updated",
+        StickyNoteReminderPayload {
+            task_id: task_id.to_string(),
+            reminder_time,
+        },
+    );
+}
+
+fn normalize_reminder_time(value: Option<String>) -> Option<String> {
+    value.and_then(|raw| {
+        let trimmed = raw.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+}
+
 fn note_id_from_item_label(label: &str) -> Option<String> {
     label
         .strip_prefix(STICKY_NOTE_ITEM_PREFIX)
@@ -183,6 +214,13 @@ struct UpdateStickyNoteTitlePayload {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct UpdateStickyNoteReminderPayload {
+    task_id: String,
+    reminder_time: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct MoveStickyNotePayload {
     task_id: String,
     x: f64,
@@ -243,21 +281,27 @@ fn create_task(state: State<AppState>, payload: CreateTaskPayload) -> ApiResult<
 }
 
 #[tauri::command]
-fn update_task(state: State<AppState>, task: TaskUpdatePayload) -> ApiResult<()> {
+fn update_task(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    task: TaskUpdatePayload,
+) -> ApiResult<()> {
+    let reminder_time = task.reminder_time.clone();
     into_api(state.db.update_task(
         &task.id,
         task.description.trim(),
         task.sticky_content.clone(),
-        task.reminder_time.clone(),
+        reminder_time.clone(),
     ))?;
     state.scheduler.cancel_task(&task.id);
-    if let Some(reminder_time) = task.reminder_time {
+    if let Some(reminder_time) = reminder_time.clone() {
         if scheduler::is_future(&reminder_time).unwrap_or(false) {
             if let Some(updated) = into_api(state.db.get_task(&task.id))? {
                 into_api(state.scheduler.schedule_task(updated))?;
             }
         }
     }
+    emit_sticky_note_reminder(&app, &task.id, reminder_time);
     into_api(state.sync.notify_local_change())?;
     Ok(())
 }
@@ -563,6 +607,35 @@ fn update_sticky_note_title(
 }
 
 #[tauri::command]
+fn update_sticky_note_reminder(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    payload: UpdateStickyNoteReminderPayload,
+) -> ApiResult<()> {
+    let reminder_time = normalize_reminder_time(payload.reminder_time);
+    if let Some(value) = reminder_time.as_deref() {
+        into_api(scheduler::is_future(value))?;
+    }
+    into_api(
+        state
+            .db
+            .set_task_reminder_time(&payload.task_id, reminder_time.as_deref()),
+    )?;
+    state.scheduler.cancel_task(&payload.task_id);
+    if let Some(value) = reminder_time.as_deref() {
+        if scheduler::is_future(value).unwrap_or(false) {
+            if let Some(task) = into_api(state.db.get_task(&payload.task_id))? {
+                into_api(state.scheduler.schedule_task(task))?;
+            }
+        }
+    }
+    emit_sticky_note_reminder(&app, &payload.task_id, reminder_time);
+    let _ = app.emit("sticky-note-changed", payload.task_id);
+    into_api(state.sync.notify_local_change())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn move_sticky_note(state: State<AppState>, payload: MoveStickyNotePayload) -> ApiResult<()> {
     into_api(
         state
@@ -685,7 +758,11 @@ fn ack_notification(state: State<AppState>, payload: AckPayload) -> ApiResult<()
 }
 
 #[tauri::command]
-fn snooze_notification(state: State<AppState>, payload: SnoozePayload) -> ApiResult<()> {
+fn snooze_notification(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    payload: SnoozePayload,
+) -> ApiResult<()> {
     let minutes = payload.minutes.max(1);
     into_api(
         state
@@ -704,6 +781,7 @@ fn snooze_notification(state: State<AppState>, payload: SnoozePayload) -> ApiRes
                 ))?;
                 task.reminder_time = Some(reminder_time);
                 state.scheduler.cancel_task(&task.id);
+                emit_sticky_note_reminder(&app, &task.id, task.reminder_time.clone());
                 into_api(state.scheduler.schedule_task(task))?;
             }
         }
@@ -1102,6 +1180,7 @@ fn main() {
             create_sticky_note,
             save_sticky_note_content,
             update_sticky_note_title,
+            update_sticky_note_reminder,
             move_sticky_note,
             close_sticky_note,
             close_sticky_note_by_window_label,
@@ -1227,6 +1306,7 @@ mod tests {
             is_pinned: false,
             created_at: "2026-01-01T00:00:00".to_string(),
             updated_at: "2026-01-01T00:00:00".to_string(),
+            reminder_time: Some("2026-09-22T16:30:00".to_string()),
         }
     }
 
@@ -1257,5 +1337,6 @@ mod tests {
         assert!(script.contains(&note.task_id));
         assert!(script.contains("__TASKREMINDER_STICKY_NOTE"));
         assert!(script.contains("taskreminder-sticky-note"));
+        assert!(script.contains("2026-09-22T16:30:00"));
     }
 }

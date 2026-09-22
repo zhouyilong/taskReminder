@@ -65,6 +65,7 @@ export interface StickyNote {
   isPinned: boolean;
   createdAt: string;
   updatedAt: string;
+  reminderTime?: string | null;
 }
 
 export interface AppSettings {

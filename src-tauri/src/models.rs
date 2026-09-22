@@ -72,6 +72,7 @@ pub struct StickyNote {
     pub is_pinned: bool,
     pub created_at: String,
     pub updated_at: String,
+    pub reminder_time: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]

@@ -1,13 +1,13 @@
 [package]
 name = "task_reminder_app"
-version = "1.5.4"
+version = "1.5.5"
 edition = "2021"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [ "tray-icon", "custom-protocol" ] }
+tauri = { version = "2", features = [ "tray-icon" ] }
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 serde = { version = "1.0", features = ["derive"] }
@@ -30,5 +30,7 @@ winreg = "0.10"
 windows = { version = "0.52", features = ["UI_ViewManagement", "Win32_Graphics_Gdi"] }
 
 [features]
-# 使用 Tauri 的自定义协议功能（生产构建或 devPath 指向远程 URL 时需要）
+# 开发时 `tauri dev` 会关掉 default features，便签等额外窗口才会走 Vite。
+# 生产构建保留 custom-protocol，从打包后的前端资源加载。
+default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

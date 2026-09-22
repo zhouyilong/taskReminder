@@ -117,6 +117,12 @@ export const api = {
   }): Promise<void> {
     return invoke("update_sticky_note_title", { payload });
   },
+  async updateStickyNoteReminder(payload: {
+    taskId: string;
+    reminderTime?: string | null;
+  }): Promise<void> {
+    return invoke("update_sticky_note_reminder", { payload });
+  },
   async moveStickyNote(payload: {
     taskId: string;
     x: number;

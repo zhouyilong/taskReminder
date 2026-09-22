@@ -154,10 +154,14 @@ impl ReminderScheduler {
         if task.deleted_at.is_some() || task.status == "COMPLETED" {
             return Ok(());
         }
-        if let Some(reminder_time) = &task.reminder_time {
-            if !is_future(reminder_time)? {
-                return Ok(());
-            }
+        let Some(reminder_time) = task.reminder_time.clone() else {
+            return Ok(());
+        };
+        // 与循环提醒一致：计时器若提前醒来，只重新排程。
+        // 等待时间向上取整后，到点或略过目标时间才会真正弹出。
+        if is_future(&reminder_time)? {
+            self.schedule_task(task)?;
+            return Ok(());
         }
 
         let record = self
