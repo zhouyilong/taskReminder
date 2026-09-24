@@ -1,34 +1,34 @@
 # Task Reminder (Tauri + Vue 3)
 
-## Recent Fix Notes
-### v1.5.6 UI refresh
-- Titlebar: app logo, standalone version label, and a colored sync-status pill (success / error / syncing) with a hover tooltip showing sync time and last error.
-- Sidebar: soft highlight + left indicator for the active tab, count badges for pending tasks and running recurring reminders; becomes a horizontal tab bar below 980px width.
-- Tasks: title + Markdown description merged into one composer card (press Enter to add; the description area expands on focus), leaving more room for the list.
-- Tables: tighter rows, colored reminder-time chips (upcoming / overdue), status and type pills, and empty states for every list.
-- Global styling is driven by CSS design tokens in `src/styles.css` (dark in `:root`, light in `.light-theme`); see “UI 样式约定” in `AGENTS.md`.
-- Sticky-note titles now use the system sans-serif stack instead of an unbundled web font that fell back to a serif face on Windows.
+## 近期修复记录
+### v1.5.6 界面优化
+- 标题栏：新增应用图标，版本号单独显示；同步状态改为带色点的标签（成功 / 失败 / 同步中），鼠标悬停可查看同步时间和最近错误。
+- 侧边栏：选中菜单改为浅色高亮 + 左侧指示条，待办事项和运行中的循环提醒显示数量角标；窗口宽度小于 980px 时变为横向标签栏。
+- 待办事项：标题与 Markdown 描述合并为一张输入卡片（回车即可添加，描述区聚焦时展开），列表可显示更多行。
+- 表格：行高收紧，提醒时间按“即将到期 / 已过期”着色，状态与类型改为彩色标签，所有列表新增空状态提示。
+- 全局样式统一由 `src/styles.css` 中的 CSS 设计令牌驱动（深色在 `:root`，浅色在 `.light-theme`），详见 `AGENTS.md` 中的“UI 样式约定”。
+- 便签标题改用系统无衬线字体，修复原先引用未打包的 Web 字体、在 Windows 上回退为衬线字体的问题。
 
-### Sticky notes failed to save / stuck loading on Linux
-- Symptom: on Linux, sticky-note windows stayed on “载入便签...”, or opened but could not save.
-- Root cause: WebKitGTK often stops repainting transparent windows after the first frame; and in dev mode the sticky-note window used an External `localhost` URL, which WebKitGTK treats as a remote origin and denies IPC `invoke`.
-- Fix: disable transparency for sticky-note windows on Linux only and inject the note data via an initialization script; load sticky-note windows with `WebviewUrl::App("sticky-note-item.html")` on every platform (Tauri rewrites it to `build.devUrl` in dev), guarded by a unit test in `main.rs`.
-- Rule: every Tauri window should use `WebviewUrl::App(...)`; do not special-case dev mode with External URLs.
+### Linux 下便签无法保存 / 卡在载入中
+- 现象：Linux 下便签窗口一直停在“载入便签...”，或能打开但无法保存。
+- 根因：WebKitGTK 的透明窗口在首帧后经常不再重绘；同时开发模式下便签窗口使用 External `localhost` URL，WebKitGTK 将其视为远程源并拒绝 IPC `invoke`。
+- 修复：仅在 Linux 关闭便签窗口透明，并通过初始化脚本注入便签数据；所有平台的便签窗口统一使用 `WebviewUrl::App("sticky-note-item.html")` 加载（开发模式下 Tauri 会自动改写为 `build.devUrl`），并在 `main.rs` 中用单元测试守护。
+- 规则：所有 Tauri 窗口都应使用 `WebviewUrl::App(...)`，不要为开发模式单独改用 External URL。
 
-### Sticky notes not following main window scale/theme
-- Symptom: after changing the main window zoom or theme, already-open sticky note windows did not update.
-- Root cause: cross-window UI sync relied on a single event path, which was not stable enough across different webview/runtime paths.
-- Fix:
-  - unified `uiScale`, `theme`, and `windowOpacity` into one UI state payload;
-  - broadcast from the main window, keep a backend snapshot, and re-send when sticky note windows are shown;
-  - add a final fallback that injects the current UI state directly into sticky-note webviews and applies it via a browser custom event.
-- Rule: for cross-window UI sync, keep at least “runtime broadcast + new-window replay + final fallback” instead of relying on a single event path.
+### 便签不跟随主窗口缩放 / 主题
+- 现象：修改主窗口缩放或主题后，已打开的便签窗口没有同步更新。
+- 根因：跨窗口 UI 同步只依赖单一事件通道，在不同 webview / 运行时路径下不够稳定。
+- 修复：
+  - 将 `uiScale`、`theme`、`windowOpacity` 合并为一个 UI 状态负载；
+  - 由主窗口广播，后端保存一份快照，便签窗口显示时重新下发；
+  - 增加最终兜底：直接向便签 webview 注入当前 UI 状态，并通过浏览器自定义事件应用。
+- 规则：跨窗口 UI 同步至少保留“运行时广播 + 新窗口回放 + 最终兜底”三层，不要只依赖单一事件通道。
 
-### Sticky note pinning was being reset
-- Symptom: clicking the pin button appeared to do nothing, or pinning was lost after opening/reordering sticky notes.
-- Root cause: the pin state lived only on the front end while the Rust window-layer logic kept reapplying sticky-note z-order, so show/reorder/restart paths could overwrite or forget the pinned state.
-- Fix: make the Rust backend the source of truth, persist `sticky_is_pinned` in the database, and always re-apply the correct top-most/bottom-most layer from that stored state when a sticky note is pinned, shown, or reordered.
-- Rule: pinning-related window behavior must be backend-owned and persisted; do not rely on a front-end-only `always_on_top(true)` call for durable sticky-note pin state.
+### 便签锚定状态被重置
+- 现象：点击锚定按钮看似无效，或打开 / 重排便签后锚定状态丢失。
+- 根因：锚定状态只保存在前端，而 Rust 窗口层级逻辑会反复重新应用便签层级，导致显示、重排、重启等路径覆盖或遗忘锚定状态。
+- 修复：以 Rust 后端为唯一可信来源，将 `sticky_is_pinned` 持久化到数据库；在便签锚定、显示或重排时，始终根据存储的状态重新应用置顶 / 置底层级。
+- 规则：与锚定相关的窗口行为必须由后端负责并持久化，不要依赖仅在前端调用的 `always_on_top(true)` 来维持便签锚定状态。
 
 一个基于 Tauri + Vue 3 + TypeScript 的桌面任务提醒应用，包含主窗口、提醒弹窗与桌面便签窗口。
 
