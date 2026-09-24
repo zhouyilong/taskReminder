@@ -1,28 +1,30 @@
 <template>
-  <div v-if="open" class="modal-mask" @click.self="onClose">
-    <div class="modal">
-      <div class="modal-header">
-        <span>{{ title }}</span>
-        <div class="modal-header-actions">
-          <button
-            v-if="showDelete"
-            class="modal-delete"
-            type="button"
-            @click="onDelete"
-          >
-            删除
-          </button>
+  <Transition name="modal">
+    <div v-if="open" class="modal-mask" @click.self="onClose">
+      <div class="modal">
+        <div class="modal-header">
+          <span>{{ title }}</span>
+          <div class="modal-header-actions">
+            <button
+              v-if="showDelete"
+              class="modal-delete"
+              type="button"
+              @click="onDelete"
+            >
+              删除
+            </button>
+          </div>
+        </div>
+        <div class="modal-body">
+          <slot />
+        </div>
+        <div class="modal-actions">
+          <button class="button secondary" type="button" @click="onClose">取消</button>
+          <button class="button" type="button" @click="onConfirm">确认</button>
         </div>
       </div>
-      <div class="modal-body">
-        <slot />
-      </div>
-      <div class="modal-actions">
-        <button class="button secondary" type="button" @click="onClose">取消</button>
-        <button class="button" type="button" @click="onConfirm">确认</button>
-      </div>
     </div>
-  </div>
+  </Transition>
 </template>
 
 <script setup lang="ts">
