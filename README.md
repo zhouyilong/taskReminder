@@ -1,6 +1,20 @@
 # Task Reminder (Tauri + Vue 3)
 
 ## Recent Fix Notes
+### v1.5.6 UI refresh
+- Titlebar: app logo, standalone version label, and a colored sync-status pill (success / error / syncing) with a hover tooltip showing sync time and last error.
+- Sidebar: soft highlight + left indicator for the active tab, count badges for pending tasks and running recurring reminders; becomes a horizontal tab bar below 980px width.
+- Tasks: title + Markdown description merged into one composer card (press Enter to add; the description area expands on focus), leaving more room for the list.
+- Tables: tighter rows, colored reminder-time chips (upcoming / overdue), status and type pills, and empty states for every list.
+- Global styling is driven by CSS design tokens in `src/styles.css` (dark in `:root`, light in `.light-theme`); see “UI 样式约定” in `AGENTS.md`.
+- Sticky-note titles now use the system sans-serif stack instead of an unbundled web font that fell back to a serif face on Windows.
+
+### Sticky notes failed to save / stuck loading on Linux
+- Symptom: on Linux, sticky-note windows stayed on “载入便签...”, or opened but could not save.
+- Root cause: WebKitGTK often stops repainting transparent windows after the first frame; and in dev mode the sticky-note window used an External `localhost` URL, which WebKitGTK treats as a remote origin and denies IPC `invoke`.
+- Fix: disable transparency for sticky-note windows on Linux only and inject the note data via an initialization script; load sticky-note windows with `WebviewUrl::App("sticky-note-item.html")` on every platform (Tauri rewrites it to `build.devUrl` in dev), guarded by a unit test in `main.rs`.
+- Rule: every Tauri window should use `WebviewUrl::App(...)`; do not special-case dev mode with External URLs.
+
 ### Sticky notes not following main window scale/theme
 - Symptom: after changing the main window zoom or theme, already-open sticky note windows did not update.
 - Root cause: cross-window UI sync relied on a single event path, which was not stable enough across different webview/runtime paths.
@@ -16,9 +30,21 @@
 - Fix: make the Rust backend the source of truth, persist `sticky_is_pinned` in the database, and always re-apply the correct top-most/bottom-most layer from that stored state when a sticky note is pinned, shown, or reordered.
 - Rule: pinning-related window behavior must be backend-owned and persisted; do not rely on a front-end-only `always_on_top(true)` call for durable sticky-note pin state.
 
-一个基于 Tauri + Vue 3 + TypeScript 的桌面任务提醒应用，包含主窗口与通知窗口。
+一个基于 Tauri + Vue 3 + TypeScript 的桌面任务提醒应用，包含主窗口、提醒弹窗与桌面便签窗口。
 
-当前技术栈：**Tauri 2 + Vue 3 + TypeScript**。
+当前技术栈：**Tauri 2 + Vue 3 + TypeScript**，当前版本 **v1.5.6**。
+
+## 功能概览
+- **待办事项**：输入标题后回车即可添加，支持 Markdown 所见即所得描述；可设置一次性提醒时间，列表中按“即将到期 / 已过期”着色显示。
+- **已办事项**：按标题或描述搜索，勾选即可取消完成。
+- **循环提醒**：支持区间间隔、每天、每周、每月固定时间与 Cron 表达式，可暂停/恢复。
+- **提醒记录**：按日期与类型筛选，查看每次提醒的处理结果（已关闭 / 已推迟 / 已完成 / 待处理），支持批量删除。
+- **提醒弹窗**：到点弹出，支持“知道了”和“稍后提醒”（推迟分钟数可在设置中调整），可选提示音。
+- **桌面便签**：每张便签一个独立窗口，支持 Markdown 编辑、自动保存、锚定（置顶并锁定位置）、标记完成，以及在右下角设置提醒时间。
+- **外观**：深色/浅色主题、界面缩放、整体透明度，提醒弹窗主题可单独设置。
+- **云同步**：通过 WebDAV 在多台设备间同步数据。
+- **自动更新**：启动时自动检查 GitHub Releases 上的新版本，可配置仅用于更新的代理。
+- **系统集成**：托盘菜单、开机自启、单实例运行。
 
 ## 环境准备
 - 安装 Node.js 与 pnpm
@@ -149,7 +175,7 @@ https://github.com/zhouyilong/taskReminder/releases/latest/download/latest.json
 
 其中 `latest.json` 会指向当前版本对应的 MSI 安装包，例如：
 ```
-https://github.com/zhouyilong/taskReminder/releases/download/v1.4.7/TaskReminderApp_1.4.7_x64_zh-CN.msi
+https://github.com/zhouyilong/taskReminder/releases/download/v1.5.6/TaskReminderApp_1.5.6_x64_zh-CN.msi
 ```
 
 建议使用下面的命令生成自动更新产物：
@@ -169,7 +195,7 @@ pnpm release:updater
 - `latest.json`
 
 发布要求：
-- GitHub Release 标签需使用 `v<version>` 格式，例如 `v1.4.7`
+- GitHub Release 标签需使用 `v<version>` 格式，例如 `v1.5.6`
 - `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 中的版本号应保持一致
 - `latest.json` 必须上传到“最新版本”对应的 Release，客户端才会通过 `releases/latest/download/latest.json` 获取到更新
 
@@ -188,6 +214,8 @@ powershell -ExecutionPolicy Bypass -File scripts/build-updater.ps1 -ReleaseNotes
 
 ## 桌面便签故障排查与修复思路（经验记录）
 以下内容用于处理“桌面便签打不开、点击无响应、层级异常、主窗口关闭异常”等问题。
+
+> 说明：早期版本有一个“桌面便签管理窗口”（`StickyNoteApp.vue`），现已移除。当前每张便签都是独立窗口（`sticky-note-item.html` → `src/StickyNoteItemApp.vue`，窗口标签 `sticky-note-item-<编码后的 id>`），可从主窗口标题栏或托盘菜单“新建便签”创建。下文中关于管理窗口的内容仅作历史经验保留，排查思路对便签窗口同样适用。
 
 ### 典型症状
 - 点击“桌面便签”按钮后无反应，或提示“打开桌面便签超时”。
@@ -225,15 +253,17 @@ powershell -ExecutionPolicy Bypass -File scripts/build-updater.ps1 -ReleaseNotes
 - 管理窗口固定右上角时，Y 轴预留顶部安全边距，避免压住主窗口标题栏按钮。
 
 ### 关键代码位置（便于快速回查）
-- 前端桌面便签管理：`src/StickyNoteApp.vue`
-- 前端主窗口开关逻辑：`src/App.vue`
-- 后端窗口创建与层级：`src-tauri/src/main.rs`
-- 便签数据读写：`src-tauri/src/db.rs`
+- 前端便签窗口：`src/StickyNoteItemApp.vue`（入口 `src/stickyNoteItem.ts`）
+- 前端主窗口“新建便签”入口：`src/App.vue`
+- 托盘菜单“新建便签”：`src-tauri/src/tray.rs`
+- 后端窗口创建、URL 与层级（锚定/贴桌面）：`src-tauri/src/main.rs`
+- 便签数据读写与锚定状态持久化：`src-tauri/src/db.rs`
 
 ### 回归检查清单
-1. 点击“桌面便签”可稳定打开/关闭管理窗口。
-2. 管理窗口中点击“便签列表项”可弹出便签项窗口。
-3. 管理窗口中点击“新增便签”可新增并弹出便签项窗口。
-4. 打开管理窗口后，主程序“关闭”按钮仍可正常点击。
-5. 便签项窗口层级符合预期（贴桌面，非前置遮挡业务窗口）。
-6. 冷启动后不会自动弹出桌面便签（保持手动打开）。
+1. 主窗口标题栏点击“新建便签”可稳定新建并弹出便签窗口。
+2. 便签窗口内点击“+”可新增便签，点击“✓”可标记完成并关闭。
+3. 便签内容修改后自动保存，重启应用后内容与位置保持一致。
+4. 锚定后便签置顶且位置锁定，取消锚定后恢复贴桌面、可拖动；重启后锚定状态保持。
+5. 便签右下角设置提醒时间后，到点弹出提醒；清除后不再提醒。
+6. 打开便签后，主程序“关闭”按钮仍可正常点击。
+7. Linux 下便签能正常载入并保存（不会停在“载入便签...”）。
