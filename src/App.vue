@@ -2,8 +2,16 @@
   <div class="app" :class="{ 'light-theme': isLightTheme, 'is-linux': isLinuxPlatform }">
     <div class="titlebar" @dblclick="toggleMaximize">
       <div class="titlebar-left" data-tauri-drag-region>
-        <span class="app-title">任务提醒 {{ appVersion }}<span v-if="isDevMode" class="dev-tag"> [开发]</span></span>
-        <span class="tag">{{ syncStatusLabel }}</span>
+        <span class="app-logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M7 12.5l3.2 3.2L17 8.8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </span>
+        <span class="app-title">任务提醒<span v-if="isDevMode" class="dev-tag"> [开发]</span></span>
+        <span v-if="appVersion" class="app-version">v{{ appVersion }}</span>
+        <span class="tag sync-tag" :class="`is-${syncStatusTone}`" :title="syncStatusTitle">
+          <span class="sync-dot" aria-hidden="true"></span>{{ syncStatusLabel }}
+        </span>
         <button
           v-if="updateTagLabel"
           class="tag tag-button update-tag"
@@ -42,28 +50,26 @@
           :disabled="creatingQuickStickyNote"
           @click="handleCreateStickyNote"
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M5 3h10l4 4v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
-            <path d="M14 3v4h4" fill="none" stroke="var(--bg-base, #1a1a2e)" stroke-width="1.2" />
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="stroke-icon">
+            <path d="M15.5 20H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9.5L15.5 20z" />
+            <path d="M15 20v-3.5a1 1 0 0 1 1-1h4" />
+            <path d="M8.5 9h7M8.5 12.5h4" />
           </svg>
         </button>
         <button class="icon-button" type="button" title="设置" @click="openSettings">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.2a1 1 0 0 0 .4-1.3l-2-3.5a1 1 0 0 0-1.2-.4l-2.2.9a7.8 7.8 0 0 0-1.7-1L14.5 2a1 1 0 0 0-1-.8h-4a1 1 0 0 0-1 .8l-.3 2.4a7.8 7.8 0 0 0-1.7 1l-2.2-.9a1 1 0 0 0-1.2.4l-2 3.5a1 1 0 0 0 .4 1.3l2 1.2a7.6 7.6 0 0 0 0 2l-2 1.2a1 1 0 0 0-.4 1.3l2 3.5a1 1 0 0 0 1.2.4l2.2-.9a7.8 7.8 0 0 0 1.7 1l.3 2.4a1 1 0 0 0 1 .8h4a1 1 0 0 0 1-.8l.3-2.4a7.8 7.8 0 0 0 1.7-1l2.2.9a1 1 0 0 0 1.2-.4l2-3.5a1 1 0 0 0-.4-1.3l-2-1.2zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"
-            />
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="stroke-icon">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
         </button>
         <button class="icon-button" type="button" title="云同步" @click="openWebdav">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M7.5 18.5a4.5 4.5 0 0 1 0-9 5.5 5.5 0 0 1 10.8 1.6A4 4 0 0 1 17 18.5H7.5z"
-            />
-            <path d="M12 8v6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-            <path d="M9.5 12l2.5 2.5L14.5 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="stroke-icon">
+            <path d="M7.5 18.5a4.5 4.5 0 0 1-.4-8.98 5.5 5.5 0 0 1 10.66 1.2A3.9 3.9 0 0 1 17 18.5H7.5z" />
+            <path d="M12 10.5v5M9.8 13.4l2.2 2.2 2.2-2.2" />
           </svg>
         </button>
       </div>
+      <span class="titlebar-divider" aria-hidden="true"></span>
       <div class="titlebar-controls">
         <button class="titlebar-button" type="button" title="最小化" @click="handleMinimize">
           <svg viewBox="0 0 10 10" aria-hidden="true">
@@ -109,6 +115,7 @@
             </svg>
           </span>
           <span class="tab-text">待办事项</span>
+          <span v-if="tasks.length" class="tab-badge">{{ tasks.length }}</span>
         </button>
         <button class="tab-button" :class="{ active: activeTab === 'completed' }" @click="activeTab = 'completed'">
           <span class="tab-icon">
@@ -128,6 +135,7 @@
             </svg>
           </span>
           <span class="tab-text">循环提醒</span>
+          <span v-if="activeRecurringCount" class="tab-badge">{{ activeRecurringCount }}</span>
         </button>
         <button class="tab-button" :class="{ active: activeTab === 'records' }" @click="activeTab = 'records'">
           <span class="tab-icon">
@@ -144,26 +152,32 @@
         <Transition name="fade" mode="out-in">
           <div v-if="activeTab === 'tasks'" key="tasks" class="tab-panel">
           <div class="section-heading">
-            <div class="section-heading-main">
-              <div class="section-title">待办事项</div>
-            </div>
+            <div class="section-title">待办事项</div>
             <span class="section-meta">共 {{ tasks.length }} 条任务</span>
           </div>
-          <div class="subsection-title">任务表单</div>
-          <div class="form-row compact">
-            <label class="field-label">标题</label>
-            <input class="input" v-model="newTaskDescription" placeholder="输入任务标题" style="flex: 1" />
-            <button class="button" @click="handleAddTask">添加任务</button>
-          </div>
-          <div class="form-row form-row-markdown task-create-markdown-row">
+          <div class="composer-card">
+            <div class="composer-title-row">
+              <span class="composer-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </span>
+              <input
+                class="composer-input"
+                v-model="newTaskDescription"
+                placeholder="添加新任务，输入标题后按回车"
+                @keydown.enter.exact.prevent="handleAddTask"
+              />
+              <button class="button" :disabled="!newTaskDescription.trim()" @click="handleAddTask">添加任务</button>
+            </div>
             <MarkdownNoteEditor
               v-model="newTaskStickyContent"
-              class="task-markdown-editor"
+              class="composer-editor"
+              variant="ghost"
               :theme="isLightTheme ? 'light' : 'dark'"
-              placeholder="输入任务描述，支持 Markdown 所见即所得"
+              placeholder="补充任务描述（可选），支持 Markdown 所见即所得"
             />
           </div>
-          <div class="subsection-title">待办列表</div>
           <div class="table-card">
             <div class="table-scroll table-scroll-no-x">
               <table class="table tasks-table">
@@ -185,26 +199,53 @@
                     @contextmenu.prevent.stop="openTaskMenu($event, task)"
                   >
                     <td class="col-select">
-                      <input type="checkbox" :checked="task.status === 'COMPLETED'" @change="toggleTask(task)" />
+                      <input
+                        type="checkbox"
+                        class="check-round"
+                        title="标记完成"
+                        :checked="task.status === 'COMPLETED'"
+                        @change="toggleTask(task)"
+                      />
                     </td>
-                    <td class="col-desc" :title="task.description">{{ task.description }}</td>
-                    <td class="col-note" :title="taskStickyPreview(task.stickyContent)">{{ taskStickyPreview(task.stickyContent) }}</td>
-                    <td class="col-datetime" :title="formatDateTime(task.reminderTime)">{{ formatDateTime(task.reminderTime) }}</td>
-                    <td class="col-datetime" :title="formatDateTime(task.createdAt)">{{ formatDateTime(task.createdAt) }}</td>
+                    <td class="col-desc cell-title" :title="task.description">{{ task.description }}</td>
+                    <td class="col-note cell-muted" :class="{ 'cell-empty': !task.stickyContent?.trim() }" :title="taskStickyPreview(task.stickyContent)">{{ taskStickyPreview(task.stickyContent) }}</td>
+                    <td class="col-datetime" :title="formatDateTime(task.reminderTime)">
+                      <span v-if="task.reminderTime" class="time-chip" :class="reminderTone(task.reminderTime)">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <circle cx="12" cy="12" r="8" />
+                          <path d="M12 8v4l2.5 1.5" />
+                        </svg>
+                        {{ formatDateTime(task.reminderTime) }}
+                      </span>
+                      <span v-else class="cell-empty">未设置</span>
+                    </td>
+                    <td class="col-datetime cell-time" :title="formatDateTime(task.createdAt)">{{ formatDateTime(task.createdAt) }}</td>
+                  </tr>
+                  <tr v-if="!tasksPage.length" class="table-empty-row">
+                    <td colspan="5">
+                      <div class="table-empty">
+                        <span class="table-empty-title">暂无待办任务</span>
+                        <span class="table-empty-hint">在上方输入标题即可快速添加</span>
+                      </div>
+                    </td>
                   </tr>
                 </tbody>
               </table>
             </div>
             <div class="pagination">
               <span>共 {{ tasks.length }} 条</span>
-              <select class="select" v-model.number="tasksPageSize">
-                <option :value="10">10</option>
-                <option :value="20">20</option>
-                <option :value="50">50</option>
+              <select class="select" title="每页条数" v-model.number="tasksPageSize">
+                <option :value="10">10 条/页</option>
+                <option :value="20">20 条/页</option>
+                <option :value="50">50 条/页</option>
               </select>
-              <button class="button secondary" :disabled="tasksPageIndex === 1" @click="tasksPageIndex--">上一页</button>
-              <span>第 {{ tasksPageIndex }} / {{ tasksTotalPages }} 页</span>
-              <button class="button secondary" :disabled="tasksPageIndex === tasksTotalPages" @click="tasksPageIndex++">下一页</button>
+              <button class="button secondary" :disabled="tasksPageIndex === 1" @click="tasksPageIndex--">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5L9 12l5.5 5.5" /></svg>上一页
+              </button>
+              <span class="pagination-page">第 {{ tasksPageIndex }} / {{ tasksTotalPages }} 页</span>
+              <button class="button secondary" :disabled="tasksPageIndex === tasksTotalPages" @click="tasksPageIndex++">
+                下一页<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6.5L15 12l-5.5 5.5" /></svg>
+              </button>
             </div>
           </div>
           </div>
@@ -213,12 +254,18 @@
             <div class="section-title">已办事项</div>
             <span class="section-meta">筛选后 {{ filteredCompleted.length }} 条</span>
           </div>
-          <div class="subsection-title">筛选表单</div>
-          <div class="form-row compact">
-            <label class="field-label">标题</label>
-            <input class="input" v-model="completedFilter" placeholder="按标题/描述过滤" style="flex: 1" />
+          <div class="search-field">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="6.5" />
+              <path d="M16 16l4 4" />
+            </svg>
+            <input class="input" v-model="completedFilter" placeholder="按标题或描述搜索已办事项" />
+            <button v-if="completedFilter" class="search-clear" type="button" title="清空" @click="completedFilter = ''">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 7l10 10M17 7L7 17" />
+              </svg>
+            </button>
           </div>
-          <div class="subsection-title">已办列表</div>
           <div class="table-card">
             <div class="table-scroll table-scroll-no-x">
               <table class="table completed-table">
@@ -240,26 +287,38 @@
                     @contextmenu.prevent.stop="openCompletedMenu($event, task)"
                   >
                     <td class="col-select">
-                      <input type="checkbox" checked @change="toggleTask(task)" />
+                      <input type="checkbox" class="check-round" title="取消完成" checked @change="toggleTask(task)" />
                     </td>
-                    <td class="col-desc" :title="task.description">{{ task.description }}</td>
-                    <td class="col-note" :title="taskStickyPreview(task.stickyContent)">{{ taskStickyPreview(task.stickyContent) }}</td>
-                    <td class="col-datetime" :title="formatDateTime(task.createdAt)">{{ formatDateTime(task.createdAt) }}</td>
-                    <td class="col-datetime" :title="formatDateTime(task.completedAt)">{{ formatDateTime(task.completedAt) }}</td>
+                    <td class="col-desc cell-title is-done" :title="task.description">{{ task.description }}</td>
+                    <td class="col-note cell-muted" :class="{ 'cell-empty': !task.stickyContent?.trim() }" :title="taskStickyPreview(task.stickyContent)">{{ taskStickyPreview(task.stickyContent) }}</td>
+                    <td class="col-datetime cell-time" :title="formatDateTime(task.createdAt)">{{ formatDateTime(task.createdAt) }}</td>
+                    <td class="col-datetime cell-time" :title="formatDateTime(task.completedAt)">{{ formatDateTime(task.completedAt) }}</td>
+                  </tr>
+                  <tr v-if="!completedPage.length" class="table-empty-row">
+                    <td colspan="5">
+                      <div class="table-empty">
+                        <span class="table-empty-title">{{ completedFilter ? "没有匹配的已办事项" : "暂无已办事项" }}</span>
+                        <span class="table-empty-hint">{{ completedFilter ? "换个关键词试试" : "完成的任务会出现在这里" }}</span>
+                      </div>
+                    </td>
                   </tr>
                 </tbody>
               </table>
             </div>
             <div class="pagination">
               <span>共 {{ filteredCompleted.length }} 条</span>
-              <select class="select" v-model.number="completedPageSize">
-                <option :value="10">10</option>
-                <option :value="20">20</option>
-                <option :value="50">50</option>
+              <select class="select" title="每页条数" v-model.number="completedPageSize">
+                <option :value="10">10 条/页</option>
+                <option :value="20">20 条/页</option>
+                <option :value="50">50 条/页</option>
               </select>
-              <button class="button secondary" :disabled="completedPageIndex === 1" @click="completedPageIndex--">上一页</button>
-              <span>第 {{ completedPageIndex }} / {{ completedTotalPages }} 页</span>
-              <button class="button secondary" :disabled="completedPageIndex === completedTotalPages" @click="completedPageIndex++">下一页</button>
+              <button class="button secondary" :disabled="completedPageIndex === 1" @click="completedPageIndex--">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5L9 12l5.5 5.5" /></svg>上一页
+              </button>
+              <span class="pagination-page">第 {{ completedPageIndex }} / {{ completedTotalPages }} 页</span>
+              <button class="button secondary" :disabled="completedPageIndex === completedTotalPages" @click="completedPageIndex++">
+                下一页<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6.5L15 12l-5.5 5.5" /></svg>
+              </button>
             </div>
           </div>
           </div>
@@ -268,6 +327,7 @@
             <div class="section-title">循环提醒</div>
             <span class="section-meta">共 {{ recurringTasks.length }} 条配置</span>
           </div>
+          <div class="form-card">
           <div class="form-row compact">
             <label class="field-label">描述</label>
             <input class="input" v-model="newRecurringDescription" placeholder="输入提醒描述" style="flex: 1" />
@@ -292,7 +352,7 @@
             </template>
             <template v-else-if="newRecurringMode === 'WEEKLY'">
               <label class="field-label">周几</label>
-              <select class="select" v-model.number="newRecurringWeekday" style="width: 120px">
+              <select class="select" title="每页条数" v-model.number="newRecurringWeekday" style="width: 120px">
                 <option v-for="item in weekdayOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
               </select>
               <label class="field-label">时间</label>
@@ -308,6 +368,7 @@
               <label class="field-label">Cron</label>
               <input class="input" v-model="newRecurringCronExpression" placeholder="如: 0 9 * * *" style="flex: 1" />
             </template>
+          </div>
           </div>
           <div class="table-card">
             <div class="table-scroll">
@@ -329,25 +390,41 @@
                     @dblclick="openEditRecurring(task)"
                     @contextmenu.prevent.stop="openRecurringMenu($event, task)"
                   >
-                    <td class="col-desc" :title="task.description">{{ task.description }}</td>
-                    <td class="col-mode" :title="formatRecurringMode(task.repeatMode)">{{ formatRecurringMode(task.repeatMode) }}</td>
-                    <td class="col-rule" :title="formatRecurringRule(task)">{{ formatRecurringRule(task) }}</td>
-                    <td class="col-datetime col-next-trigger" :title="formatDateTime(task.nextTrigger)">{{ formatDateTime(task.nextTrigger) }}</td>
-                    <td class="col-status" :title="task.isPaused ? '已暂停' : '运行中'">{{ task.isPaused ? "已暂停" : "运行中" }}</td>
+                    <td class="col-desc cell-title" :title="task.description">{{ task.description }}</td>
+                    <td class="col-mode" :title="formatRecurringMode(task.repeatMode)">
+                      <span class="chip">{{ formatRecurringMode(task.repeatMode) }}</span>
+                    </td>
+                    <td class="col-rule cell-muted" :title="formatRecurringRule(task)">{{ formatRecurringRule(task) }}</td>
+                    <td class="col-datetime col-next-trigger cell-time" :title="formatDateTime(task.nextTrigger)">{{ formatDateTime(task.nextTrigger) }}</td>
+                    <td class="col-status" :title="task.isPaused ? '已暂停' : '运行中'">
+                      <span class="status-pill" :class="task.isPaused ? 'is-paused' : 'is-running'">{{ task.isPaused ? "已暂停" : "运行中" }}</span>
+                    </td>
+                  </tr>
+                  <tr v-if="!recurringPage.length" class="table-empty-row">
+                    <td colspan="5">
+                      <div class="table-empty">
+                        <span class="table-empty-title">暂无循环提醒</span>
+                        <span class="table-empty-hint">在上方设置描述与规则后添加</span>
+                      </div>
+                    </td>
                   </tr>
                 </tbody>
               </table>
             </div>
             <div class="pagination">
               <span>共 {{ recurringTasks.length }} 条</span>
-              <select class="select" v-model.number="recurringPageSize">
-                <option :value="10">10</option>
-                <option :value="20">20</option>
-                <option :value="50">50</option>
+              <select class="select" title="每页条数" v-model.number="recurringPageSize">
+                <option :value="10">10 条/页</option>
+                <option :value="20">20 条/页</option>
+                <option :value="50">50 条/页</option>
               </select>
-              <button class="button secondary" :disabled="recurringPageIndex === 1" @click="recurringPageIndex--">上一页</button>
-              <span>第 {{ recurringPageIndex }} / {{ recurringTotalPages }} 页</span>
-              <button class="button secondary" :disabled="recurringPageIndex === recurringTotalPages" @click="recurringPageIndex++">下一页</button>
+              <button class="button secondary" :disabled="recurringPageIndex === 1" @click="recurringPageIndex--">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5L9 12l5.5 5.5" /></svg>上一页
+              </button>
+              <span class="pagination-page">第 {{ recurringPageIndex }} / {{ recurringTotalPages }} 页</span>
+              <button class="button secondary" :disabled="recurringPageIndex === recurringTotalPages" @click="recurringPageIndex++">
+                下一页<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6.5L15 12l-5.5 5.5" /></svg>
+              </button>
             </div>
           </div>
           </div>
@@ -356,7 +433,7 @@
             <div class="section-title">提醒记录</div>
             <span class="section-meta">筛选后 {{ filteredRecords.length }} 条</span>
           </div>
-          <div class="form-row compact">
+          <div class="form-row compact filter-bar">
             <label class="field-label">开始</label>
             <input class="input" type="date" v-model="recordFilterStart" @change="handleRecordDatePicked" />
             <label class="field-label">结束</label>
@@ -395,25 +472,44 @@
                     <td class="col-select">
                       <input type="checkbox" v-model="selectedRecords" :value="record.id" />
                     </td>
-                    <td class="col-desc" :title="recordDescription(record.description)">{{ recordDescription(record.description) }}</td>
-                    <td class="col-type" :title="record.type === 'TASK' ? '任务' : '循环'">{{ record.type === 'TASK' ? '任务' : '循环' }}</td>
-                    <td class="col-datetime" :title="formatDateTime(record.triggerTime)">{{ formatDateTime(record.triggerTime) }}</td>
-                    <td class="col-datetime" :title="formatDateTime(record.closeTime)">{{ formatDateTime(record.closeTime) }}</td>
-                    <td class="col-action" :title="formatAction(record.action)">{{ formatAction(record.action) }}</td>
+                    <td class="col-desc cell-title" :title="recordDescription(record.description)">{{ recordDescription(record.description) }}</td>
+                    <td class="col-type" :title="record.type === 'TASK' ? '任务' : '循环'">
+                      <span class="chip" :class="record.type === 'TASK' ? 'is-task' : 'is-recurring'">{{ record.type === 'TASK' ? '任务' : '循环' }}</span>
+                    </td>
+                    <td class="col-datetime cell-time" :title="formatDateTime(record.triggerTime)">{{ formatDateTime(record.triggerTime) }}</td>
+                    <td class="col-datetime cell-time" :title="formatDateTime(record.closeTime)">
+                      <span v-if="record.closeTime">{{ formatDateTime(record.closeTime) }}</span>
+                      <span v-else class="cell-empty">—</span>
+                    </td>
+                    <td class="col-action" :title="formatAction(record.action)">
+                      <span class="status-pill" :class="`action-${record.action.toLowerCase()}`">{{ formatAction(record.action) }}</span>
+                    </td>
+                  </tr>
+                  <tr v-if="!recordPage.length" class="table-empty-row">
+                    <td colspan="6">
+                      <div class="table-empty">
+                        <span class="table-empty-title">暂无提醒记录</span>
+                        <span class="table-empty-hint">提醒弹出后会自动记录在这里</span>
+                      </div>
+                    </td>
                   </tr>
                 </tbody>
               </table>
             </div>
             <div class="pagination">
               <span>共 {{ filteredRecords.length }} 条</span>
-              <select class="select" v-model.number="recordPageSize">
-                <option :value="10">10</option>
-                <option :value="20">20</option>
-                <option :value="50">50</option>
+              <select class="select" title="每页条数" v-model.number="recordPageSize">
+                <option :value="10">10 条/页</option>
+                <option :value="20">20 条/页</option>
+                <option :value="50">50 条/页</option>
               </select>
-              <button class="button secondary" :disabled="recordPageIndex === 1" @click="recordPageIndex--">上一页</button>
-              <span>第 {{ recordPageIndex }} / {{ recordTotalPages }} 页</span>
-              <button class="button secondary" :disabled="recordPageIndex === recordTotalPages" @click="recordPageIndex++">下一页</button>
+              <button class="button secondary" :disabled="recordPageIndex === 1" @click="recordPageIndex--">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5L9 12l5.5 5.5" /></svg>上一页
+              </button>
+              <span class="pagination-page">第 {{ recordPageIndex }} / {{ recordTotalPages }} 页</span>
+              <button class="button secondary" :disabled="recordPageIndex === recordTotalPages" @click="recordPageIndex++">
+                下一页<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6.5L15 12l-5.5 5.5" /></svg>
+              </button>
             </div>
           </div>
           </div>
@@ -880,10 +976,40 @@ const contextMenu = reactive({
 
 const syncStatusLabel = computed(() => {
   if (!syncStatus.value || !syncStatus.value.status) {
-    return "同步: 未同步";
+    return "未同步";
   }
-  return `同步: ${syncStatus.value.status}`;
+  return syncStatus.value.status;
 });
+
+const syncStatusTone = computed(() => {
+  const status = syncStatus.value?.status ?? "";
+  if (!status) {
+    return "idle";
+  }
+  if (status.includes("失败") || syncStatus.value?.error) {
+    return "error";
+  }
+  if (status.includes("中")) {
+    return "syncing";
+  }
+  if (status.includes("成功") || status.includes("完成")) {
+    return "success";
+  }
+  return "idle";
+});
+
+const syncStatusTitle = computed(() => {
+  const parts = [`云同步：${syncStatusLabel.value}`];
+  if (syncStatus.value?.time) {
+    parts.push(`时间：${formatDateTime(syncStatus.value.time)}`);
+  }
+  if (syncStatus.value?.error) {
+    parts.push(`错误：${syncStatus.value.error}`);
+  }
+  return parts.join("\n");
+});
+
+const activeRecurringCount = computed(() => recurringTasks.value.filter(task => !task.isPaused).length);
 
 const uiScalePercent = computed(() => Math.round(uiScale.value * 100));
 const windowOpacityPercent = computed(() => Math.round(windowOpacity.value * 100));
@@ -1072,6 +1198,17 @@ const formatDateTime = (value?: string | null) => {
     return "-";
   }
   return value.replace("T", " ");
+};
+
+const reminderTone = (value?: string | null) => {
+  if (!value) {
+    return "";
+  }
+  const time = new Date(value).getTime();
+  if (Number.isNaN(time)) {
+    return "";
+  }
+  return time < Date.now() ? "is-overdue" : "is-upcoming";
 };
 
 const formatBytes = (value: number) => {
