@@ -4,7 +4,9 @@
       <div class="titlebar-left" data-tauri-drag-region>
         <span class="app-logo" aria-hidden="true">
           <svg viewBox="0 0 24 24">
-            <path d="M7 12.5l3.2 3.2L17 8.8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+            <path d="M12 2.27C7.91 2.27 5.06 5.24 5.06 9.46v3.72c0 1.11-.62 1.98-1.49 2.73-.75.62-.37 1.98.74 1.98h15.38c1.11 0 1.49-1.36.74-1.98-.87-.75-1.49-1.62-1.49-2.73V9.46c0-4.22-2.85-7.19-6.94-7.19z" fill="currentColor" />
+            <path d="M9.52 19.13a2.48 2.48 0 0 0 4.96 0z" fill="currentColor" />
+            <path class="app-logo-check" d="M8.53 10.33l2.48 2.48 4.59-4.59" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         </span>
         <span class="app-title">任务提醒<span v-if="isDevMode" class="dev-tag"> [开发]</span></span>

@@ -183,6 +183,10 @@ html.sticky-note-mode.is-linux.light-theme #sticky-note-item {
   height: 16px;
 }
 
+.app-logo-check {
+  stroke: var(--primary);
+}
+
 .app-title {
   font-size: 14px;
   font-weight: var(--weight-bold);
