@@ -3,7 +3,7 @@
 ## 近期修复记录
 > 后续规划见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
-### 提醒可靠性（v1.5.x）
+### v1.5.7 提醒可靠性
 - 提醒弹窗改为队列：多条提醒同时到点时逐条展示（显示 `1 / N`），可一键“全部知道了”，不再互相覆盖。
 - 关机、休眠或改系统时间期间错过的提醒，会在启动后或 30 秒内的巡检中补发（一次性提醒回溯 7 天），弹窗标注“错过的提醒 · 原定 HH:mm”。
 - 在主窗口完成或删除任务时，会同时撤下弹窗中该任务的提醒。
@@ -41,7 +41,7 @@
 
 一个基于 Tauri + Vue 3 + TypeScript 的桌面任务提醒应用，包含主窗口、提醒弹窗与桌面便签窗口。
 
-当前技术栈：**Tauri 2 + Vue 3 + TypeScript**，当前版本 **v1.5.6**。
+当前技术栈：**Tauri 2 + Vue 3 + TypeScript**，当前版本 **v1.5.7**。
 
 ## 功能概览
 - **待办事项**：输入标题后回车即可添加，支持 Markdown 所见即所得描述；可设置一次性提醒时间，列表中按“即将到期 / 已过期”着色显示。
@@ -184,7 +184,7 @@ https://github.com/zhouyilong/taskReminder/releases/latest/download/latest.json
 
 其中 `latest.json` 会指向当前版本对应的 MSI 安装包，例如：
 ```
-https://github.com/zhouyilong/taskReminder/releases/download/v1.5.6/TaskReminderApp_1.5.6_x64_zh-CN.msi
+https://github.com/zhouyilong/taskReminder/releases/download/v1.5.7/TaskReminderApp_1.5.7_x64_zh-CN.msi
 ```
 
 建议使用下面的命令生成自动更新产物：
@@ -204,7 +204,7 @@ pnpm release:updater
 - `latest.json`
 
 发布要求：
-- GitHub Release 标签需使用 `v<version>` 格式，例如 `v1.5.6`
+- GitHub Release 标签需使用 `v<version>` 格式，例如 `v1.5.7`
 - `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 中的版本号应保持一致
 - `latest.json` 必须上传到“最新版本”对应的 Release，客户端才会通过 `releases/latest/download/latest.json` 获取到更新
 
