@@ -2022,6 +2022,30 @@ label:has(> input[type="checkbox"]) {
   line-height: 1;
 }
 
+.notification-queue-count {
+  padding-left: 8px;
+  border-left: 1px solid currentColor;
+  line-height: 1;
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.notification-missed {
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--warning-soft);
+  color: var(--warning-text);
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+
+.notification-actions .button.notification-dismiss-all {
+  margin-right: auto;
+}
+
 .notification-title {
   margin-top: 10px;
   font-size: 15px;

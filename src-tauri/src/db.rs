@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use chrono::Local;
+use chrono::{Local, NaiveDateTime};
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -9,6 +9,20 @@ use uuid::Uuid;
 use crate::errors::AppError;
 use crate::models::{AppSettings, RecurringTask, ReminderRecord, StickyNote, Task};
 use crate::recurrence::REPEAT_MODE_INTERVAL_RANGE;
+use crate::time::{format_datetime, now_string, parse_datetime_any};
+
+/// 墓碑（软删除行）的保留天数。开启云同步时保留更久，
+/// 让较长时间未同步的设备也能收到删除，而不是把旧数据重新上传“复活”。
+pub const TOMBSTONE_RETENTION_DAYS_LOCAL: i64 = 7;
+pub const TOMBSTONE_RETENTION_DAYS_SYNC: i64 = 60;
+
+pub fn tombstone_retention_days(sync_enabled: bool) -> i64 {
+    if sync_enabled {
+        TOMBSTONE_RETENTION_DAYS_SYNC
+    } else {
+        TOMBSTONE_RETENTION_DAYS_LOCAL
+    }
+}
 
 #[derive(Clone)]
 pub struct DbManager {
@@ -246,6 +260,25 @@ impl DbManager {
             .query_row([record_id], |row| record_from_row(row))
             .optional()?;
         Ok(record)
+    }
+
+    /// 该提醒在 `since` 之后（含）是否已经触发过。
+    /// 包含已软删除的记录：用户删掉提醒记录不代表希望再弹一次。
+    pub fn has_reminder_record_since(
+        &self,
+        reminder_id: &str,
+        since: &NaiveDateTime,
+    ) -> Result<bool, AppError> {
+        let conn = self.get_conn()?;
+        let mut stmt =
+            conn.prepare("SELECT trigger_time FROM reminder_records WHERE reminder_id = ?")?;
+        let rows = stmt.query_map([reminder_id], |row| row.get::<_, String>(0))?;
+        for trigger_time in rows.filter_map(Result::ok) {
+            if parse_datetime_any(&trigger_time).is_some_and(|value| value >= *since) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     pub fn create_task(
@@ -897,32 +930,54 @@ impl DbManager {
         Ok(())
     }
 
-    pub fn cleanup_data(&self) -> Result<(), AppError> {
+    /// 定期清理：
+    /// 1. 超过 30 天、或超出最近 100 条的已完成任务转为墓碑（软删除），
+    ///    而不是直接物理删除——否则云同步合并时远端仍有该行，会被重新插回本地；
+    /// 2. 物理删除超过保留期的墓碑。
+    pub fn cleanup_data(&self, tombstone_retention_days: i64) -> Result<(), AppError> {
         let conn = self.get_conn()?;
         let now = Local::now().naive_local();
-        let completed_cutoff = (now - chrono::Duration::days(30))
-            .format("%Y-%m-%dT%H:%M:%S")
-            .to_string();
-        let deleted_cutoff = (now - chrono::Duration::days(7))
-            .format("%Y-%m-%dT%H:%M:%S")
-            .to_string();
+        let now_text = format_datetime(&now);
+        let completed_cutoff = format_datetime(&(now - chrono::Duration::days(30)));
 
         conn.execute(
-            "DELETE FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < ?",
-            [deleted_cutoff.clone()],
+            "UPDATE tasks SET deleted_at = ?1, updated_at = ?1
+             WHERE status = 'COMPLETED' AND deleted_at IS NULL
+               AND completed_at IS NOT NULL AND completed_at < ?2",
+            params![now_text, completed_cutoff],
         )?;
         conn.execute(
-            "DELETE FROM tasks WHERE status = 'COMPLETED' AND deleted_at IS NULL AND completed_at IS NOT NULL AND completed_at < ?",
-            [completed_cutoff],
+            "UPDATE tasks SET deleted_at = ?1, updated_at = ?1 WHERE id IN (
+                SELECT id FROM tasks
+                WHERE status = 'COMPLETED' AND deleted_at IS NULL
+                ORDER BY completed_at DESC
+                LIMIT -1 OFFSET 100
+            )",
+            params![now_text],
         )?;
-        conn.execute(
-            "DELETE FROM tasks WHERE id IN (\n                SELECT id FROM tasks\n                WHERE status = 'COMPLETED' AND deleted_at IS NULL\n                ORDER BY completed_at DESC\n                LIMIT -1 OFFSET 100\n            )",
-            [],
-        )?;
-        conn.execute(
-            "DELETE FROM recurring_tasks WHERE deleted_at IS NOT NULL AND deleted_at < ?",
-            [deleted_cutoff],
-        )?;
+        drop(conn);
+        self.purge_expired_tombstones(tombstone_retention_days)?;
+        Ok(())
+    }
+
+    /// 物理删除 `deleted_at` 早于保留期的墓碑行。
+    ///
+    /// 云同步在合并后、上传前也会调用它，使本地与远端一起删除墓碑；
+    /// 若只在本地删除，下一次合并又会把远端的墓碑插回来。
+    pub fn purge_expired_tombstones(&self, retention_days: i64) -> Result<(), AppError> {
+        let conn = self.get_conn()?;
+        let cutoff = format_datetime(
+            &(Local::now().naive_local() - chrono::Duration::days(retention_days.max(1))),
+        );
+        for table in ["tasks", "recurring_tasks", "reminder_records"] {
+            conn.execute(
+                &format!(
+                    "DELETE FROM {} WHERE deleted_at IS NOT NULL AND deleted_at < ?",
+                    table
+                ),
+                [cutoff.as_str()],
+            )?;
+        }
         Ok(())
     }
 
@@ -1016,10 +1071,6 @@ fn sticky_note_from_task_row(row: &rusqlite::Row<'_>) -> Result<StickyNote, rusq
             .unwrap_or_else(|| now_string()),
         reminder_time: row.get(11)?,
     })
-}
-
-fn now_string() -> String {
-    Local::now().format("%Y-%m-%dT%H:%M:%S").to_string()
 }
 
 struct MigrationScript {
@@ -1135,4 +1186,141 @@ fn execute_sql_script(conn: &Connection, sql: &str) -> Result<(), AppError> {
         conn.execute_batch(trimmed)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_db() -> (DbManager, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("taskreminder-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = DbManager::new(dir.join("test.db")).unwrap();
+        (db, dir)
+    }
+
+    fn days_ago(days: i64) -> String {
+        format_datetime(&(Local::now().naive_local() - chrono::Duration::days(days)))
+    }
+
+    fn task_row(db: &DbManager, id: &str) -> Option<(String, Option<String>)> {
+        let conn = db.get_conn().unwrap();
+        conn.query_row(
+            "SELECT status, deleted_at FROM tasks WHERE id = ?",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .unwrap()
+    }
+
+    #[test]
+    fn cleanup_tombstones_old_completed_tasks_instead_of_deleting() {
+        let (db, dir) = temp_db();
+        let old = db.create_task("old", None).unwrap();
+        let recent = db.create_task("recent", None).unwrap();
+        {
+            let conn = db.get_conn().unwrap();
+            conn.execute(
+                "UPDATE tasks SET status = 'COMPLETED', completed_at = ? WHERE id = ?",
+                params![days_ago(40), old.id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE tasks SET status = 'COMPLETED', completed_at = ? WHERE id = ?",
+                params![days_ago(1), recent.id],
+            )
+            .unwrap();
+        }
+
+        db.cleanup_data(TOMBSTONE_RETENTION_DAYS_LOCAL).unwrap();
+
+        // 过期的已完成任务仍保留一行墓碑，云同步才能把删除传播到其他设备。
+        let (_, deleted_at) = task_row(&db, &old.id).expect("old task row kept as tombstone");
+        assert!(deleted_at.is_some());
+        let (_, deleted_at) = task_row(&db, &recent.id).unwrap();
+        assert!(deleted_at.is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn purge_removes_only_expired_tombstones() {
+        let (db, dir) = temp_db();
+        let expired = db.create_task("expired", None).unwrap();
+        let fresh = db.create_task("fresh", None).unwrap();
+        let alive = db.create_task("alive", None).unwrap();
+        {
+            let conn = db.get_conn().unwrap();
+            conn.execute(
+                "UPDATE tasks SET deleted_at = ? WHERE id = ?",
+                params![days_ago(10), expired.id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE tasks SET deleted_at = ? WHERE id = ?",
+                params![days_ago(2), fresh.id],
+            )
+            .unwrap();
+        }
+
+        db.purge_expired_tombstones(7).unwrap();
+        assert!(task_row(&db, &expired.id).is_none());
+        assert!(task_row(&db, &fresh.id).is_some());
+        assert!(task_row(&db, &alive.id).is_some());
+
+        // 开启同步时保留期更长，10 天前的墓碑不应被删除。
+        let kept = db.create_task("kept", None).unwrap();
+        {
+            let conn = db.get_conn().unwrap();
+            conn.execute(
+                "UPDATE tasks SET deleted_at = ? WHERE id = ?",
+                params![days_ago(10), kept.id],
+            )
+            .unwrap();
+        }
+        db.purge_expired_tombstones(tombstone_retention_days(true))
+            .unwrap();
+        assert!(task_row(&db, &kept.id).is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn purge_also_clears_deleted_reminder_records() {
+        let (db, dir) = temp_db();
+        let record = db.create_reminder_record("task-1", "desc", "TASK").unwrap();
+        {
+            let conn = db.get_conn().unwrap();
+            conn.execute(
+                "UPDATE reminder_records SET deleted_at = ? WHERE id = ?",
+                params![days_ago(30), record.id],
+            )
+            .unwrap();
+        }
+        db.purge_expired_tombstones(7).unwrap();
+        assert!(db.get_reminder_record(&record.id).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn has_reminder_record_since_compares_trigger_time() {
+        let (db, dir) = temp_db();
+        let record = db.create_reminder_record("task-1", "desc", "TASK").unwrap();
+        let trigger = parse_datetime_any(&record.trigger_time).unwrap();
+
+        assert!(db
+            .has_reminder_record_since("task-1", &(trigger - chrono::Duration::minutes(5)))
+            .unwrap());
+        assert!(db.has_reminder_record_since("task-1", &trigger).unwrap());
+        assert!(!db
+            .has_reminder_record_since("task-1", &(trigger + chrono::Duration::minutes(5)))
+            .unwrap());
+        assert!(!db
+            .has_reminder_record_since("task-2", &(trigger - chrono::Duration::minutes(5)))
+            .unwrap());
+
+        // 已软删除的记录也算触发过，删除记录不应导致重复弹出。
+        db.delete_reminder_record(&record.id).unwrap();
+        assert!(db.has_reminder_record_since("task-1", &trigger).unwrap());
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

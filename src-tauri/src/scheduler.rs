@@ -1,15 +1,28 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use chrono::{Local, NaiveDateTime};
+use chrono::{Duration, Local, NaiveDateTime};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tokio::time::sleep;
 
 use crate::db::DbManager;
 use crate::errors::AppError;
 use crate::models::{NotificationPayload, RecurringTask, Task};
+use crate::notification_queue::NotificationQueue;
 use crate::recurrence::{compute_next_trigger, sanitize_recurring_task, should_trigger_now};
 use crate::sync::CloudSyncService;
+use crate::time::{now_string, parse_datetime_any};
+
+/// 校准巡检间隔：兜底系统休眠/唤醒、修改系统时间、云同步带来的新提醒等
+/// 单次 sleep 计时器覆盖不到的情况。
+const WATCHDOG_INTERVAL_SECONDS: u64 = 30;
+/// 启动后首次巡检的延迟，等主窗口与状态初始化完成后再补发错过的提醒。
+const WATCHDOG_STARTUP_DELAY_SECONDS: u64 = 5;
+/// 一次性提醒的补发回溯窗口：超过该天数仍未触发的提醒不再补发，
+/// 避免长期未使用后一次性弹出大量陈旧提醒。
+const MISSED_REMINDER_LOOKBACK_DAYS: i64 = 7;
+/// 弹窗队列更新事件。
+pub const NOTIFICATION_QUEUE_EVENT: &str = "notification-queue";
 
 #[derive(Clone)]
 pub struct ReminderScheduler {
@@ -18,7 +31,10 @@ pub struct ReminderScheduler {
     sync: CloudSyncService,
     recurring_jobs: Arc<Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>>,
     task_jobs: Arc<Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>>,
-    snapshot: Arc<Mutex<Option<NotificationPayload>>>,
+    queue: NotificationQueue,
+    /// 串行化“判断是否到点 + 写记录 + 推进下次时间”，
+    /// 防止计时器与巡检同时命中同一条提醒而重复触发。
+    fire_lock: Arc<Mutex<()>>,
 }
 
 impl ReminderScheduler {
@@ -26,7 +42,7 @@ impl ReminderScheduler {
         app: AppHandle,
         db: DbManager,
         sync: CloudSyncService,
-        snapshot: Arc<Mutex<Option<NotificationPayload>>>,
+        queue: NotificationQueue,
     ) -> Self {
         Self {
             app,
@@ -34,8 +50,75 @@ impl ReminderScheduler {
             sync,
             recurring_jobs: Arc::new(Mutex::new(HashMap::new())),
             task_jobs: Arc::new(Mutex::new(HashMap::new())),
-            snapshot,
+            queue,
+            fire_lock: Arc::new(Mutex::new(())),
         }
+    }
+
+    /// 启动校准巡检：首次巡检会补发应用未运行期间错过的一次性提醒，
+    /// 之后每隔一段时间检查一次已到点但未触发的提醒。
+    pub fn start_watchdog(&self) {
+        let scheduler = self.clone();
+        tauri::async_runtime::spawn(async move {
+            sleep(std::time::Duration::from_secs(
+                WATCHDOG_STARTUP_DELAY_SECONDS,
+            ))
+            .await;
+            loop {
+                if let Err(err) = scheduler.fire_due() {
+                    eprintln!("[scheduler] 巡检提醒失败: {}", err);
+                }
+                sleep(std::time::Duration::from_secs(WATCHDOG_INTERVAL_SECONDS)).await;
+            }
+        });
+    }
+
+    /// 触发所有已到点但尚未触发的提醒。`handle_*` 自身是幂等的，
+    /// 与计时器重复命中时不会产生重复提醒。
+    pub fn fire_due(&self) -> Result<(), AppError> {
+        let now = Local::now().naive_local();
+        let lookback = now - Duration::days(MISSED_REMINDER_LOOKBACK_DAYS);
+        for task in self.db.list_active_tasks()? {
+            let Some(reminder) = task.reminder_time.as_deref().and_then(parse_datetime_any) else {
+                continue;
+            };
+            if reminder <= now && reminder >= lookback {
+                if let Err(err) = self.handle_task(task.id) {
+                    eprintln!("[scheduler] 补发待办提醒失败: {}", err);
+                }
+            }
+        }
+        for task in self.db.list_recurring_tasks()? {
+            if task.is_paused {
+                continue;
+            }
+            let due = parse_datetime_any(&task.next_trigger).is_some_and(|next| next <= now);
+            if due {
+                if let Err(err) = self.handle_recurring(task.id) {
+                    eprintln!("[scheduler] 补发循环提醒失败: {}", err);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn queue(&self) -> &NotificationQueue {
+        &self.queue
+    }
+
+    /// 从弹窗队列中撤下某个任务的提醒（例如在主窗口中完成或删除了该任务），
+    /// 并把对应的提醒记录标记为 `action`。
+    pub fn withdraw_notifications(&self, reminder_id: &str, action: &str) -> Result<(), AppError> {
+        let removed = self.queue.remove_reminder(reminder_id);
+        if removed.is_empty() {
+            return Ok(());
+        }
+        for item in &removed {
+            self.db
+                .update_reminder_record_action(&item.record_id, action)?;
+        }
+        publish_queue(&self.app, &self.queue.snapshot());
+        Ok(())
     }
 
     pub fn schedule_existing(&self) -> Result<(), AppError> {
@@ -101,6 +184,7 @@ impl ReminderScheduler {
     }
 
     fn handle_recurring(&self, task_id: String) -> Result<(), AppError> {
+        let _guard = self.fire_lock.lock().unwrap_or_else(|e| e.into_inner());
         let Some(mut task) = self.db.get_recurring_task(&task_id)? else {
             return Ok(());
         };
@@ -124,6 +208,7 @@ impl ReminderScheduler {
             return Ok(());
         }
         sanitize_recurring_task(&mut task)?;
+        let scheduled_time = task.next_trigger.clone();
         task.last_triggered = Some(now_string());
         task.next_trigger = compute_next_trigger(&task, Some(now))?;
         self.db.update_recurring_task(&task)?;
@@ -139,15 +224,17 @@ impl ReminderScheduler {
             reminder_type: "RECURRING".to_string(),
             description: task.description.clone(),
             snooze_minutes: settings.snooze_minutes,
+            scheduled_time: Some(scheduled_time),
         };
-        *self.snapshot.lock().unwrap() = Some(payload.clone());
-        emit_notification(&self.app, &payload)?;
+        let queue = self.queue.push(payload);
+        emit_notification(&self.app, &queue)?;
 
         self.schedule_recurring(task)?;
         Ok(())
     }
 
     fn handle_task(&self, task_id: String) -> Result<(), AppError> {
+        let _guard = self.fire_lock.lock().unwrap_or_else(|e| e.into_inner());
         let Some(task) = self.db.get_task(&task_id)? else {
             return Ok(());
         };
@@ -163,6 +250,12 @@ impl ReminderScheduler {
             self.schedule_task(task)?;
             return Ok(());
         }
+        // 本次提醒时间之后已有提醒记录，说明已经触发过（计时器与巡检重复命中、
+        // 或其他设备已触发并同步过来），不再重复弹出。
+        let scheduled = parse_datetime(&reminder_time)?;
+        if self.db.has_reminder_record_since(&task.id, &scheduled)? {
+            return Ok(());
+        }
 
         let record = self
             .db
@@ -175,14 +268,26 @@ impl ReminderScheduler {
             reminder_type: "TASK".to_string(),
             description: task.description.clone(),
             snooze_minutes: settings.snooze_minutes,
+            scheduled_time: Some(reminder_time),
         };
-        *self.snapshot.lock().unwrap() = Some(payload.clone());
-        emit_notification(&self.app, &payload)?;
+        let queue = self.queue.push(payload);
+        emit_notification(&self.app, &queue)?;
         Ok(())
     }
 }
 
-fn emit_notification(app: &AppHandle, payload: &NotificationPayload) -> Result<(), AppError> {
+/// 把当前队列推送给提醒弹窗。队列为空时隐藏弹窗。
+pub fn publish_queue(app: &AppHandle, queue: &[NotificationPayload]) {
+    let Some(window) = app.get_webview_window("notification") else {
+        return;
+    };
+    window.emit(NOTIFICATION_QUEUE_EVENT, queue).ok();
+    if queue.is_empty() {
+        window.hide().ok();
+    }
+}
+
+fn emit_notification(app: &AppHandle, queue: &[NotificationPayload]) -> Result<(), AppError> {
     let notification_width = 392.0;
     let notification_height = if cfg!(target_os = "linux") {
         228.0
@@ -229,7 +334,7 @@ fn emit_notification(app: &AppHandle, payload: &NotificationPayload) -> Result<(
         }
     }
 
-    window.emit("notification", payload).ok();
+    window.emit(NOTIFICATION_QUEUE_EVENT, queue).ok();
     window.show().ok();
     window.set_focus().ok();
     Ok(())
@@ -251,25 +356,7 @@ fn parse_datetime(value: &str) -> Result<NaiveDateTime, AppError> {
     parse_datetime_any(value).ok_or_else(|| AppError::Invalid(format!("无法解析时间: {}", value)))
 }
 
-fn now_string() -> String {
-    Local::now().format("%Y-%m-%dT%H:%M:%S").to_string()
-}
-
 pub fn is_future(value: &str) -> Result<bool, AppError> {
     let target = parse_datetime(value)?;
     Ok(target > Local::now().naive_local())
-}
-
-fn parse_datetime_any(value: &str) -> Option<NaiveDateTime> {
-    let candidates = [
-        "%Y-%m-%dT%H:%M:%S%.f",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M",
-    ];
-    for fmt in candidates {
-        if let Ok(dt) = NaiveDateTime::parse_from_str(value, fmt) {
-            return Some(dt);
-        }
-    }
-    None
 }

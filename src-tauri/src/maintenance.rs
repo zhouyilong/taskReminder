@@ -1,4 +1,4 @@
-use crate::db::DbManager;
+use crate::db::{tombstone_retention_days, DbManager};
 
 use tokio::time::sleep;
 
@@ -7,7 +7,11 @@ pub fn start_maintenance(db: DbManager) {
     tauri::async_runtime::spawn(async move {
         loop {
             sleep(std::time::Duration::from_secs(3600)).await;
-            let _ = db_cleanup.cleanup_data();
+            let sync_enabled = db_cleanup
+                .load_settings()
+                .map(|settings| settings.webdav_enabled)
+                .unwrap_or(true);
+            let _ = db_cleanup.cleanup_data(tombstone_retention_days(sync_enabled));
         }
     });
 

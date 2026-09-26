@@ -5,9 +5,13 @@
         <div class="notification-heading">
           <div class="notification-eyebrow">
             <span class="notification-pulse-dot" aria-hidden="true"></span>
-            <span class="notification-status">提醒进行中</span>
+            <span class="notification-status">{{ missedLabel ? "错过的提醒" : "提醒进行中" }}</span>
+            <span v-if="queue.length > 1" class="notification-queue-count">{{ queuePositionLabel }}</span>
           </div>
-          <div class="notification-title">任务提醒</div>
+          <div class="notification-title">
+            {{ reminderTitle }}
+            <span v-if="missedLabel" class="notification-missed">{{ missedLabel }}</span>
+          </div>
         </div>
         <button class="notification-close" type="button" @click="handleDismiss">✕</button>
       </div>
@@ -26,6 +30,13 @@
         <div class="notification-progress-bar" :style="{ width: `${progressPercent}%` }"></div>
       </div>
       <div class="notification-actions">
+        <button
+          v-if="queue.length > 1"
+          class="button secondary notification-dismiss-all"
+          @click="handleDismissAll"
+        >
+          全部知道了
+        </button>
         <button class="button secondary" @click="handleAcknowledge">知道了</button>
         <button class="button" @click="handleSnooze">稍后提醒</button>
       </div>
@@ -46,7 +57,11 @@ import type { NotificationPayload } from "./types";
 type NotificationThemeMode = "system" | "app" | "light" | "dark";
 
 const AUTO_CLOSE_MS = 15 * 60 * 1000;
-const payload = ref<NotificationPayload | null>(null);
+// 弹出时间比原定时间晚超过该值，视为“错过的提醒”（如关机期间到点、启动后补发）。
+const MISSED_THRESHOLD_MS = 2 * 60 * 1000;
+// 待处理的提醒队列，由后端维护；弹窗始终展示队首一条。
+const queue = ref<NotificationPayload[]>([]);
+const payload = computed<NotificationPayload | null>(() => queue.value[0] ?? null);
 const visible = ref(false);
 const isLightTheme = ref(false);
 const notificationTheme = ref<NotificationThemeMode>("app");
@@ -67,6 +82,7 @@ let elapsedTicker: number | null = null;
 let unlistenTheme: (() => void) | null = null;
 let unlistenThemeEvent: (() => void) | null = null;
 let unlistenDataUpdated: (() => void) | null = null;
+let unlistenQueue: (() => void) | null = null;
 let mediaQuery: MediaQueryList | null = null;
 let mediaHandler: ((event: MediaQueryListEvent) => void) | null = null;
 let themePoll: number | null = null;
@@ -99,6 +115,44 @@ const notificationDescription = computed(() => {
   const text = stripLeadingListMarker(markdownToPreviewText(payload.value?.description, ""));
   return text || "-";
 });
+const queuePositionLabel = computed(() => `1 / ${queue.value.length}`);
+const reminderTitle = computed(() =>
+  payload.value?.reminderType === "RECURRING" ? "循环提醒" : "任务提醒"
+);
+
+const parseLocalDateTime = (value?: string | null): Date | null => {
+  if (!value) {
+    return null;
+  }
+  // 后端时间为不带时区的本地时间（YYYY-MM-DDTHH:mm[:ss]），按本地时间解析。
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const formatScheduledTime = (date: Date) => {
+  const now = new Date();
+  const time = `${date.getHours().toString().padStart(2, "0")}:${date
+    .getMinutes()
+    .toString()
+    .padStart(2, "0")}`;
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  return sameDay ? time : `${date.getMonth() + 1}月${date.getDate()}日 ${time}`;
+};
+
+const missedLabel = computed(() => {
+  const scheduled = parseLocalDateTime(payload.value?.scheduledTime);
+  if (!scheduled || !shownAt.value) {
+    return "";
+  }
+  if (shownAt.value - scheduled.getTime() < MISSED_THRESHOLD_MS) {
+    return "";
+  }
+  return `原定 ${formatScheduledTime(scheduled)}`;
+});
+
 const progressPercent = computed(() => {
   if (!shownAt.value) {
     return 0;
@@ -280,8 +334,7 @@ const stopThemePolling = () => {
   }
 };
 
-const show = async (data: NotificationPayload) => {
-  payload.value = data;
+const show = async () => {
   shownAt.value = Date.now();
   nowTick.value = shownAt.value;
   visible.value = true;
@@ -305,39 +358,67 @@ const hide = async () => {
   }
 };
 
-const handleDismiss = async () => {
+// 应用后端下发的最新队列：队列为空则隐藏；队首变化时重新计时并展示新的一条。
+const applyQueue = async (items: NotificationPayload[] | null | undefined) => {
+  const previousHead = payload.value?.recordId ?? null;
+  queue.value = Array.isArray(items) ? items : [];
   if (!payload.value) {
+    await hide();
     return;
   }
-  await api.acknowledgeNotification({
-    recordId: payload.value.recordId,
-    action: "DISMISSED"
-  });
-  await hide();
+  if (!visible.value || payload.value.recordId !== previousHead) {
+    await show();
+  }
 };
 
-const handleAcknowledge = async () => {
-  if (!payload.value) {
+const runAction = async (action: () => Promise<NotificationPayload[] | void>) => {
+  try {
+    const remaining = await action();
+    if (Array.isArray(remaining)) {
+      await applyQueue(remaining);
+      return;
+    }
+    await applyQueue(await api.getNotificationQueue());
+  } catch (error) {
+    console.error("[notification] 处理提醒失败", error);
+  }
+};
+
+const handleDismiss = async () => {
+  const current = payload.value;
+  if (!current) {
     return;
   }
-  await api.acknowledgeNotification({
-    recordId: payload.value.recordId,
-    action: "DISMISSED"
+  await runAction(() =>
+    api.acknowledgeNotification({
+      recordId: current.recordId,
+      action: "DISMISSED"
+    })
+  );
+};
+
+const handleAcknowledge = handleDismiss;
+
+const handleDismissAll = async () => {
+  await runAction(async () => {
+    await api.acknowledgeAllNotifications();
+    return [];
   });
-  await hide();
 };
 
 const handleSnooze = async () => {
-  if (!payload.value) {
+  const current = payload.value;
+  if (!current) {
     return;
   }
-  await api.snoozeNotification({
-    recordId: payload.value.recordId,
-    reminderId: payload.value.reminderId,
-    reminderType: payload.value.reminderType,
-    minutes: payload.value.snoozeMinutes
-  });
-  await hide();
+  await runAction(() =>
+    api.snoozeNotification({
+      recordId: current.recordId,
+      reminderId: current.reminderId,
+      reminderType: current.reminderType,
+      minutes: current.snoozeMinutes
+    })
+  );
 };
 
 onMounted(async () => {
@@ -345,19 +426,16 @@ onMounted(async () => {
   await loadNotificationTheme();
   await applyThemeByMode();
   try {
-    const snapshot = await api.getNotificationSnapshot();
-    if (snapshot) {
-      await show(snapshot);
-    }
+    await applyQueue(await api.getNotificationQueue());
   } catch (error) {
-    console.error("[notification] 读取通知快照失败", error);
+    console.error("[notification] 读取提醒队列失败", error);
   }
   try {
-    await listen<NotificationPayload>("notification", async event => {
-      await show(event.payload);
+    unlistenQueue = await listen<NotificationPayload[]>("notification-queue", async event => {
+      await applyQueue(event.payload);
     });
   } catch (error) {
-    console.error("[notification] 监听 notification 失败", error);
+    console.error("[notification] 监听 notification-queue 失败", error);
   }
   try {
     unlistenDataUpdated = await listen("data-updated", async () => {
@@ -384,6 +462,9 @@ onBeforeUnmount(() => {
   }
   if (unlistenDataUpdated) {
     unlistenDataUpdated();
+  }
+  if (unlistenQueue) {
+    unlistenQueue();
   }
   if (mediaQuery && mediaHandler) {
     if (typeof mediaQuery.removeEventListener === "function") {
