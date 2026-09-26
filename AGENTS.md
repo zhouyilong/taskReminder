@@ -5,17 +5,21 @@
   - 主窗口：`index.html` → `src/main.ts` → `src/App.vue`（待办、已办、循环提醒、提醒记录、设置、云同步）。
   - 提醒弹窗：`notification.html` → `src/notification.ts` → `src/NotificationApp.vue`。
   - 桌面便签：`sticky-note-item.html` → `src/stickyNoteItem.ts` → `src/StickyNoteItemApp.vue`（每张便签一个独立窗口，窗口标签为 `sticky-note-item-<编码后的 id>`）。
+  - 快速添加：`quick-add.html` → `src/quickAdd.ts` → `src/QuickAddApp.vue`（窗口标签 `quick-add`，由全局快捷键或托盘菜单打开）。
 - `src/components/` 存放可复用 UI 组件：
   - `MarkdownNoteEditor.vue`：基于 Milkdown Crepe 的 Markdown 所见即所得编辑器，`variant` 支持 `card`（带边框）与 `ghost`（无边框，嵌入卡片或便签）。
   - `Modal.vue`：通用弹窗（带进出过渡动画）。
+  - `WeekdayPicker.vue`：每周多天选择（位掩码 `v-model`，含工作日/周末/每天预设）。
 - `src/api.ts` 封装所有 Tauri `invoke` 命令；`src/types.ts` 为前后端共享的数据类型。
 - `src/markdown.ts` Markdown 转纯文本/预览文本工具（列表描述、提醒记录去掉前导列表标记）。
 - `src/safeStorage.ts` 带异常保护的 `localStorage` 封装；`src/startupError.ts` 启动失败时渲染错误页。
 - `src/styles.css` 为三个窗口共用的全局样式表（设计令牌、主窗口、提醒弹窗、便签）；组件私有样式放在 `.vue` 文件内。
 - `src/update.ts` 自动更新逻辑模块（检查更新、安装更新、偏好管理）。
+- `src/weekdays.ts` 每周位掩码工具（与后端一致：周一 = bit0 … 周日 = bit6）；`src/shortcut.ts` 全局快捷键录制与展示。
 - `src-tauri/` 存放 Tauri 应用的 Rust 后端。
-  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（命令注册、窗口管理、便签窗口）、`db.rs`（SQLite 读写）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync.rs`（WebDAV 同步）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（本地时间格式化与解析）、`tray.rs`（托盘菜单）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
-  - `src-tauri/migrations/` 存放数据库迁移文件。
+  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（命令注册、窗口管理、便签窗口）、`db.rs`（SQLite 读写）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync.rs`（WebDAV 同步）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（本地时间格式化与解析）、`holidays.rs`（中国法定节假日与调休）、`quick_add.rs`（快速添加窗口与全局快捷键）、`tray.rs`（托盘菜单）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
+  - `src-tauri/migrations/` 存放数据库迁移文件；新增迁移后需在 `db.rs` 的 `migration_scripts()` 中登记，并同步 `sync.rs` 的列清单与 `ensure_sync_columns`。
+  - `src-tauri/data/holidays-cn.json` 为内置法定节假日数据（`off` 放假日、`work` 调休上班日，支持 `[开始, 结束]` 区间），每年国务院发布次年安排后追加，并补充 `holidays.rs` 中的测试。
   - `src-tauri/icons/` 存放应用图标；源文件在 `src-tauri/icons/source/`（`icon.svg` 为主图标，`icon-small.svg` 为 16–32px 简化版），修改后执行 `python3 src-tauri/icons/source/render.py` 重新生成 PNG 与 `icon.ico`（需 `pip install cairosvg pillow`）。
   - `src-tauri/capabilities/default.json` 定义各窗口的权限。
   - `src-tauri/tauri.conf.json` 定义窗口、打包、更新器与应用元数据；`src-tauri/tauri.updater.conf.json` 为签名构建时的覆盖配置。
@@ -102,6 +106,13 @@
 - **问题**：直接 `DELETE` 行后，远端库仍有该行，同步合并会把它重新插回本地（“复活”）。
 - **规则**：业务删除与定期清理一律写 `deleted_at` + `updated_at`（墓碑）；只有 `purge_expired_tombstones` 按保留期（本地 7 天，开启同步 60 天）物理删除，同步在合并后、上传前也会调用它。
 
+### 循环模式的兼容性
+- 每周多天存于 `schedule_weekdays` 位掩码，`schedule_weekday` 始终写入掩码中最早的一天，供旧版本读取；读取时掩码为空则回退到 `schedule_weekday`。
+- 新增循环模式时，旧版本的 `normalize_repeat_mode` 会把未知模式回退为区间间隔并可能同步回来，需在发布说明中提示多设备同时升级。
+
+### 全局快捷键
+- 快捷键由 `quick_add::apply_shortcut` 统一注册（先 `unregister_all` 再注册），启动时与保存设置后调用；失败（格式无效、被其他程序占用、Wayland 不支持等）不能阻止应用启动，原因通过 `apply_quick_add_shortcut` 命令返回给设置界面。
+
 ### onMounted 中异步操作的异常隔离
 - **问题**：多个异步操作放在同一个 `try` 块中，前面的操作抛异常会导致后面的操作被跳过（如自动更新检查被数据初始化异常阻断）。
 - **解决**：将相互独立的异步操作放在各自独立的 `try/catch` 块中。
@@ -109,7 +120,7 @@
 
 ## 测试指南
 - `package.json` 尚未配置 JavaScript 测试框架；前端改动至少执行 `pnpm build`（含 `vue-tsc` 类型检查）确认可编译。
-- Rust 测试位于 `src-tauri/src/` 各模块的 `#[cfg(test)]` 中（便签窗口标签/URL、提醒队列、墓碑清理、同步合并、时间解析），通过 `cargo test` 运行；需要数据库的测试用临时目录创建 `DbManager`，会自动执行迁移。
+- Rust 测试位于 `src-tauri/src/` 各模块的 `#[cfg(test)]` 中（便签窗口标签/URL、提醒队列、墓碑清理、同步合并、时间解析、节假日、循环规则），通过 `cargo test` 运行；需要数据库的测试用临时目录创建 `DbManager`，会自动执行迁移。
 - 提交前运行 `cargo fmt`，CI 会执行 `cargo fmt --check`。
 - 在 Linux 上构建会改写 `src-tauri/gen/schemas/`，这些生成文件的无关变动不要提交。
 - 仅调整前端 UI 时，可用 `pnpm dev` 在浏览器中预览；浏览器中没有 Tauri 运行时，需要在页面加载前注入 `window.__TAURI_INTERNALS__`（模拟 `invoke`、`transformCallback`、`metadata.currentWindow`）并返回示例数据，否则列表为空。
@@ -121,5 +132,5 @@
 
 ## 配置与资源
 - 在 `src-tauri/tauri.conf.json` 中更新窗口行为、打包标识符与应用元数据。
-- 保持静态 HTML 入口文件（`index.html`、`notification.html`、`sticky-note-item.html`）简洁，并与 Vue 入口保持同步；新增入口时同时更新 `vite.config.ts` 的多页面配置。
+- 保持静态 HTML 入口文件（`index.html`、`notification.html`、`quick-add.html`、`sticky-note-item.html`）简洁，并与 Vue 入口保持同步；新增入口时同时更新 `vite.config.ts` 的多页面配置。
 - 更新器配置在 `src-tauri/tauri.conf.json` 的 `plugins.updater` 节点，包含公钥和 GitHub Releases 端点。
