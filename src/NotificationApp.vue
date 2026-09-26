@@ -13,7 +13,18 @@
             <span v-if="missedLabel" class="notification-missed">{{ missedLabel }}</span>
           </div>
         </div>
-        <button class="notification-close" type="button" @click="handleDismiss">✕</button>
+        <div class="notification-header-actions">
+          <button
+            v-if="queue.length > 1"
+            class="notification-dismiss-all"
+            type="button"
+            title="关闭队列中的全部提醒"
+            @click="handleDismissAll"
+          >
+            全部知道了
+          </button>
+          <button class="notification-close" type="button" @click="handleDismiss">✕</button>
+        </div>
       </div>
       <div class="notification-body">{{ notificationDescription }}</div>
       <div class="notification-meta">
@@ -29,16 +40,30 @@
       <div class="notification-progress" aria-hidden="true">
         <div class="notification-progress-bar" :style="{ width: `${progressPercent}%` }"></div>
       </div>
-      <div class="notification-actions">
+      <div v-if="snoozePickerOpen" class="notification-actions is-snooze">
         <button
-          v-if="queue.length > 1"
-          class="button secondary notification-dismiss-all"
-          @click="handleDismissAll"
+          v-for="option in snoozeOptions"
+          :key="option.label"
+          class="button secondary"
+          @click="handleSnooze(option)"
         >
-          全部知道了
+          {{ option.label }}
+        </button>
+        <button class="button secondary notification-snooze-back" title="返回" @click="snoozePickerOpen = false">
+          ←
+        </button>
+      </div>
+      <div v-else class="notification-actions">
+        <button
+          v-if="payload?.reminderType === 'TASK'"
+          class="button secondary notification-complete"
+          title="将该待办标记为已完成"
+          @click="handleComplete"
+        >
+          完成
         </button>
         <button class="button secondary" @click="handleAcknowledge">知道了</button>
-        <button class="button" @click="handleSnooze">稍后提醒</button>
+        <button class="button" title="选择推迟时长" @click="snoozePickerOpen = true">稍后提醒</button>
       </div>
     </div>
   </div>
@@ -116,6 +141,37 @@ const notificationDescription = computed(() => {
   return text || "-";
 });
 const queuePositionLabel = computed(() => `1 / ${queue.value.length}`);
+const snoozePickerOpen = ref(false);
+
+type SnoozeOption = { label: string; minutes: number; until?: () => string };
+
+const pad = (value: number) => value.toString().padStart(2, "0");
+const formatLocalDateTime = (date: Date) =>
+  `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(
+    date.getMinutes()
+  )}:00`;
+
+// “明早 9:00”：凌晨 6 点前视为当天早上，否则为次日早上。
+const nextMorning = () => {
+  const target = new Date();
+  if (target.getHours() >= 6) {
+    target.setDate(target.getDate() + 1);
+  }
+  target.setHours(9, 0, 0, 0);
+  return formatLocalDateTime(target);
+};
+
+const formatMinutes = (minutes: number) =>
+  minutes % 60 === 0 ? `${minutes / 60} 小时` : `${minutes} 分钟`;
+
+const snoozeOptions = computed<SnoozeOption[]>(() => {
+  const preferred = Math.max(1, payload.value?.snoozeMinutes ?? 5);
+  const minutes = [...new Set([preferred, 15, 60])].sort((a, b) => a - b);
+  return [
+    ...minutes.map(value => ({ label: formatMinutes(value), minutes: value })),
+    { label: "明早 9:00", minutes: preferred, until: nextMorning }
+  ];
+});
 const reminderTitle = computed(() =>
   payload.value?.reminderType === "RECURRING" ? "循环提醒" : "任务提醒"
 );
@@ -367,6 +423,7 @@ const applyQueue = async (items: NotificationPayload[] | null | undefined) => {
     return;
   }
   if (!visible.value || payload.value.recordId !== previousHead) {
+    snoozePickerOpen.value = false;
     await show();
   }
 };
@@ -406,7 +463,7 @@ const handleDismissAll = async () => {
   });
 };
 
-const handleSnooze = async () => {
+const handleSnooze = async (option?: SnoozeOption) => {
   const current = payload.value;
   if (!current) {
     return;
@@ -416,7 +473,21 @@ const handleSnooze = async () => {
       recordId: current.recordId,
       reminderId: current.reminderId,
       reminderType: current.reminderType,
-      minutes: current.snoozeMinutes
+      minutes: option?.minutes ?? current.snoozeMinutes,
+      until: option?.until ? option.until() : null
+    })
+  );
+};
+
+const handleComplete = async () => {
+  const current = payload.value;
+  if (!current) {
+    return;
+  }
+  await runAction(() =>
+    api.completeNotification({
+      recordId: current.recordId,
+      reminderId: current.reminderId
     })
   );
 };

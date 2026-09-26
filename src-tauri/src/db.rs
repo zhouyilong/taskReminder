@@ -7,7 +7,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
 use crate::errors::AppError;
-use crate::models::{AppSettings, RecurringTask, ReminderRecord, StickyNote, Task};
+use crate::models::{
+    default_quick_add_shortcut, AppSettings, RecurringTask, ReminderRecord, StickyNote, Task,
+};
 use crate::recurrence::REPEAT_MODE_INTERVAL_RANGE;
 use crate::time::{format_datetime, now_string, parse_datetime_any};
 
@@ -214,7 +216,7 @@ impl DbManager {
             "SELECT id, description, type, status, created_at, completed_at,
                     interval_minutes, last_triggered, next_trigger, is_paused, start_time, end_time,
                     repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
-                    updated_at, deleted_at
+                    updated_at, deleted_at, schedule_weekdays
              FROM recurring_tasks
              WHERE deleted_at IS NULL
              ORDER BY created_at ASC",
@@ -229,7 +231,7 @@ impl DbManager {
             "SELECT id, description, type, status, created_at, completed_at,
                     interval_minutes, last_triggered, next_trigger, is_paused, start_time, end_time,
                     repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
-                    updated_at, deleted_at
+                    updated_at, deleted_at, schedule_weekdays
              FROM recurring_tasks WHERE id = ?",
         )?;
         let task = stmt
@@ -367,10 +369,10 @@ impl DbManager {
                 id, description, type, status, created_at, completed_at, interval_minutes,
                 last_triggered, next_trigger, is_paused, start_time, end_time,
                 repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
-                updated_at, deleted_at
+                updated_at, deleted_at, schedule_weekdays
             )
              VALUES (?, ?, 'RECURRING', 'PENDING', ?, NULL, ?, NULL, ?, 0, ?, ?,
-                     ?, ?, ?, ?, ?, ?, NULL)",
+                     ?, ?, ?, ?, ?, ?, NULL, ?)",
             params![
                 id,
                 task.description.as_str(),
@@ -384,7 +386,8 @@ impl DbManager {
                 task.schedule_weekday,
                 task.schedule_day,
                 task.cron_expression.as_deref(),
-                now
+                now,
+                task.schedule_weekdays
             ],
         )?;
         Ok(RecurringTask {
@@ -406,6 +409,7 @@ impl DbManager {
             repeat_mode: task.repeat_mode.clone(),
             schedule_time: task.schedule_time.clone(),
             schedule_weekday: task.schedule_weekday,
+            schedule_weekdays: task.schedule_weekdays,
             schedule_day: task.schedule_day,
             cron_expression: task.cron_expression.clone(),
         })
@@ -417,7 +421,8 @@ impl DbManager {
         conn.execute(
             "UPDATE recurring_tasks
              SET description = ?, interval_minutes = ?, start_time = ?, end_time = ?,
-                 repeat_mode = ?, schedule_time = ?, schedule_weekday = ?, schedule_day = ?, cron_expression = ?,
+                 repeat_mode = ?, schedule_time = ?, schedule_weekday = ?, schedule_weekdays = ?,
+                 schedule_day = ?, cron_expression = ?,
                  is_paused = ?, next_trigger = ?, last_triggered = ?, updated_at = ?
              WHERE id = ?",
             params![
@@ -428,6 +433,7 @@ impl DbManager {
                 task.repeat_mode.as_str(),
                 task.schedule_time.as_deref(),
                 task.schedule_weekday,
+                task.schedule_weekdays,
                 task.schedule_day,
                 task.cron_expression.as_deref(),
                 if task.is_paused { 1 } else { 0 },
@@ -820,7 +826,7 @@ impl DbManager {
                    webdav_enabled, webdav_url, webdav_username, webdav_password,
                    webdav_root_path, webdav_sync_interval_minutes, webdav_last_sync_time,
                    webdav_last_local_change_time, webdav_last_sync_status, webdav_last_sync_error,
-                   webdav_device_id, notification_theme
+                   webdav_device_id, notification_theme, quick_add_enabled, quick_add_shortcut
                    FROM settings WHERE id = 1";
         let mut stmt = conn.prepare(sql)?;
         let row = stmt.query_row([], |row| {
@@ -839,6 +845,10 @@ impl DbManager {
             let notification_theme: String = row
                 .get::<_, Option<String>>(22)?
                 .unwrap_or_else(|| "app".to_string());
+            let quick_add_shortcut: String = row
+                .get::<_, Option<String>>(24)?
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(default_quick_add_shortcut);
             Ok(AppSettings {
                 auto_start_enabled: row.get::<_, i64>(0)? == 1,
                 sound_enabled: row.get::<_, i64>(1)? == 1,
@@ -863,6 +873,8 @@ impl DbManager {
                 webdav_last_sync_error: row.get(20)?,
                 webdav_device_id,
                 notification_theme,
+                quick_add_enabled: row.get::<_, Option<i64>>(23)?.unwrap_or(1) == 1,
+                quick_add_shortcut,
             })
         })?;
         Ok(row)
@@ -878,7 +890,8 @@ impl DbManager {
                  webdav_enabled = ?, webdav_url = ?, webdav_username = ?, webdav_password = ?,
                  webdav_root_path = ?, webdav_sync_interval_minutes = ?, webdav_last_sync_time = ?,
                  webdav_last_local_change_time = ?, webdav_last_sync_status = ?, webdav_last_sync_error = ?,
-                 webdav_device_id = ?, notification_theme = ?
+                 webdav_device_id = ?, notification_theme = ?,
+                 quick_add_enabled = ?, quick_add_shortcut = ?
              WHERE id = 1",
             params![
                 if settings.auto_start_enabled { 1 } else { 0 },
@@ -904,6 +917,8 @@ impl DbManager {
                 settings.webdav_last_sync_error,
                 settings.webdav_device_id,
                 settings.notification_theme,
+                if settings.quick_add_enabled { 1 } else { 0 },
+                settings.quick_add_shortcut.trim(),
             ],
         )?;
         Ok(())
@@ -1026,6 +1041,7 @@ fn recurring_from_row(row: &rusqlite::Row<'_>) -> Result<RecurringTask, rusqlite
             .unwrap_or_else(|| REPEAT_MODE_INTERVAL_RANGE.to_string()),
         schedule_time: row.get(13)?,
         schedule_weekday: row.get(14)?,
+        schedule_weekdays: row.get(19)?,
         schedule_day: row.get(15)?,
         cron_expression: row.get(16)?,
         updated_at: row.get(17)?,
@@ -1145,6 +1161,11 @@ fn migration_scripts() -> Vec<MigrationScript> {
             version: "1.4.9".to_string(),
             description: "add sticky note pin state".to_string(),
             sql: include_str!("../migrations/V1.4.9__add_sticky_note_pin_state.sql"),
+        },
+        MigrationScript {
+            version: "1.6.0".to_string(),
+            description: "add weekday mask and quick add shortcut".to_string(),
+            sql: include_str!("../migrations/V1.6.0__add_weekday_mask_and_quick_add.sql"),
         },
     ]
 }
@@ -1298,6 +1319,54 @@ mod tests {
         }
         db.purge_expired_tombstones(7).unwrap();
         assert!(db.get_reminder_record(&record.id).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn recurring_weekday_mask_roundtrip_and_quick_add_defaults() {
+        let (db, dir) = temp_db();
+        let draft = RecurringTask {
+            id: String::new(),
+            description: "weekly".to_string(),
+            task_type: "RECURRING".to_string(),
+            status: "PENDING".to_string(),
+            created_at: String::new(),
+            completed_at: None,
+            reminder_time: None,
+            updated_at: None,
+            deleted_at: None,
+            interval_minutes: 60,
+            last_triggered: None,
+            next_trigger: "2026-09-28T09:00:00".to_string(),
+            is_paused: false,
+            start_time: None,
+            end_time: None,
+            repeat_mode: "WEEKLY".to_string(),
+            schedule_time: Some("09:00".to_string()),
+            schedule_weekday: Some(1),
+            schedule_weekdays: Some(0b10101),
+            schedule_day: None,
+            cron_expression: None,
+        };
+        let created = db.create_recurring_task(&draft).unwrap();
+        let loaded = db.get_recurring_task(&created.id).unwrap().unwrap();
+        assert_eq!(loaded.schedule_weekdays, Some(0b10101));
+
+        let mut updated = loaded.clone();
+        updated.schedule_weekdays = Some(0b1100000);
+        db.update_recurring_task(&updated).unwrap();
+        let loaded = db.get_recurring_task(&created.id).unwrap().unwrap();
+        assert_eq!(loaded.schedule_weekdays, Some(0b1100000));
+
+        let mut settings = db.load_settings().unwrap();
+        assert!(settings.quick_add_enabled);
+        assert_eq!(settings.quick_add_shortcut, "CommandOrControl+Alt+N");
+        settings.quick_add_enabled = false;
+        settings.quick_add_shortcut = "Alt+Space".to_string();
+        db.save_settings(&settings).unwrap();
+        let settings = db.load_settings().unwrap();
+        assert!(!settings.quick_add_enabled);
+        assert_eq!(settings.quick_add_shortcut, "Alt+Space");
         let _ = std::fs::remove_dir_all(dir);
     }
 

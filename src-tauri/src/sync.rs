@@ -63,6 +63,7 @@ const RECURRING_COLUMNS: &[&str] = &[
     "cron_expression",
     "updated_at",
     "deleted_at",
+    "schedule_weekdays",
 ];
 const RECORD_COLUMNS: &[&str] = &[
     "id",
@@ -637,6 +638,7 @@ fn ensure_sync_columns(conn: &Connection) -> Result<(), AppError> {
     ensure_column(conn, "recurring_tasks", "schedule_weekday", "INTEGER")?;
     ensure_column(conn, "recurring_tasks", "schedule_day", "INTEGER")?;
     ensure_column(conn, "recurring_tasks", "cron_expression", "TEXT")?;
+    ensure_column(conn, "recurring_tasks", "schedule_weekdays", "INTEGER")?;
     ensure_column(conn, "reminder_records", "updated_at", "TEXT")?;
     ensure_column(conn, "reminder_records", "deleted_at", "TEXT")?;
     Ok(())
