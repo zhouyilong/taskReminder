@@ -28,7 +28,7 @@ export interface UpdateSummary {
   body?: string;
 }
 
-type UpdateNetworkOptions = Pick<CheckOptions, "proxy"> & Pick<DownloadOptions, "proxy">;
+type UpdateNetworkOptions = Pick<CheckOptions, "proxy">;
 
 export function normalizeUpdateProxyUrl(proxyUrl: string | null | undefined): string | null {
   const normalized = proxyUrl?.trim();

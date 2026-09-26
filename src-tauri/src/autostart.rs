@@ -179,7 +179,9 @@ pub fn is_autostart_configuration_current() -> Result<bool, AppError> {
             KEY_READ,
         ) {
             let value: Result<String, _> = key.get_value(autostart_entry_name());
-            return Ok(matches!(value, Ok(existing) if existing == windows_autostart_command(&exe)));
+            return Ok(
+                matches!(value, Ok(existing) if existing == windows_autostart_command(&exe)),
+            );
         }
         return Ok(false);
     }

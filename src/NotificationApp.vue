@@ -243,7 +243,7 @@ const setupThemeListeners = async () => {
 
   if (appWindow) {
     try {
-      unlistenTheme = await appWindow.onThemeChanged(theme => {
+      unlistenTheme = await appWindow.onThemeChanged(({ payload: theme }) => {
         if (notificationTheme.value === "system") {
           applyTheme(theme);
         }
