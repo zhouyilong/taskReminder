@@ -26,7 +26,9 @@ src-tauri/Cargo.lock
 # Windows
 Thumbs.db
 
-.github/
+# 仅提交 CI 工作流，.github 下其他内容仍忽略
+.github/*
+!.github/workflows/
 src-tauri/gen/schemas/windows-schema.json
 
 .codex
