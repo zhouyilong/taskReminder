@@ -5,12 +5,14 @@ mod db;
 mod errors;
 mod maintenance;
 mod models;
+mod notification_queue;
 mod paths;
 mod recurrence;
 mod scheduler;
 mod single_instance;
 mod state;
 mod sync;
+mod time;
 mod tray;
 
 use std::sync::{Arc, Mutex};
@@ -28,6 +30,7 @@ use crate::models::{
     AppSettings, NotificationPayload, RecurringTask, ReminderRecord, StickyNote, SyncStatus, Task,
     UiStatePayload,
 };
+use crate::notification_queue::NotificationQueue;
 use crate::scheduler::ReminderScheduler;
 use crate::single_instance::InstanceLock;
 use crate::state::AppState;
@@ -310,6 +313,7 @@ fn update_task(
 fn complete_task(state: State<AppState>, id: String) -> ApiResult<()> {
     into_api(state.db.complete_task(&id))?;
     state.scheduler.cancel_task(&id);
+    into_api(state.scheduler.withdraw_notifications(&id, "COMPLETED"))?;
     into_api(state.sync.notify_local_change())?;
     Ok(())
 }
@@ -332,6 +336,7 @@ fn uncomplete_task(state: State<AppState>, id: String) -> ApiResult<()> {
 fn delete_task(state: State<AppState>, id: String) -> ApiResult<()> {
     into_api(state.db.delete_task(&id))?;
     state.scheduler.cancel_task(&id);
+    into_api(state.scheduler.withdraw_notifications(&id, "DISMISSED"))?;
     into_api(state.sync.notify_local_change())?;
     Ok(())
 }
@@ -416,6 +421,7 @@ fn resume_recurring_task(state: State<AppState>, id: String) -> ApiResult<()> {
 fn delete_recurring_task(state: State<AppState>, id: String) -> ApiResult<()> {
     into_api(state.db.delete_recurring_task(&id))?;
     state.scheduler.cancel_recurring(&id);
+    into_api(state.scheduler.withdraw_notifications(&id, "DISMISSED"))?;
     into_api(state.sync.notify_local_change())?;
     Ok(())
 }
@@ -743,8 +749,23 @@ fn set_autostart(state: State<AppState>, enabled: bool) -> ApiResult<()> {
     Ok(())
 }
 
+/// 处理完弹窗中的一条提醒后，从队列移除并广播剩余队列；返回剩余队列供弹窗直接使用。
+fn finish_notification(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    record_id: &str,
+) -> Vec<NotificationPayload> {
+    let remaining = state.scheduler.queue().remove_record(record_id);
+    scheduler::publish_queue(app, &remaining);
+    remaining
+}
+
 #[tauri::command]
-fn ack_notification(state: State<AppState>, payload: AckPayload) -> ApiResult<()> {
+fn ack_notification(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    payload: AckPayload,
+) -> ApiResult<Vec<NotificationPayload>> {
     if into_api(state.db.get_reminder_record(&payload.record_id))?.is_some() {
         into_api(
             state
@@ -753,7 +774,24 @@ fn ack_notification(state: State<AppState>, payload: AckPayload) -> ApiResult<()
         )?;
         into_api(state.sync.notify_local_change())?;
     }
-    *state.notification_snapshot.lock().unwrap() = None;
+    Ok(finish_notification(&app, &state, &payload.record_id))
+}
+
+/// 一次性关闭队列中的全部提醒（均记为“已关闭”）。
+#[tauri::command]
+fn ack_all_notifications(app: tauri::AppHandle, state: State<AppState>) -> ApiResult<()> {
+    let drained = state.scheduler.queue().drain();
+    for item in &drained {
+        into_api(
+            state
+                .db
+                .update_reminder_record_action(&item.record_id, "DISMISSED"),
+        )?;
+    }
+    if !drained.is_empty() {
+        into_api(state.sync.notify_local_change())?;
+    }
+    scheduler::publish_queue(&app, &[]);
     Ok(())
 }
 
@@ -762,7 +800,7 @@ fn snooze_notification(
     app: tauri::AppHandle,
     state: State<AppState>,
     payload: SnoozePayload,
-) -> ApiResult<()> {
+) -> ApiResult<Vec<NotificationPayload>> {
     let minutes = payload.minutes.max(1);
     into_api(
         state
@@ -796,8 +834,7 @@ fn snooze_notification(
         _ => {}
     }
     into_api(state.sync.notify_local_change())?;
-    *state.notification_snapshot.lock().unwrap() = None;
-    Ok(())
+    Ok(finish_notification(&app, &state, &payload.record_id))
 }
 
 #[tauri::command]
@@ -806,8 +843,8 @@ fn get_sync_status(state: State<AppState>) -> ApiResult<SyncStatus> {
 }
 
 #[tauri::command]
-fn get_notification_snapshot(state: State<AppState>) -> ApiResult<Option<NotificationPayload>> {
-    Ok(state.notification_snapshot.lock().unwrap().clone())
+fn get_notification_queue(state: State<AppState>) -> ApiResult<Vec<NotificationPayload>> {
+    Ok(state.scheduler.queue().snapshot())
 }
 
 #[cfg(target_os = "windows")]
@@ -1190,9 +1227,10 @@ fn main() {
             sync_now,
             set_autostart,
             ack_notification,
+            ack_all_notifications,
             snooze_notification,
             get_sync_status,
-            get_notification_snapshot,
+            get_notification_queue,
             get_current_theme,
             get_debug_info,
             is_dev_mode,
@@ -1240,15 +1278,15 @@ fn main() {
                 let db_path = paths::db_path(&data_dir);
                 let is_first_launch = !db_path.exists();
                 let db = DbManager::new(db_path)?;
-                let snapshot = Arc::new(Mutex::new(None));
                 let sync = CloudSyncService::new(app_handle.clone(), db.clone());
                 let scheduler = ReminderScheduler::new(
                     app_handle.clone(),
                     db.clone(),
                     sync.clone(),
-                    snapshot.clone(),
+                    NotificationQueue::new(),
                 );
                 scheduler.schedule_existing()?;
+                scheduler.start_watchdog();
                 sync.start()?;
                 maintenance::start_maintenance(db.clone());
 
@@ -1275,7 +1313,6 @@ fn main() {
                     db,
                     scheduler,
                     sync,
-                    notification_snapshot: snapshot,
                     ui_state: Arc::new(Mutex::new(None)),
                 };
                 app.manage(state);

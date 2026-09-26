@@ -1016,12 +1016,6 @@ const activeRecurringCount = computed(() => recurringTasks.value.filter(task => 
 const uiScalePercent = computed(() => Math.round(uiScale.value * 100));
 const windowOpacityPercent = computed(() => Math.round(windowOpacity.value * 100));
 const stickyNoteWindowVisible = ref(false);
-const stickyNoteToggleTitle = computed(() => {
-  if (stickyNoteSwitching.value) {
-    return "桌面便签处理中...";
-  }
-  return stickyNoteWindowVisible.value ? "关闭桌面便签" : "打开桌面便签";
-});
 const currentVersionLabel = computed(() => {
   if (!appVersion.value) {
     return "-";
@@ -1572,11 +1566,8 @@ const handleInstallUpdate = async () => {
   updateInstalling.value = true;
   resetUpdateProgress();
   try {
-    await installUpdate(
-      availableUpdateHandle.value,
-      handleUpdateDownloadEvent,
-      resolveUpdateNetworkOptions(updatePreferences.proxyUrl)
-    );
+    // 代理已在检查更新时写入 Update 句柄，下载安装会沿用同一代理。
+    await installUpdate(availableUpdateHandle.value, handleUpdateDownloadEvent);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     updateCheckError.value = `安装更新失败：${message}`;

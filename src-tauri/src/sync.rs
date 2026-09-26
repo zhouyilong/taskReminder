@@ -12,9 +12,10 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::time::sleep;
 
-use crate::db::DbManager;
+use crate::db::{DbManager, TOMBSTONE_RETENTION_DAYS_SYNC};
 use crate::errors::AppError;
 use crate::models::{AppSettings, SyncStatus};
+use crate::time::parse_datetime_any;
 
 const REMOTE_DB_NAME: &str = "taskreminder.db";
 const LOCK_FILE_NAME: &str = "taskreminder.lock";
@@ -333,6 +334,9 @@ impl CloudSyncService {
             let downloaded = download_remote(&client)?;
             remote = Some(downloaded.clone());
             merge_databases(&self.db.db_path(), &downloaded)?;
+            // 合并后再清理过期墓碑，随后上传的快照中也不再包含它们。
+            self.db
+                .purge_expired_tombstones(TOMBSTONE_RETENTION_DAYS_SYNC)?;
             let local_snapshot = export_local_snapshot(&self.db.db_path())?;
             client.upload(REMOTE_DB_NAME, &local_snapshot)?;
             snapshot = Some(local_snapshot);
@@ -605,20 +609,6 @@ fn value_to_string(value: &Value) -> Option<String> {
         Value::Real(num) => Some(num.to_string()),
         _ => None,
     }
-}
-
-fn parse_datetime_any(value: &str) -> Option<NaiveDateTime> {
-    let candidates = [
-        "%Y-%m-%dT%H:%M:%S%.f",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M",
-    ];
-    for fmt in candidates {
-        if let Ok(dt) = NaiveDateTime::parse_from_str(value, fmt) {
-            return Some(dt);
-        }
-    }
-    None
 }
 
 fn ensure_sync_columns(conn: &Connection) -> Result<(), AppError> {
@@ -895,5 +885,97 @@ fn build_auth_header(username: &str, password: &str) -> Option<String> {
 fn cleanup_temp_file(path: &Option<std::path::PathBuf>) {
     if let Some(path) = path {
         let _ = std::fs::remove_file(path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_db(name: &str) -> (DbManager, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "taskreminder-sync-test-{}-{}",
+            name,
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.db");
+        (DbManager::new(path.clone()).unwrap(), dir)
+    }
+
+    fn set_completed(path: &std::path::Path, id: &str, days_ago: i64) {
+        let completed = crate::time::format_datetime(
+            &(Local::now().naive_local() - chrono::Duration::days(days_ago)),
+        );
+        let conn = Connection::open(path).unwrap();
+        conn.execute(
+            "UPDATE tasks SET status = 'COMPLETED', completed_at = ?1, updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![completed, id],
+        )
+        .unwrap();
+    }
+
+    fn copy_task(from: &std::path::Path, to: &std::path::Path, id: &str) {
+        let conn = Connection::open(to).unwrap();
+        let escaped = from.to_string_lossy().replace('\'', "''");
+        conn.execute_batch(&format!("ATTACH DATABASE '{}' AS src", escaped))
+            .unwrap();
+        conn.execute(
+            "INSERT INTO tasks SELECT * FROM src.tasks WHERE id = ?",
+            [id],
+        )
+        .unwrap();
+        conn.execute_batch("DETACH DATABASE src").unwrap();
+    }
+
+    fn deleted_at(path: &std::path::Path, id: &str) -> Option<Option<String>> {
+        let conn = Connection::open(path).unwrap();
+        conn.query_row("SELECT deleted_at FROM tasks WHERE id = ?", [id], |row| {
+            row.get::<_, Option<String>>(0)
+        })
+        .ok()
+    }
+
+    #[test]
+    fn cleaned_up_completed_task_does_not_resurrect_after_merge() {
+        let (local, local_dir) = temp_db("local");
+        let (remote, remote_dir) = temp_db("remote");
+        let task = local.create_task("old completed", None).unwrap();
+        set_completed(&local.db_path(), &task.id, 40);
+        // 远端（另一台设备上传的库）仍保留这条已完成任务。
+        copy_task(&local.db_path(), &remote.db_path(), &task.id);
+
+        local
+            .cleanup_data(crate::db::TOMBSTONE_RETENTION_DAYS_SYNC)
+            .unwrap();
+        merge_databases(&local.db_path(), &remote.db_path()).unwrap();
+
+        let merged = deleted_at(&local.db_path(), &task.id).expect("row exists");
+        assert!(merged.is_some(), "tombstone should win over older live row");
+
+        let _ = std::fs::remove_dir_all(local_dir);
+        let _ = std::fs::remove_dir_all(remote_dir);
+    }
+
+    #[test]
+    fn merge_keeps_newer_row() {
+        let (local, local_dir) = temp_db("local");
+        let (remote, remote_dir) = temp_db("remote");
+        let task = local.create_task("shared", None).unwrap();
+        copy_task(&local.db_path(), &remote.db_path(), &task.id);
+        {
+            let conn = Connection::open(remote.db_path()).unwrap();
+            conn.execute(
+                "UPDATE tasks SET description = 'remote edit', updated_at = '2999-01-01T00:00:00' WHERE id = ?",
+                [&task.id],
+            )
+            .unwrap();
+        }
+        merge_databases(&local.db_path(), &remote.db_path()).unwrap();
+        let merged = local.get_task(&task.id).unwrap().unwrap();
+        assert_eq!(merged.description, "remote edit");
+
+        let _ = std::fs::remove_dir_all(local_dir);
+        let _ = std::fs::remove_dir_all(remote_dir);
     }
 }

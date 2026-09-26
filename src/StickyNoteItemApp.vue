@@ -148,12 +148,23 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { getCurrentWindow, type ResizeDirection } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import MarkdownNoteEditor from "./components/MarkdownNoteEditor.vue";
 import { safeStorage } from "./safeStorage";
 import { api } from "./api";
 import type { AppSettings, StickyNote, UiStatePayload } from "./types";
+
+// @tauri-apps/api 未导出该类型，这里按 startResizeDragging 的参数定义同名联合类型。
+type ResizeDirection =
+  | "East"
+  | "North"
+  | "NorthEast"
+  | "NorthWest"
+  | "South"
+  | "SouthEast"
+  | "SouthWest"
+  | "West";
 
 type StickyNoteHostWindow = Window & {
   __TASKREMINDER_STICKY_NOTE?: StickyNote;

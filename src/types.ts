@@ -112,4 +112,6 @@ export interface NotificationPayload {
   reminderType: ReminderType;
   description: string;
   snoozeMinutes: number;
+  /** 原定触发时间；明显早于弹出时间时视为“错过的提醒”。 */
+  scheduledTime?: string | null;
 }

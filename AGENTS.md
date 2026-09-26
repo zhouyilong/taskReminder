@@ -14,11 +14,13 @@
 - `src/styles.css` 为三个窗口共用的全局样式表（设计令牌、主窗口、提醒弹窗、便签）；组件私有样式放在 `.vue` 文件内。
 - `src/update.ts` 自动更新逻辑模块（检查更新、安装更新、偏好管理）。
 - `src-tauri/` 存放 Tauri 应用的 Rust 后端。
-  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（命令注册、窗口管理、便签窗口）、`db.rs`（SQLite 读写）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync.rs`（WebDAV 同步）、`tray.rs`（托盘菜单）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`state.rs`、`errors.rs`、`maintenance.rs`。
+  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（命令注册、窗口管理、便签窗口）、`db.rs`（SQLite 读写）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync.rs`（WebDAV 同步）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（本地时间格式化与解析）、`tray.rs`（托盘菜单）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
   - `src-tauri/migrations/` 存放数据库迁移文件。
   - `src-tauri/icons/` 存放应用图标；源文件在 `src-tauri/icons/source/`（`icon.svg` 为主图标，`icon-small.svg` 为 16–32px 简化版），修改后执行 `python3 src-tauri/icons/source/render.py` 重新生成 PNG 与 `icon.ico`（需 `pip install cairosvg pillow`）。
   - `src-tauri/capabilities/default.json` 定义各窗口的权限。
   - `src-tauri/tauri.conf.json` 定义窗口、打包、更新器与应用元数据；`src-tauri/tauri.updater.conf.json` 为签名构建时的覆盖配置。
+- `docs/ROADMAP.md` 为功能扩展与重构路线图，完成条目后同步勾选并补充变更记录。
+- `.github/workflows/ci.yml` 为 CI（Ubuntu + Windows：`pnpm build`、`cargo fmt --check`、`cargo clippy`、`cargo test`）。
 - `scripts/` 存放构建与发布脚本。
   - `scripts/build-updater.ps1` 签名构建 MSI + 生成更新清单。
   - `scripts/write-updater-manifest.mjs` 生成 `latest.json` 更新清单。
@@ -26,7 +28,8 @@
 
 ## 构建、测试与开发命令
 - `pnpm dev`：启动 Web UI 的 Vite 开发服务器。
-- `pnpm build`：将前端打包到 `dist/`。
+- `pnpm build`：先执行 `vue-tsc --noEmit` 类型检查，再将前端打包到 `dist/`。
+- `pnpm typecheck`：仅做类型检查。
 - `pnpm preview`：本地预览生产构建。
 - `pnpm tauri dev`：以开发模式运行完整的 Tauri 桌面应用。
 - `pnpm tauri build`：生成生产环境桌面应用包，不生成 updater 签名产物。
@@ -90,14 +93,25 @@
 - **问题**：Linux WebKitGTK 的透明窗口在首帧后经常不重绘，便签一直停在“载入便签...”。
 - **解决**：仅在 Linux 关闭便签窗口透明，并通过初始化脚本直接注入便签数据；Windows 仍保持透明浮动外观。Linux 下相关样式挂在 `html.sticky-note-mode.is-linux` 上。
 
+### 提醒弹窗队列与巡检
+- 提醒由后端 `NotificationQueue` 维护，弹窗通过 `get_notification_queue` 读取、监听 `notification-queue` 事件更新，始终展示队首；`ack_notification` / `snooze_notification` 返回剩余队列，队列为空时后端隐藏弹窗。
+- **规则**：新增触发提醒的路径一律走 `ReminderScheduler::handle_task` / `handle_recurring`，它们持有 `fire_lock` 并按提醒记录判重，保证计时器、30 秒巡检（`fire_due`）重复命中时不会重复弹出。不要绕过它直接写提醒记录再弹窗。
+- 一次性提醒只补发 7 天内错过的（`MISSED_REMINDER_LOOKBACK_DAYS`）。
+
+### 删除与清理必须走墓碑
+- **问题**：直接 `DELETE` 行后，远端库仍有该行，同步合并会把它重新插回本地（“复活”）。
+- **规则**：业务删除与定期清理一律写 `deleted_at` + `updated_at`（墓碑）；只有 `purge_expired_tombstones` 按保留期（本地 7 天，开启同步 60 天）物理删除，同步在合并后、上传前也会调用它。
+
 ### onMounted 中异步操作的异常隔离
 - **问题**：多个异步操作放在同一个 `try` 块中，前面的操作抛异常会导致后面的操作被跳过（如自动更新检查被数据初始化异常阻断）。
 - **解决**：将相互独立的异步操作放在各自独立的 `try/catch` 块中。
 - **规则**：`onMounted` 中多个独立的异步初始化操作应分别用 `try/catch` 包裹，互不影响。
 
 ## 测试指南
-- `package.json` 尚未配置 JavaScript 测试框架；前端改动至少执行 `pnpm build` 确认可编译。
-- Rust 测试位于 `src-tauri/src/` 各模块的 `#[cfg(test)]` 中（如 `main.rs` 的便签窗口标签/URL 测试），通过 `cargo test` 运行。
+- `package.json` 尚未配置 JavaScript 测试框架；前端改动至少执行 `pnpm build`（含 `vue-tsc` 类型检查）确认可编译。
+- Rust 测试位于 `src-tauri/src/` 各模块的 `#[cfg(test)]` 中（便签窗口标签/URL、提醒队列、墓碑清理、同步合并、时间解析），通过 `cargo test` 运行；需要数据库的测试用临时目录创建 `DbManager`，会自动执行迁移。
+- 提交前运行 `cargo fmt`，CI 会执行 `cargo fmt --check`。
+- 在 Linux 上构建会改写 `src-tauri/gen/schemas/`，这些生成文件的无关变动不要提交。
 - 仅调整前端 UI 时，可用 `pnpm dev` 在浏览器中预览；浏览器中没有 Tauri 运行时，需要在页面加载前注入 `window.__TAURI_INTERNALS__`（模拟 `invoke`、`transformCallback`、`metadata.currentWindow`）并返回示例数据，否则列表为空。
 - 若引入 JS 测试框架，请将测试放在 `src/` 下（如 `*.spec.ts`），并在 `package.json` 中添加脚本。
 

@@ -154,22 +154,25 @@ export const api = {
   async acknowledgeNotification(payload: {
     recordId: string;
     action: string;
-  }): Promise<void> {
+  }): Promise<NotificationPayload[]> {
     return invoke("ack_notification", { payload });
+  },
+  async acknowledgeAllNotifications(): Promise<void> {
+    return invoke("ack_all_notifications");
   },
   async snoozeNotification(payload: {
     recordId: string;
     reminderId: string;
     reminderType: string;
     minutes: number;
-  }): Promise<void> {
+  }): Promise<NotificationPayload[]> {
     return invoke("snooze_notification", { payload });
   },
   async getSyncStatus(): Promise<SyncStatus> {
     return invoke("get_sync_status");
   },
-  async getNotificationSnapshot(): Promise<NotificationPayload | null> {
-    return invoke("get_notification_snapshot");
+  async getNotificationQueue(): Promise<NotificationPayload[]> {
+    return invoke("get_notification_queue");
   },
   async isDevMode(): Promise<boolean> {
     return invoke("is_dev_mode");

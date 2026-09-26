@@ -111,6 +111,9 @@ pub struct NotificationPayload {
     pub reminder_type: String,
     pub description: String,
     pub snooze_minutes: i64,
+    /// 本次提醒原定的触发时间；用于在弹窗中标识“错过的提醒”。
+    #[serde(default)]
+    pub scheduled_time: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
