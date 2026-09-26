@@ -50,6 +50,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
     };
     let menu = MenuBuilder::new(app)
         .text("open", format!("打开{}", dev_tag))
+        .text("quick_add", "快速添加待办")
         .text("new_note", "新建便签")
         .text("check_update", "检查更新")
         .text("sync_now", "立即同步")
@@ -63,6 +64,11 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => {
                 show_main(app);
+            }
+            "quick_add" => {
+                if let Err(err) = crate::quick_add::show_window(app) {
+                    eprintln!("[tray] 打开快速添加失败: {}", err);
+                }
             }
             "new_note" => {
                 create_sticky_note(app);

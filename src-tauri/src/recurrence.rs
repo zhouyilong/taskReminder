@@ -4,6 +4,7 @@ use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, Tim
 use cron::Schedule;
 
 use crate::errors::AppError;
+use crate::holidays;
 use crate::models::RecurringTask;
 
 pub const REPEAT_MODE_INTERVAL_RANGE: &str = "INTERVAL_RANGE";
@@ -11,6 +12,32 @@ pub const REPEAT_MODE_DAILY: &str = "DAILY";
 pub const REPEAT_MODE_WEEKLY: &str = "WEEKLY";
 pub const REPEAT_MODE_MONTHLY: &str = "MONTHLY";
 pub const REPEAT_MODE_CRON: &str = "CRON";
+/// 中国法定工作日：跳过法定节假日，调休上班日照常提醒。
+pub const REPEAT_MODE_WORKDAY: &str = "WORKDAY";
+
+/// 每周多天的位掩码：周一 = bit0 … 周日 = bit6。
+pub const WEEKDAY_MASK_ALL: i64 = 0b111_1111;
+
+/// 周几（1 = 周一 … 7 = 周日）对应的位。
+pub fn weekday_bit(weekday: i64) -> i64 {
+    1 << (weekday - 1)
+}
+
+/// 位掩码中最早的一天（1–7），用于兼容只认 `schedule_weekday` 的旧版本。
+fn first_weekday(mask: i64) -> Option<i64> {
+    (1..=7).find(|day| mask & weekday_bit(*day) != 0)
+}
+
+/// 读取任务的每周位掩码；旧数据只有 `schedule_weekday` 时由它换算。
+fn weekday_mask(task: &RecurringTask) -> Option<i64> {
+    match task.schedule_weekdays {
+        Some(mask) if mask & WEEKDAY_MASK_ALL != 0 => Some(mask & WEEKDAY_MASK_ALL),
+        _ => task
+            .schedule_weekday
+            .filter(|day| (1..=7).contains(day))
+            .map(weekday_bit),
+    }
+}
 
 pub fn normalize_repeat_mode(mode: &str) -> String {
     match mode.trim().to_uppercase().as_str() {
@@ -18,6 +45,7 @@ pub fn normalize_repeat_mode(mode: &str) -> String {
         REPEAT_MODE_WEEKLY => REPEAT_MODE_WEEKLY.to_string(),
         REPEAT_MODE_MONTHLY => REPEAT_MODE_MONTHLY.to_string(),
         REPEAT_MODE_CRON => REPEAT_MODE_CRON.to_string(),
+        REPEAT_MODE_WORKDAY => REPEAT_MODE_WORKDAY.to_string(),
         "INTERVAL" | "INTERVAL-RANGE" | REPEAT_MODE_INTERVAL_RANGE => {
             REPEAT_MODE_INTERVAL_RANGE.to_string()
         }
@@ -46,6 +74,7 @@ pub fn sanitize_recurring_task(task: &mut RecurringTask) -> Result<(), AppError>
         REPEAT_MODE_INTERVAL_RANGE => {
             task.schedule_time = None;
             task.schedule_weekday = None;
+            task.schedule_weekdays = None;
             task.schedule_day = None;
             task.cron_expression = None;
         }
@@ -56,6 +85,7 @@ pub fn sanitize_recurring_task(task: &mut RecurringTask) -> Result<(), AppError>
             task.start_time = None;
             task.end_time = None;
             task.schedule_weekday = None;
+            task.schedule_weekdays = None;
             task.schedule_day = None;
             task.cron_expression = None;
         }
@@ -63,14 +93,22 @@ pub fn sanitize_recurring_task(task: &mut RecurringTask) -> Result<(), AppError>
             if task.schedule_time.is_none() {
                 return Err(AppError::Invalid("每周模式需要设置触发时间".to_string()));
             }
-            let weekday = task
-                .schedule_weekday
-                .ok_or_else(|| AppError::Invalid("每周模式需要设置周几".to_string()))?;
-            if !(1..=7).contains(&weekday) {
-                return Err(AppError::Invalid(
-                    "每周模式中的周几必须在 1 到 7 之间".to_string(),
-                ));
+            if let Some(mask) = task.schedule_weekdays {
+                if mask & !WEEKDAY_MASK_ALL != 0 {
+                    return Err(AppError::Invalid("每周模式中的周几无效".to_string()));
+                }
             }
+            if let Some(weekday) = task.schedule_weekday {
+                if !(1..=7).contains(&weekday) {
+                    return Err(AppError::Invalid(
+                        "每周模式中的周几必须在 1 到 7 之间".to_string(),
+                    ));
+                }
+            }
+            let mask = weekday_mask(task)
+                .ok_or_else(|| AppError::Invalid("每周模式需要至少选择一天".to_string()))?;
+            task.schedule_weekdays = Some(mask);
+            task.schedule_weekday = first_weekday(mask);
             task.start_time = None;
             task.end_time = None;
             task.schedule_day = None;
@@ -91,6 +129,18 @@ pub fn sanitize_recurring_task(task: &mut RecurringTask) -> Result<(), AppError>
             task.start_time = None;
             task.end_time = None;
             task.schedule_weekday = None;
+            task.schedule_weekdays = None;
+            task.cron_expression = None;
+        }
+        REPEAT_MODE_WORKDAY => {
+            if task.schedule_time.is_none() {
+                return Err(AppError::Invalid("工作日模式需要设置触发时间".to_string()));
+            }
+            task.start_time = None;
+            task.end_time = None;
+            task.schedule_weekday = None;
+            task.schedule_weekdays = None;
+            task.schedule_day = None;
             task.cron_expression = None;
         }
         REPEAT_MODE_CRON => {
@@ -103,6 +153,7 @@ pub fn sanitize_recurring_task(task: &mut RecurringTask) -> Result<(), AppError>
             task.end_time = None;
             task.schedule_time = None;
             task.schedule_weekday = None;
+            task.schedule_weekdays = None;
             task.schedule_day = None;
         }
         _ => {}
@@ -124,6 +175,7 @@ pub fn compute_next_trigger(
         REPEAT_MODE_WEEKLY => compute_weekly_next(&normalized, base)?,
         REPEAT_MODE_MONTHLY => compute_monthly_next(&normalized, base)?,
         REPEAT_MODE_CRON => compute_cron_next(&normalized, base)?,
+        REPEAT_MODE_WORKDAY => compute_workday_next(&normalized, base)?,
         _ => compute_interval_next(&normalized, base)?,
     };
     Ok(next.format("%Y-%m-%dT%H:%M:%S").to_string())
@@ -226,25 +278,43 @@ fn compute_weekly_next(
             .as_deref()
             .ok_or_else(|| AppError::Invalid("每周模式缺少触发时间".to_string()))?,
     )?;
-    let weekday = task
-        .schedule_weekday
-        .ok_or_else(|| AppError::Invalid("每周模式缺少周几".to_string()))?;
-    if !(1..=7).contains(&weekday) {
-        return Err(AppError::Invalid(
-            "每周模式中的周几必须在 1 到 7 之间".to_string(),
-        ));
-    }
+    let mask =
+        weekday_mask(task).ok_or_else(|| AppError::Invalid("每周模式缺少周几".to_string()))?;
 
-    let current_weekday = base.weekday().number_from_monday() as i64;
-    let mut days_ahead = (weekday - current_weekday + 7) % 7;
-    let mut candidate_date = base.date() + Duration::days(days_ahead);
-    let mut candidate = NaiveDateTime::new(candidate_date, time);
-    if candidate <= base {
-        days_ahead += 7;
-        candidate_date = base.date() + Duration::days(days_ahead);
-        candidate = NaiveDateTime::new(candidate_date, time);
+    // 从今天起最多看 8 天，一定能找到下一个选中的日子。
+    for offset in 0..=7 {
+        let date = base.date() + Duration::days(offset);
+        let weekday = date.weekday().number_from_monday() as i64;
+        let candidate = NaiveDateTime::new(date, time);
+        if mask & weekday_bit(weekday) != 0 && candidate > base {
+            return Ok(candidate);
+        }
     }
-    Ok(candidate)
+    Err(AppError::Invalid(
+        "每周模式无法计算下次触发时间".to_string(),
+    ))
+}
+
+fn compute_workday_next(
+    task: &RecurringTask,
+    base: NaiveDateTime,
+) -> Result<NaiveDateTime, AppError> {
+    let time = parse_time(
+        task.schedule_time
+            .as_deref()
+            .ok_or_else(|| AppError::Invalid("工作日模式缺少触发时间".to_string()))?,
+    )?;
+    // 最长的法定假期（含调休）不超过两周，向后查找 60 天足够。
+    for offset in 0..=60 {
+        let date = base.date() + Duration::days(offset);
+        let candidate = NaiveDateTime::new(date, time);
+        if candidate > base && holidays::is_workday(date) {
+            return Ok(candidate);
+        }
+    }
+    Err(AppError::Invalid(
+        "工作日模式无法计算下次触发时间".to_string(),
+    ))
 }
 
 fn compute_monthly_next(
@@ -382,4 +452,119 @@ fn midnight_time() -> NaiveTime {
 
 fn minute_of_day(time: NaiveTime) -> i32 {
     (time.hour() as i32) * 60 + (time.minute() as i32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dt(value: &str) -> NaiveDateTime {
+        NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M").unwrap()
+    }
+
+    fn task(mode: &str) -> RecurringTask {
+        RecurringTask {
+            id: "t".to_string(),
+            description: "test".to_string(),
+            task_type: "RECURRING".to_string(),
+            status: "PENDING".to_string(),
+            created_at: "2026-01-01T00:00:00".to_string(),
+            completed_at: None,
+            reminder_time: None,
+            updated_at: None,
+            deleted_at: None,
+            interval_minutes: 60,
+            last_triggered: None,
+            next_trigger: String::new(),
+            is_paused: false,
+            start_time: None,
+            end_time: None,
+            repeat_mode: mode.to_string(),
+            schedule_time: Some("09:00".to_string()),
+            schedule_weekday: None,
+            schedule_weekdays: None,
+            schedule_day: None,
+            cron_expression: None,
+        }
+    }
+
+    fn next(task: &RecurringTask, base: &str) -> String {
+        compute_next_trigger(task, Some(dt(base))).unwrap()
+    }
+
+    #[test]
+    fn weekly_multiple_days() {
+        let mut t = task(REPEAT_MODE_WEEKLY);
+        // 周一、三、五
+        t.schedule_weekdays = Some(weekday_bit(1) | weekday_bit(3) | weekday_bit(5));
+        // 2026-09-21 为周一
+        assert_eq!(next(&t, "2026-09-21T08:00"), "2026-09-21T09:00:00");
+        assert_eq!(next(&t, "2026-09-21T09:00"), "2026-09-23T09:00:00");
+        assert_eq!(next(&t, "2026-09-25T10:00"), "2026-09-28T09:00:00");
+    }
+
+    #[test]
+    fn weekly_legacy_single_weekday_still_works() {
+        let mut t = task(REPEAT_MODE_WEEKLY);
+        t.schedule_weekday = Some(7); // 周日
+        assert_eq!(next(&t, "2026-09-21T08:00"), "2026-09-27T09:00:00");
+        sanitize_recurring_task(&mut t).unwrap();
+        assert_eq!(t.schedule_weekdays, Some(weekday_bit(7)));
+    }
+
+    #[test]
+    fn weekly_sanitize_keeps_first_day_for_old_clients() {
+        let mut t = task(REPEAT_MODE_WEEKLY);
+        t.schedule_weekday = Some(1);
+        t.schedule_weekdays = Some(weekday_bit(3) | weekday_bit(6));
+        sanitize_recurring_task(&mut t).unwrap();
+        assert_eq!(t.schedule_weekday, Some(3));
+        assert_eq!(t.schedule_weekdays, Some(weekday_bit(3) | weekday_bit(6)));
+    }
+
+    #[test]
+    fn weekly_requires_a_day() {
+        let mut t = task(REPEAT_MODE_WEEKLY);
+        t.schedule_weekdays = Some(0);
+        assert!(sanitize_recurring_task(&mut t).is_err());
+        t.schedule_weekdays = Some(1 << 7);
+        assert!(sanitize_recurring_task(&mut t).is_err());
+    }
+
+    #[test]
+    fn other_modes_clear_weekday_mask() {
+        let mut t = task(REPEAT_MODE_DAILY);
+        t.schedule_weekdays = Some(WEEKDAY_MASK_ALL);
+        sanitize_recurring_task(&mut t).unwrap();
+        assert_eq!(t.schedule_weekdays, None);
+    }
+
+    #[test]
+    fn workday_skips_holidays_and_includes_makeup_days() {
+        let t = task(REPEAT_MODE_WORKDAY);
+        // 2026-09-18（周五）之后：19 日周六、20 日周日调休上班。
+        assert_eq!(next(&t, "2026-09-18T10:00"), "2026-09-20T09:00:00");
+        // 9 月 24 日（周四）之后：25–27 中秋放假，28 日（周一）上班。
+        assert_eq!(next(&t, "2026-09-24T10:00"), "2026-09-28T09:00:00");
+        // 9 月 30 日之后：10 月 1–7 日国庆放假，8 日上班。
+        assert_eq!(next(&t, "2026-09-30T10:00"), "2026-10-08T09:00:00");
+        // 10 月 9 日（周五）之后：10 日周六调休上班。
+        assert_eq!(next(&t, "2026-10-09T10:00"), "2026-10-10T09:00:00");
+    }
+
+    #[test]
+    fn workday_mode_is_normalized_and_requires_time() {
+        assert_eq!(normalize_repeat_mode("workday"), REPEAT_MODE_WORKDAY);
+        let mut t = task(REPEAT_MODE_WORKDAY);
+        t.schedule_time = None;
+        assert!(sanitize_recurring_task(&mut t).is_err());
+    }
+
+    #[test]
+    fn monthly_clamps_to_month_end() {
+        let mut t = task(REPEAT_MODE_MONTHLY);
+        t.schedule_day = Some(31);
+        assert_eq!(next(&t, "2026-02-10T10:00"), "2026-02-28T09:00:00");
+        assert_eq!(next(&t, "2026-02-28T10:00"), "2026-03-31T09:00:00");
+    }
 }

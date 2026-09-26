@@ -2,7 +2,7 @@ export type TaskStatus = "PENDING" | "COMPLETED";
 export type TaskType = "ONE_TIME" | "RECURRING";
 export type ReminderType = "TASK" | "RECURRING";
 export type UserAction = "DISMISSED" | "SNOOZED" | "COMPLETED" | "PENDING";
-export type RecurringMode = "INTERVAL_RANGE" | "DAILY" | "WEEKLY" | "MONTHLY" | "CRON";
+export type RecurringMode = "INTERVAL_RANGE" | "DAILY" | "WORKDAY" | "WEEKLY" | "MONTHLY" | "CRON";
 
 export interface Task {
   id: string;
@@ -36,6 +36,8 @@ export interface RecurringTask {
   repeatMode: RecurringMode;
   scheduleTime?: string | null;
   scheduleWeekday?: number | null;
+  /** 每周多天位掩码：周一 = bit0 … 周日 = bit6。 */
+  scheduleWeekdays?: number | null;
   scheduleDay?: number | null;
   cronExpression?: string | null;
 }
@@ -92,6 +94,9 @@ export interface AppSettings {
   webdavLastSyncError?: string | null;
   webdavDeviceId: string;
   notificationTheme: "system" | "app" | "light" | "dark";
+  quickAddEnabled: boolean;
+  /** Tauri 加速键格式，如 CommandOrControl+Alt+N。 */
+  quickAddShortcut: string;
 }
 
 export interface UiStatePayload {

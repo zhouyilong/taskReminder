@@ -354,11 +354,14 @@
             </template>
             <template v-else-if="newRecurringMode === 'WEEKLY'">
               <label class="field-label">周几</label>
-              <select class="select" title="每页条数" v-model.number="newRecurringWeekday" style="width: 120px">
-                <option v-for="item in weekdayOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
-              </select>
+              <WeekdayPicker v-model="newRecurringWeekdays" />
               <label class="field-label">时间</label>
               <input class="input" type="time" v-model="newRecurringScheduleTime" style="width: 140px" />
+            </template>
+            <template v-else-if="newRecurringMode === 'WORKDAY'">
+              <label class="field-label">时间</label>
+              <input class="input" type="time" v-model="newRecurringScheduleTime" style="width: 140px" />
+              <span class="field-hint">{{ workdayHint }}</span>
             </template>
             <template v-else-if="newRecurringMode === 'MONTHLY'">
               <label class="field-label">每月几号</label>
@@ -563,10 +566,12 @@
           <input class="input" type="time" v-model="editRecurringScheduleTime" style="width: 160px" />
         </template>
         <template v-else-if="editRecurringMode === 'WEEKLY'">
-          <select class="select" v-model.number="editRecurringWeekday" style="width: 120px">
-            <option v-for="item in weekdayOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
-          </select>
+          <WeekdayPicker v-model="editRecurringWeekdays" />
           <input class="input" type="time" v-model="editRecurringScheduleTime" style="width: 160px" />
+        </template>
+        <template v-else-if="editRecurringMode === 'WORKDAY'">
+          <input class="input" type="time" v-model="editRecurringScheduleTime" style="width: 160px" />
+          <span class="field-hint">{{ workdayHint }}</span>
         </template>
         <template v-else-if="editRecurringMode === 'MONTHLY'">
           <input class="input" type="number" min="1" max="31" v-model.number="editRecurringDayOfMonth" style="width: 120px" />
@@ -618,6 +623,25 @@
         <div class="form-row compact">
           <label>稍后提醒分钟数</label>
           <input class="input" type="number" min="1" v-model.number="settingsDraft.snoozeMinutes" />
+        </div>
+        <div class="form-row compact">
+          <label>
+            <input type="checkbox" v-model="settingsDraft.quickAddEnabled" /> 快速添加快捷键
+          </label>
+          <input
+            class="input shortcut-input"
+            :class="{ 'is-recording': shortcutRecording }"
+            readonly
+            :disabled="!settingsDraft.quickAddEnabled"
+            :value="shortcutRecording ? '请按下组合键…' : formatAccelerator(settingsDraft.quickAddShortcut)"
+            title="点击后按下新的组合键，Esc 取消"
+            @focus="shortcutRecording = true"
+            @blur="shortcutRecording = false"
+            @keydown.prevent="handleShortcutKeydown"
+          />
+        </div>
+        <div v-if="quickAddShortcutError" class="form-row compact">
+          <span class="field-hint is-error">{{ quickAddShortcutError }}</span>
         </div>
       </div>
       <div class="modal-section">
@@ -801,9 +825,18 @@ import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import type { DownloadEvent, Update } from "@tauri-apps/plugin-updater";
 import Modal from "./components/Modal.vue";
 import MarkdownNoteEditor from "./components/MarkdownNoteEditor.vue";
+import WeekdayPicker from "./components/WeekdayPicker.vue";
 import { api } from "./api";
 import { markdownToPlainText, markdownToPreviewText, stripLeadingListMarker } from "./markdown";
 import { safeStorage } from "./safeStorage";
+import {
+  WEEKDAY_MASK_ALL,
+  WEEKDAY_MASK_WORKDAYS,
+  firstWeekday,
+  formatWeekdayMask,
+  resolveWeekdayMask
+} from "./weekdays";
+import { acceleratorFromEvent, formatAccelerator } from "./shortcut";
 import {
   checkForUpdates,
   formatVersionLabel,
@@ -855,20 +888,12 @@ const creatingQuickStickyNote = ref(false);
 const recurringModeOptions: { value: RecurringMode; label: string }[] = [
   { value: "INTERVAL_RANGE", label: "区间间隔" },
   { value: "DAILY", label: "每天固定时间" },
+  { value: "WORKDAY", label: "法定工作日" },
   { value: "WEEKLY", label: "每周固定时间" },
   { value: "MONTHLY", label: "每月固定时间" },
   { value: "CRON", label: "Cron 表达式" },
 ];
 
-const weekdayOptions: { value: number; label: string }[] = [
-  { value: 1, label: "周一" },
-  { value: 2, label: "周二" },
-  { value: 3, label: "周三" },
-  { value: 4, label: "周四" },
-  { value: 5, label: "周五" },
-  { value: 6, label: "周六" },
-  { value: 7, label: "周日" },
-];
 
 const newTaskDescription = ref("");
 const newTaskStickyContent = ref("");
@@ -878,7 +903,7 @@ const newRecurringStart = ref("08:00");
 const newRecurringEnd = ref("17:30");
 const newRecurringMode = ref<RecurringMode>("INTERVAL_RANGE");
 const newRecurringScheduleTime = ref("09:00");
-const newRecurringWeekday = ref(1);
+const newRecurringWeekdays = ref(WEEKDAY_MASK_WORKDAYS);
 const newRecurringDayOfMonth = ref(1);
 const newRecurringCronExpression = ref("0 9 * * *");
 
@@ -900,7 +925,7 @@ const editRecurringStart = ref("");
 const editRecurringEnd = ref("");
 const editRecurringMode = ref<RecurringMode>("INTERVAL_RANGE");
 const editRecurringScheduleTime = ref("09:00");
-const editRecurringWeekday = ref(1);
+const editRecurringWeekdays = ref(WEEKDAY_MASK_WORKDAYS);
 const editRecurringDayOfMonth = ref(1);
 const editRecurringCronExpression = ref("");
 
@@ -926,8 +951,12 @@ const settingsDraft = reactive<AppSettings>({
   webdavRootPath: "",
   webdavSyncIntervalMinutes: 60,
   webdavDeviceId: "",
-  notificationTheme: "app"
+  notificationTheme: "app",
+  quickAddEnabled: true,
+  quickAddShortcut: "CommandOrControl+Alt+N"
 });
+const shortcutRecording = ref(false);
+const quickAddShortcutError = ref("");
 const initialUpdatePreferences = loadUpdatePreferences();
 const updatePreferences = reactive<UpdatePreferences>({ ...initialUpdatePreferences });
 const updatePreferencesDraft = reactive<UpdatePreferences>({ ...initialUpdatePreferences });
@@ -1237,9 +1266,14 @@ const formatAction = (action: string) => {
   }
 };
 
-const weekdayLabel = (value?: number | null) => {
-  return weekdayOptions.find(item => item.value === value)?.label ?? "-";
-};
+const holidayYears = ref<number[]>([]);
+const workdayHint = computed(() => {
+  const years = holidayYears.value;
+  const coverage = years.length
+    ? `已内置 ${years[0]}${years.length > 1 ? `–${years[years.length - 1]}` : ""} 年安排，其他年份按周一至周五`
+    : "暂无节假日数据，按周一至周五";
+  return `跳过法定节假日，调休上班日照常提醒（${coverage}）`;
+});
 
 const formatRecurringMode = (mode?: RecurringMode | string | null) => {
   const resolved = recurringModeOptions.find(item => item.value === mode);
@@ -1251,7 +1285,9 @@ const formatRecurringRule = (task: RecurringTask) => {
     case "DAILY":
       return `每天 ${task.scheduleTime || "-"}`;
     case "WEEKLY":
-      return `${weekdayLabel(task.scheduleWeekday)} ${task.scheduleTime || "-"}`;
+      return `${formatWeekdayMask(resolveWeekdayMask(task.scheduleWeekdays, task.scheduleWeekday))} ${task.scheduleTime || "-"}`;
+    case "WORKDAY":
+      return `法定工作日 ${task.scheduleTime || "-"}`;
     case "MONTHLY":
       return `每月 ${task.scheduleDay || "-"} 日 ${task.scheduleTime || "-"}`;
     case "CRON":
@@ -1271,7 +1307,7 @@ type RecurringDraft = {
   startTime: string;
   endTime: string;
   scheduleTime: string;
-  scheduleWeekday: number;
+  scheduleWeekdays: number;
   scheduleDay: number;
   cronExpression: string;
 };
@@ -1299,8 +1335,14 @@ const validateRecurringDraft = (draft: RecurringDraft) => {
         alert("每周模式需要选择触发时间");
         return false;
       }
-      if (draft.scheduleWeekday < 1 || draft.scheduleWeekday > 7) {
-        alert("每周模式中的周几必须在 1 到 7 之间");
+      if (!(draft.scheduleWeekdays & WEEKDAY_MASK_ALL)) {
+        alert("每周模式至少需要选择一天");
+        return false;
+      }
+      return true;
+    case "WORKDAY":
+      if (!draft.scheduleTime) {
+        alert("工作日模式需要选择触发时间");
         return false;
       }
       return true;
@@ -1333,6 +1375,7 @@ const buildRecurringPayload = (draft: RecurringDraft) => {
     repeatMode: draft.mode,
     scheduleTime: null as string | null,
     scheduleWeekday: null as number | null,
+    scheduleWeekdays: null as number | null,
     scheduleDay: null as number | null,
     cronExpression: null as string | null,
   };
@@ -1346,7 +1389,11 @@ const buildRecurringPayload = (draft: RecurringDraft) => {
       break;
     case "WEEKLY":
       payload.scheduleTime = draft.scheduleTime || null;
-      payload.scheduleWeekday = draft.scheduleWeekday;
+      payload.scheduleWeekdays = draft.scheduleWeekdays & WEEKDAY_MASK_ALL;
+      payload.scheduleWeekday = firstWeekday(payload.scheduleWeekdays);
+      break;
+    case "WORKDAY":
+      payload.scheduleTime = draft.scheduleTime || null;
       break;
     case "MONTHLY":
       payload.scheduleTime = draft.scheduleTime || null;
@@ -1368,7 +1415,7 @@ const resetNewRecurringForm = () => {
   newRecurringEnd.value = "17:30";
   newRecurringMode.value = "INTERVAL_RANGE";
   newRecurringScheduleTime.value = "09:00";
-  newRecurringWeekday.value = 1;
+  newRecurringWeekdays.value = WEEKDAY_MASK_WORKDAYS;
   newRecurringDayOfMonth.value = 1;
   newRecurringCronExpression.value = "0 9 * * *";
 };
@@ -1710,7 +1757,7 @@ const handleAddRecurring = async () => {
     startTime: newRecurringStart.value,
     endTime: newRecurringEnd.value,
     scheduleTime: newRecurringScheduleTime.value,
-    scheduleWeekday: newRecurringWeekday.value,
+    scheduleWeekdays: newRecurringWeekdays.value,
     scheduleDay: newRecurringDayOfMonth.value,
     cronExpression: newRecurringCronExpression.value,
   };
@@ -1733,7 +1780,8 @@ const openEditRecurring = (task: RecurringTask) => {
   editRecurringEnd.value = task.endTime ?? "";
   editRecurringMode.value = (task.repeatMode || "INTERVAL_RANGE") as RecurringMode;
   editRecurringScheduleTime.value = task.scheduleTime ?? "09:00";
-  editRecurringWeekday.value = task.scheduleWeekday ?? 1;
+  editRecurringWeekdays.value =
+    resolveWeekdayMask(task.scheduleWeekdays, task.scheduleWeekday) || WEEKDAY_MASK_WORKDAYS;
   editRecurringDayOfMonth.value = task.scheduleDay ?? 1;
   editRecurringCronExpression.value = task.cronExpression ?? "";
   editRecurringOpen.value = true;
@@ -1750,7 +1798,7 @@ const saveRecurringEdit = async () => {
     startTime: editRecurringStart.value,
     endTime: editRecurringEnd.value,
     scheduleTime: editRecurringScheduleTime.value,
-    scheduleWeekday: editRecurringWeekday.value,
+    scheduleWeekdays: editRecurringWeekdays.value,
     scheduleDay: editRecurringDayOfMonth.value,
     cronExpression: editRecurringCronExpression.value,
   };
@@ -1815,9 +1863,38 @@ const openWebdav = async () => {
   webdavOpen.value = true;
 };
 
+const handleShortcutKeydown = (event: KeyboardEvent) => {
+  const target = event.target as HTMLInputElement | null;
+  if (event.key === "Escape") {
+    target?.blur();
+    return;
+  }
+  const accelerator = acceleratorFromEvent(event);
+  if (!accelerator) {
+    return;
+  }
+  settingsDraft.quickAddShortcut = accelerator;
+  target?.blur();
+};
+
+// 按已保存的设置重新注册快速添加快捷键，并记录失败原因（如被其他程序占用）。
+const applyQuickAddShortcut = async () => {
+  try {
+    await api.applyQuickAddShortcut();
+    quickAddShortcutError.value = "";
+    return true;
+  } catch (error) {
+    quickAddShortcutError.value = error instanceof Error ? error.message : String(error);
+    return false;
+  }
+};
+
 const saveSettings = async () => {
   settingsDraft.windowOpacity = windowOpacity.value;
   await api.saveSettings({ ...settingsDraft });
+  if (!(await applyQuickAddShortcut())) {
+    alert(`设置已保存，但${quickAddShortcutError.value}`);
+  }
   await api.setAutoStart(settingsDraft.autoStartEnabled);
   updatePreferences.autoCheckEnabled = updatePreferencesDraft.autoCheckEnabled;
   updatePreferences.proxyUrl = normalizeUpdateProxyUrl(updatePreferencesDraft.proxyUrl);
@@ -2020,6 +2097,13 @@ onMounted(async () => {
   } catch (error) {
     console.error("[main] 初始化广播 UI 状态失败", error);
   }
+  try {
+    holidayYears.value = await api.getHolidayYears();
+  } catch (error) {
+    console.error("[main] 读取节假日数据范围失败", error);
+  }
+  // 重新应用一次快捷键，以便在设置中展示启动时注册失败的原因。
+  await applyQuickAddShortcut();
   try {
     await maybeAutoCheckForUpdates();
   } catch (error) {

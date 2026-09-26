@@ -52,6 +52,7 @@ export const api = {
     repeatMode?: RecurringMode;
     scheduleTime?: string | null;
     scheduleWeekday?: number | null;
+    scheduleWeekdays?: number | null;
     scheduleDay?: number | null;
     cronExpression?: string | null;
   }): Promise<RecurringTask> {
@@ -165,8 +166,25 @@ export const api = {
     reminderId: string;
     reminderType: string;
     minutes: number;
+    /** 推迟到指定本地时间（YYYY-MM-DDTHH:mm:ss），优先于 minutes。 */
+    until?: string | null;
   }): Promise<NotificationPayload[]> {
     return invoke("snooze_notification", { payload });
+  },
+  async completeNotification(payload: {
+    recordId: string;
+    reminderId: string;
+  }): Promise<NotificationPayload[]> {
+    return invoke("complete_notification", { payload });
+  },
+  async getHolidayYears(): Promise<number[]> {
+    return invoke("get_holiday_years");
+  },
+  async quickAddTask(payload: { description: string; reminderTime?: string | null }): Promise<Task> {
+    return invoke("quick_add_task", { payload });
+  },
+  async applyQuickAddShortcut(): Promise<void> {
+    return invoke("apply_quick_add_shortcut");
   },
   async getSyncStatus(): Promise<SyncStatus> {
     return invoke("get_sync_status");

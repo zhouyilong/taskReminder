@@ -38,6 +38,9 @@ pub struct RecurringTask {
     pub repeat_mode: String,
     pub schedule_time: Option<String>,
     pub schedule_weekday: Option<i64>,
+    /// 每周多天位掩码（周一 = bit0 … 周日 = bit6）；`schedule_weekday` 保留为其中最早的一天以兼容旧版本。
+    #[serde(default)]
+    pub schedule_weekdays: Option<i64>,
     pub schedule_day: Option<i64>,
     pub cron_expression: Option<String>,
 }
@@ -101,6 +104,18 @@ pub struct AppSettings {
     pub webdav_last_sync_error: Option<String>,
     pub webdav_device_id: String,
     pub notification_theme: String,
+    #[serde(default = "default_true")]
+    pub quick_add_enabled: bool,
+    #[serde(default = "default_quick_add_shortcut")]
+    pub quick_add_shortcut: String,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+pub fn default_quick_add_shortcut() -> String {
+    "CommandOrControl+Alt+N".to_string()
 }
 
 #[derive(Clone, Serialize, Deserialize)]

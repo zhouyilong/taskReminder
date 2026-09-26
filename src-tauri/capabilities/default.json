@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability for main, notification and sticky-note windows",
+  "description": "Default capability for main, notification, quick-add and sticky-note windows",
   "windows": [
     "main",
     "notification",
+    "quick-add",
     "sticky-note",
     "sticky-note-item-*"
   ],

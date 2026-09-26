@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { resolve } from "path";
 
-// 使用多入口以支持通知窗口
+// 使用多入口以支持通知、快速添加与便签窗口
 export default defineConfig({
   // Use relative asset paths so packaged desktop builds can always resolve JS/CSS.
   base: "./",
@@ -22,6 +22,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
         notification: resolve(__dirname, "notification.html"),
+        quickAdd: resolve(__dirname, "quick-add.html"),
         stickyNoteItem: resolve(__dirname, "sticky-note-item.html")
       }
     }

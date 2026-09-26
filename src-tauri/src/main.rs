@@ -3,10 +3,12 @@
 mod autostart;
 mod db;
 mod errors;
+mod holidays;
 mod maintenance;
 mod models;
 mod notification_queue;
 mod paths;
+mod quick_add;
 mod recurrence;
 mod scheduler;
 mod single_instance;
@@ -164,6 +166,13 @@ struct CreateTaskPayload {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct QuickAddPayload {
+    description: String,
+    reminder_time: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct CreateRecurringPayload {
     description: String,
     interval_minutes: i64,
@@ -172,6 +181,8 @@ struct CreateRecurringPayload {
     repeat_mode: Option<String>,
     schedule_time: Option<String>,
     schedule_weekday: Option<i64>,
+    #[serde(default)]
+    schedule_weekdays: Option<i64>,
     schedule_day: Option<i64>,
     cron_expression: Option<String>,
 }
@@ -190,6 +201,16 @@ struct SnoozePayload {
     reminder_id: String,
     reminder_type: String,
     minutes: i64,
+    /// 推迟到指定时间（如“明早 9 点”），优先于 `minutes`。
+    #[serde(default)]
+    until: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CompleteNotificationPayload {
+    record_id: String,
+    reminder_id: String,
 }
 
 #[derive(Deserialize)]
@@ -283,6 +304,45 @@ fn create_task(state: State<AppState>, payload: CreateTaskPayload) -> ApiResult<
     Ok(task)
 }
 
+/// 快速添加窗口：一次完成创建待办与设置提醒，并通知主窗口刷新。
+#[tauri::command]
+fn quick_add_task(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    payload: QuickAddPayload,
+) -> ApiResult<Task> {
+    let description = payload.description.trim();
+    if description.is_empty() {
+        return Err("待办内容不能为空".to_string());
+    }
+    let reminder_time = normalize_reminder_time(payload.reminder_time);
+    if let Some(value) = reminder_time.as_deref() {
+        if !into_api(scheduler::is_future(value))? {
+            return Err("提醒时间需晚于当前时间".to_string());
+        }
+    }
+    let mut task = into_api(state.db.create_task(description, None))?;
+    if let Some(reminder_time) = reminder_time {
+        into_api(
+            state
+                .db
+                .set_task_reminder_time(&task.id, Some(reminder_time.as_str())),
+        )?;
+        task.reminder_time = Some(reminder_time);
+        into_api(state.scheduler.schedule_task(task.clone()))?;
+    }
+    into_api(state.sync.notify_local_change())?;
+    let _ = app.emit("data-updated", ());
+    Ok(task)
+}
+
+/// 按当前设置重新注册快速添加快捷键，失败时返回原因供设置界面展示。
+#[tauri::command]
+fn apply_quick_add_shortcut(app: tauri::AppHandle, state: State<AppState>) -> ApiResult<()> {
+    let settings = into_api(state.db.load_settings())?;
+    into_api(quick_add::apply_shortcut(&app, &settings))
+}
+
 #[tauri::command]
 fn update_task(
     app: tauri::AppHandle,
@@ -367,6 +427,7 @@ fn create_recurring_task(
             .unwrap_or_else(|| recurrence::REPEAT_MODE_INTERVAL_RANGE.to_string()),
         schedule_time: payload.schedule_time,
         schedule_weekday: payload.schedule_weekday,
+        schedule_weekdays: payload.schedule_weekdays,
         schedule_day: payload.schedule_day,
         cron_expression: payload.cron_expression,
     };
@@ -795,6 +856,46 @@ fn ack_all_notifications(app: tauri::AppHandle, state: State<AppState>) -> ApiRe
     Ok(())
 }
 
+/// 在提醒弹窗中直接完成一次性待办：记录标记为“已完成”，任务完成并关闭其便签。
+#[tauri::command]
+fn complete_notification(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    payload: CompleteNotificationPayload,
+) -> ApiResult<Vec<NotificationPayload>> {
+    into_api(
+        state
+            .db
+            .update_reminder_record_action(&payload.record_id, "COMPLETED"),
+    )?;
+    if let Some(task) = into_api(state.db.get_task(&payload.reminder_id))? {
+        if task.status != "COMPLETED" && task.deleted_at.is_none() {
+            into_api(state.db.complete_task(&task.id))?;
+        }
+        state.scheduler.cancel_task(&task.id);
+        if let Some(window) = app.get_webview_window(&sticky_note_item_label(&task.id)) {
+            let _ = window.hide();
+            into_api(state.db.close_sticky_note(&task.id))?;
+            let _ = app.emit("sticky-note-changed", task.id.clone());
+        }
+    }
+    // 同一任务可能还有其他排队中的提醒，一并撤下。
+    let _ = state
+        .scheduler
+        .queue()
+        .remove_reminder(&payload.reminder_id);
+    into_api(state.sync.notify_local_change())?;
+    let remaining = finish_notification(&app, &state, &payload.record_id);
+    let _ = app.emit("data-updated", ());
+    Ok(remaining)
+}
+
+/// 已有法定节假日数据的年份，供设置界面提示覆盖范围。
+#[tauri::command]
+fn get_holiday_years() -> Vec<i32> {
+    holidays::covered_years()
+}
+
 #[tauri::command]
 fn snooze_notification(
     app: tauri::AppHandle,
@@ -802,6 +903,13 @@ fn snooze_notification(
     payload: SnoozePayload,
 ) -> ApiResult<Vec<NotificationPayload>> {
     let minutes = payload.minutes.max(1);
+    let snooze_until = payload
+        .until
+        .as_deref()
+        .and_then(time::parse_datetime_any)
+        .filter(|value| *value > Local::now().naive_local())
+        .map(|value| time::format_datetime(&value))
+        .unwrap_or_else(|| add_minutes(minutes));
     into_api(
         state
             .db
@@ -810,7 +918,7 @@ fn snooze_notification(
     match payload.reminder_type.as_str() {
         "TASK" => {
             if let Some(mut task) = into_api(state.db.get_task(&payload.reminder_id))? {
-                let reminder_time = add_minutes(minutes);
+                let reminder_time = snooze_until.clone();
                 into_api(state.db.update_task(
                     &task.id,
                     &task.description,
@@ -825,7 +933,7 @@ fn snooze_notification(
         }
         "RECURRING" => {
             if let Some(mut task) = into_api(state.db.get_recurring_task(&payload.reminder_id))? {
-                task.next_trigger = add_minutes(minutes);
+                task.next_trigger = snooze_until.clone();
                 task.is_paused = false;
                 into_api(state.db.update_recurring_task(&task))?;
                 into_api(state.scheduler.schedule_recurring(task))?;
@@ -1145,6 +1253,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .on_window_event(|window, event| {
             if window.label() == "main" {
                 if let WindowEvent::CloseRequested { api, .. } = event {
@@ -1228,6 +1337,10 @@ fn main() {
             set_autostart,
             ack_notification,
             ack_all_notifications,
+            complete_notification,
+            quick_add_task,
+            apply_quick_add_shortcut,
+            get_holiday_years,
             snooze_notification,
             get_sync_status,
             get_notification_queue,
@@ -1275,6 +1388,7 @@ fn main() {
                     }
                 }
 
+                holidays::load_override(&data_dir);
                 let db_path = paths::db_path(&data_dir);
                 let is_first_launch = !db_path.exists();
                 let db = DbManager::new(db_path)?;
@@ -1316,6 +1430,12 @@ fn main() {
                     ui_state: Arc::new(Mutex::new(None)),
                 };
                 app.manage(state);
+                // 快捷键被占用等失败不应阻止应用启动，设置界面可重新应用并查看原因。
+                if let Ok(settings) = db_for_restore.load_settings() {
+                    if let Err(err) = quick_add::apply_shortcut(&app_handle, &settings) {
+                        eprintln!("[quick-add] {}", err);
+                    }
+                }
                 restore_open_sticky_note_items(&app_handle, &db_for_restore)?;
                 Ok(())
             })();
