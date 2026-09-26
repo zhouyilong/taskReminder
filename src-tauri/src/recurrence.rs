@@ -181,6 +181,33 @@ pub fn compute_next_trigger(
     Ok(next.format("%Y-%m-%dT%H:%M:%S").to_string())
 }
 
+/// 预估 `until`（含）之前的触发时间，用于“今天”视图展示即将到来的循环提醒。
+///
+/// 从任务当前的 `next_trigger` 开始，按调度器的方式（以上一次触发时间为基准）
+/// 逐个推算，最多返回 `limit` 个。暂停的任务返回空列表。
+pub fn upcoming_triggers(
+    task: &RecurringTask,
+    until: NaiveDateTime,
+    limit: usize,
+) -> Result<Vec<String>, AppError> {
+    let mut result = Vec::new();
+    if task.is_paused || limit == 0 {
+        return Ok(result);
+    }
+    let Some(mut current) = crate::time::parse_datetime_any(&task.next_trigger) else {
+        return Ok(result);
+    };
+    while current <= until && result.len() < limit {
+        result.push(current.format("%Y-%m-%dT%H:%M:%S").to_string());
+        let next = compute_next_trigger(task, Some(current))?;
+        match crate::time::parse_datetime_any(&next) {
+            Some(value) if value > current => current = value,
+            _ => break,
+        }
+    }
+    Ok(result)
+}
+
 pub fn should_trigger_now(task: &RecurringTask, now: NaiveDateTime) -> Result<bool, AppError> {
     let mut normalized = task.clone();
     sanitize_recurring_task(&mut normalized)?;
@@ -558,6 +585,41 @@ mod tests {
         let mut t = task(REPEAT_MODE_WORKDAY);
         t.schedule_time = None;
         assert!(sanitize_recurring_task(&mut t).is_err());
+    }
+
+    #[test]
+    fn upcoming_triggers_until_end_of_day() {
+        let mut t = task(REPEAT_MODE_INTERVAL_RANGE);
+        t.interval_minutes = 120;
+        t.start_time = Some("08:00".to_string());
+        t.end_time = Some("17:00".to_string());
+        t.next_trigger = "2026-09-21T13:00:00".to_string();
+        let times = upcoming_triggers(&t, dt("2026-09-21T23:59"), 10).unwrap();
+        assert_eq!(
+            times,
+            vec![
+                "2026-09-21T13:00:00",
+                "2026-09-21T15:00:00",
+                "2026-09-21T17:00:00"
+            ]
+        );
+        assert_eq!(
+            upcoming_triggers(&t, dt("2026-09-21T23:59"), 2)
+                .unwrap()
+                .len(),
+            2
+        );
+
+        let mut daily = task(REPEAT_MODE_DAILY);
+        daily.next_trigger = "2026-09-22T09:00:00".to_string();
+        assert!(upcoming_triggers(&daily, dt("2026-09-21T23:59"), 10)
+            .unwrap()
+            .is_empty());
+
+        t.is_paused = true;
+        assert!(upcoming_triggers(&t, dt("2026-09-21T23:59"), 10)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

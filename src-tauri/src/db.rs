@@ -26,6 +26,29 @@ pub fn tombstone_retention_days(sync_enabled: bool) -> i64 {
     }
 }
 
+/// 回收站“永久删除”时写入的删除时间：早于任何保留期，下一次清理即会物理删除。
+pub const EXPIRED_TOMBSTONE_TIME: &str = "1970-01-01T00:00:00";
+
+/// 回收站涉及的表。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrashTable {
+    Tasks,
+    RecurringTasks,
+}
+
+impl TrashTable {
+    fn name(self) -> &'static str {
+        match self {
+            TrashTable::Tasks => "tasks",
+            TrashTable::RecurringTasks => "recurring_tasks",
+        }
+    }
+}
+
+fn tombstone_cutoff(retention_days: i64) -> String {
+    format_datetime(&(Local::now().naive_local() - chrono::Duration::days(retention_days.max(1))))
+}
+
 #[derive(Clone)]
 pub struct DbManager {
     pool: Pool<SqliteConnectionManager>,
@@ -360,6 +383,31 @@ impl DbManager {
         Ok(())
     }
 
+    /// 回收站中的待办：已软删除且仍在墓碑保留期内的行，按删除时间倒序。
+    pub fn list_deleted_tasks(&self, retention_days: i64) -> Result<Vec<Task>, AppError> {
+        let conn = self.get_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, description, sticky_content, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at
+             FROM tasks
+             WHERE deleted_at IS NOT NULL AND deleted_at >= ?
+             ORDER BY deleted_at DESC",
+        )?;
+        let cutoff = tombstone_cutoff(retention_days);
+        let rows = stmt.query_map([cutoff.as_str()], task_from_row)?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    /// 从回收站恢复待办。只清除墓碑，保留原来的完成状态与提醒时间。
+    pub fn restore_task(&self, task_id: &str) -> Result<(), AppError> {
+        let conn = self.get_conn()?;
+        let now = now_string();
+        conn.execute(
+            "UPDATE tasks SET deleted_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL",
+            params![now, task_id],
+        )?;
+        Ok(())
+    }
+
     pub fn create_recurring_task(&self, task: &RecurringTask) -> Result<RecurringTask, AppError> {
         let conn = self.get_conn()?;
         let id = Uuid::new_v4().to_string();
@@ -473,6 +521,56 @@ impl DbManager {
             "UPDATE recurring_tasks SET deleted_at = ?, updated_at = ? WHERE id = ?",
             params![now, now, task_id],
         )?;
+        Ok(())
+    }
+
+    pub fn list_deleted_recurring_tasks(
+        &self,
+        retention_days: i64,
+    ) -> Result<Vec<RecurringTask>, AppError> {
+        let conn = self.get_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, description, type, status, created_at, completed_at,
+                    interval_minutes, last_triggered, next_trigger, is_paused, start_time, end_time,
+                    repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
+                    updated_at, deleted_at, schedule_weekdays
+             FROM recurring_tasks
+             WHERE deleted_at IS NOT NULL AND deleted_at >= ?
+             ORDER BY deleted_at DESC",
+        )?;
+        let cutoff = tombstone_cutoff(retention_days);
+        let rows = stmt.query_map([cutoff.as_str()], recurring_from_row)?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    /// 从回收站恢复循环提醒。调用方负责重新计算下次触发时间并写回。
+    pub fn restore_recurring_task(&self, task_id: &str) -> Result<(), AppError> {
+        let conn = self.get_conn()?;
+        let now = now_string();
+        conn.execute(
+            "UPDATE recurring_tasks SET deleted_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL",
+            params![now, task_id],
+        )?;
+        Ok(())
+    }
+
+    /// 在回收站中“永久删除”：把墓碑的 `deleted_at` 改为已过期的时间并刷新 `updated_at`。
+    ///
+    /// 不直接物理删除：开启同步时远端仍有较新的墓碑，合并后会重新出现在回收站。
+    /// 刷新 `updated_at` 让本地行在合并中胜出，随后由 `purge_expired_tombstones`
+    /// 在本地与远端一起删除。未开启同步时调用方可以立即清理。
+    pub fn expire_tombstones(&self, table: TrashTable, ids: &[String]) -> Result<(), AppError> {
+        let mut conn = self.get_conn()?;
+        let now = now_string();
+        let sql = format!(
+            "UPDATE {} SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL",
+            table.name()
+        );
+        let tx = conn.transaction()?;
+        for id in ids {
+            tx.execute(&sql, params![EXPIRED_TOMBSTONE_TIME, now, id])?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -981,9 +1079,7 @@ impl DbManager {
     /// 若只在本地删除，下一次合并又会把远端的墓碑插回来。
     pub fn purge_expired_tombstones(&self, retention_days: i64) -> Result<(), AppError> {
         let conn = self.get_conn()?;
-        let cutoff = format_datetime(
-            &(Local::now().naive_local() - chrono::Duration::days(retention_days.max(1))),
-        );
+        let cutoff = tombstone_cutoff(retention_days);
         for table in ["tasks", "recurring_tasks", "reminder_records"] {
             conn.execute(
                 &format!(
@@ -1235,6 +1331,32 @@ mod tests {
         .unwrap()
     }
 
+    fn sample_recurring() -> RecurringTask {
+        RecurringTask {
+            id: String::new(),
+            description: "weekly".to_string(),
+            task_type: "RECURRING".to_string(),
+            status: "PENDING".to_string(),
+            created_at: String::new(),
+            completed_at: None,
+            reminder_time: None,
+            updated_at: None,
+            deleted_at: None,
+            interval_minutes: 60,
+            last_triggered: None,
+            next_trigger: String::new(),
+            is_paused: false,
+            start_time: None,
+            end_time: None,
+            repeat_mode: "DAILY".to_string(),
+            schedule_time: Some("09:00".to_string()),
+            schedule_weekday: None,
+            schedule_weekdays: None,
+            schedule_day: None,
+            cron_expression: None,
+        }
+    }
+
     #[test]
     fn cleanup_tombstones_old_completed_tasks_instead_of_deleting() {
         let (db, dir) = temp_db();
@@ -1306,6 +1428,84 @@ mod tests {
     }
 
     #[test]
+    fn trash_lists_restores_and_expires_tombstones() {
+        let (db, dir) = temp_db();
+        let task = db.create_task("trash me", None).unwrap();
+        let too_old = db.create_task("too old", None).unwrap();
+        let alive = db.create_task("alive", None).unwrap();
+        db.delete_task(&task.id).unwrap();
+        {
+            let conn = db.get_conn().unwrap();
+            conn.execute(
+                "UPDATE tasks SET deleted_at = ? WHERE id = ?",
+                params![days_ago(10), too_old.id],
+            )
+            .unwrap();
+        }
+
+        // 只列出保留期内的墓碑，不含正常行。
+        let ids: Vec<String> = db
+            .list_deleted_tasks(7)
+            .unwrap()
+            .into_iter()
+            .map(|t| t.id)
+            .collect();
+        assert_eq!(ids, vec![task.id.clone()]);
+        assert!(!ids.contains(&alive.id));
+
+        db.restore_task(&task.id).unwrap();
+        let (_, deleted_at) = task_row(&db, &task.id).unwrap();
+        assert!(deleted_at.is_none());
+        assert!(db.list_deleted_tasks(7).unwrap().is_empty());
+
+        // 永久删除：从回收站消失，行仍在（等待同步传播），清理后物理删除。
+        db.delete_task(&task.id).unwrap();
+        let before = db.get_task(&task.id).unwrap().unwrap().updated_at;
+        db.expire_tombstones(TrashTable::Tasks, std::slice::from_ref(&task.id))
+            .unwrap();
+        assert!(db.list_deleted_tasks(7).unwrap().is_empty());
+        let expired = db.get_task(&task.id).unwrap().unwrap();
+        assert_eq!(expired.deleted_at.as_deref(), Some(EXPIRED_TOMBSTONE_TIME));
+        assert!(expired.updated_at >= before);
+        db.purge_expired_tombstones(60).unwrap();
+        assert!(db.get_task(&task.id).unwrap().is_none());
+
+        // 不能用“永久删除”删掉正常行。
+        db.expire_tombstones(TrashTable::Tasks, std::slice::from_ref(&alive.id))
+            .unwrap();
+        assert!(db
+            .get_task(&alive.id)
+            .unwrap()
+            .unwrap()
+            .deleted_at
+            .is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn trash_handles_recurring_tasks() {
+        let (db, dir) = temp_db();
+        let mut draft = sample_recurring();
+        draft.next_trigger = "2026-01-01T09:00:00".to_string();
+        let task = db.create_recurring_task(&draft).unwrap();
+        db.delete_recurring_task(&task.id).unwrap();
+        assert!(db.list_recurring_tasks().unwrap().is_empty());
+        assert_eq!(db.list_deleted_recurring_tasks(7).unwrap().len(), 1);
+
+        db.restore_recurring_task(&task.id).unwrap();
+        assert_eq!(db.list_recurring_tasks().unwrap().len(), 1);
+        assert!(db.list_deleted_recurring_tasks(7).unwrap().is_empty());
+
+        db.delete_recurring_task(&task.id).unwrap();
+        db.expire_tombstones(TrashTable::RecurringTasks, std::slice::from_ref(&task.id))
+            .unwrap();
+        assert!(db.list_deleted_recurring_tasks(60).unwrap().is_empty());
+        db.purge_expired_tombstones(60).unwrap();
+        assert!(db.get_recurring_task(&task.id).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn purge_also_clears_deleted_reminder_records() {
         let (db, dir) = temp_db();
         let record = db.create_reminder_record("task-1", "desc", "TASK").unwrap();
@@ -1325,29 +1525,11 @@ mod tests {
     #[test]
     fn recurring_weekday_mask_roundtrip_and_quick_add_defaults() {
         let (db, dir) = temp_db();
-        let draft = RecurringTask {
-            id: String::new(),
-            description: "weekly".to_string(),
-            task_type: "RECURRING".to_string(),
-            status: "PENDING".to_string(),
-            created_at: String::new(),
-            completed_at: None,
-            reminder_time: None,
-            updated_at: None,
-            deleted_at: None,
-            interval_minutes: 60,
-            last_triggered: None,
-            next_trigger: "2026-09-28T09:00:00".to_string(),
-            is_paused: false,
-            start_time: None,
-            end_time: None,
-            repeat_mode: "WEEKLY".to_string(),
-            schedule_time: Some("09:00".to_string()),
-            schedule_weekday: Some(1),
-            schedule_weekdays: Some(0b10101),
-            schedule_day: None,
-            cron_expression: None,
-        };
+        let mut draft = sample_recurring();
+        draft.next_trigger = "2026-09-28T09:00:00".to_string();
+        draft.repeat_mode = "WEEKLY".to_string();
+        draft.schedule_weekday = Some(1);
+        draft.schedule_weekdays = Some(0b10101);
         let created = db.create_recurring_task(&draft).unwrap();
         let loaded = db.get_recurring_task(&created.id).unwrap().unwrap();
         assert_eq!(loaded.schedule_weekdays, Some(0b10101));
