@@ -14,6 +14,7 @@ mod quick_add;
 mod quiet_hours;
 mod recurrence;
 mod scheduler;
+mod shortcuts;
 mod single_instance;
 mod state;
 mod sync;
@@ -182,10 +183,11 @@ fn main() {
                     ui_state: Arc::new(Mutex::new(None)),
                 };
                 app.manage(state);
+                tray::request_refresh(app_handle);
                 // 快捷键被占用等失败不应阻止应用启动，设置界面可重新应用并查看原因。
                 if let Ok(settings) = db_for_restore.load_settings() {
-                    if let Err(err) = quick_add::apply_shortcut(app_handle, &settings) {
-                        eprintln!("[quick-add] {}", err);
+                    if let Err(err) = shortcuts::apply_shortcuts(app_handle, &settings) {
+                        eprintln!("[shortcuts] {}", err);
                     }
                 }
                 windows::sticky::restore_open_sticky_note_items(app_handle, &db_for_restore)?;

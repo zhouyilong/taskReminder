@@ -272,6 +272,47 @@ pub fn restore_open_sticky_note_items(
     Ok(())
 }
 
+/// 是否有正在显示的便签窗口。
+pub fn any_sticky_window_visible(app: &tauri::AppHandle) -> bool {
+    app.webview_windows().iter().any(|(label, window)| {
+        label.starts_with(STICKY_NOTE_ITEM_PREFIX) && window.is_visible().unwrap_or(false)
+    })
+}
+
+/// 隐藏全部便签窗口。只隐藏窗口，不改 `sticky_is_open`，避免产生同步改动；
+/// 重启应用或“显示全部便签”后按原状态恢复。
+pub fn hide_all_sticky_windows(app: &tauri::AppHandle) {
+    for (label, window) in app.webview_windows() {
+        if label.starts_with(STICKY_NOTE_ITEM_PREFIX) {
+            let _ = window.hide();
+        }
+    }
+}
+
+/// 重新显示所有处于打开状态的便签（在主线程创建或显示窗口）。
+pub fn show_all_sticky_windows(app: &tauri::AppHandle) {
+    let handle = app.clone();
+    let result = app.run_on_main_thread(move || {
+        if let Some(state) = handle.try_state::<AppState>() {
+            if let Err(err) = restore_open_sticky_note_items(&handle, &state.db) {
+                eprintln!("[sticky-note] 显示全部便签失败: {}", err);
+            }
+        }
+    });
+    if let Err(err) = result {
+        eprintln!("[sticky-note] 主线程调度显示全部便签失败: {}", err);
+    }
+}
+
+/// 有便签显示时全部隐藏，否则全部显示（全局快捷键使用）。
+pub fn toggle_all_sticky_windows(app: &tauri::AppHandle) {
+    if any_sticky_window_visible(app) {
+        hide_all_sticky_windows(app);
+    } else {
+        show_all_sticky_windows(app);
+    }
+}
+
 /// 便签窗口事件：关闭时隐藏并记为已关闭，移动与缩放时保存位置和尺寸。
 pub fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
     let note_id = note_id_from_item_label(window.label());

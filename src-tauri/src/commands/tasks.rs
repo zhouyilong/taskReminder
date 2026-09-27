@@ -5,6 +5,7 @@ use tauri::{Emitter, State};
 
 use crate::commands::{into_api, ApiResult};
 use crate::db::TaskMeta;
+use crate::errors::AppError;
 use crate::models::Task;
 use crate::scheduler;
 use crate::state::AppState;
@@ -183,11 +184,31 @@ pub fn update_task(
 
 #[tauri::command]
 pub fn complete_task(state: State<AppState>, id: String) -> ApiResult<()> {
-    into_api(state.db.complete_task(&id))?;
-    state.scheduler.cancel_task(&id);
-    into_api(state.scheduler.withdraw_notifications(&id, "COMPLETED"))?;
-    into_api(state.sync.notify_local_change())?;
-    Ok(())
+    into_api(complete_task_by_id(&state, &id))
+}
+
+/// 完成待办：取消计时器并撤下弹窗中该待办的提醒。托盘菜单也会调用。
+pub(crate) fn complete_task_by_id(state: &AppState, id: &str) -> Result<(), AppError> {
+    state.db.complete_task(id)?;
+    state.scheduler.cancel_task(id);
+    state.scheduler.withdraw_notifications(id, "COMPLETED")?;
+    state.sync.notify_local_change()
+}
+
+/// 把待办的提醒改到 `until`，只改时间、保留标签与优先级。托盘菜单“推迟”使用。
+pub(crate) fn reschedule_task_reminder(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    id: &str,
+    until: &str,
+) -> Result<(), AppError> {
+    state.db.set_task_reminder_time(id, Some(until))?;
+    state.scheduler.cancel_task(id);
+    if let Some(task) = state.db.get_task(id)? {
+        state.scheduler.schedule_task(task)?;
+    }
+    emit_sticky_note_reminder(app, id, Some(until.to_string()));
+    state.sync.notify_local_change()
 }
 
 #[tauri::command]

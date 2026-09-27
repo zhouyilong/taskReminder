@@ -45,15 +45,43 @@
         </label>
         <input
           class="input shortcut-input"
-          :class="{ 'is-recording': shortcutRecording }"
+          :class="{ 'is-recording': shortcutRecording === 'quickAdd' }"
           readonly
           :disabled="!settingsDraft.quickAddEnabled"
-          :value="shortcutRecording ? '请按下组合键…' : formatAccelerator(settingsDraft.quickAddShortcut)"
+          :value="shortcutRecording === 'quickAdd' ? '请按下组合键…' : formatAccelerator(settingsDraft.quickAddShortcut)"
           title="点击后按下新的组合键，Esc 取消"
-          @focus="shortcutRecording = true"
-          @blur="shortcutRecording = false"
-          @keydown.prevent="handleShortcutKeydown"
+          @focus="shortcutRecording = 'quickAdd'"
+          @blur="shortcutRecording = null"
+          @keydown.prevent="handleShortcutKeydown($event, 'quickAdd')"
         />
+      </div>
+      <div class="form-row compact">
+        <label>显示/隐藏全部便签</label>
+        <input
+          class="input shortcut-input"
+          :class="{ 'is-recording': shortcutRecording === 'stickyToggle' }"
+          readonly
+          :value="
+            shortcutRecording === 'stickyToggle'
+              ? '请按下组合键…'
+              : settingsDraft.stickyToggleShortcut
+                ? formatAccelerator(settingsDraft.stickyToggleShortcut)
+                : '未设置'
+          "
+          title="点击后按下新的组合键，Esc 取消"
+          @focus="shortcutRecording = 'stickyToggle'"
+          @blur="shortcutRecording = null"
+          @keydown.prevent="handleShortcutKeydown($event, 'stickyToggle')"
+        />
+        <button
+          v-if="settingsDraft.stickyToggleShortcut"
+          class="button secondary"
+          type="button"
+          @click="settingsDraft.stickyToggleShortcut = ''"
+        >
+          清除
+        </button>
+        <span class="field-hint">托盘菜单也可以显示或隐藏全部便签</span>
       </div>
       <div v-if="quickAddShortcutError" class="form-row compact">
         <span class="field-hint is-error">{{ quickAddShortcutError }}</span>
@@ -218,7 +246,8 @@ const {
   handleInstallUpdate
 } = useUpdater();
 
-const shortcutRecording = ref(false);
+type ShortcutField = "quickAdd" | "stickyToggle";
+const shortcutRecording = ref<ShortcutField | null>(null);
 const uiScalePercent = computed(() => Math.round(uiScale.value * 100));
 const windowOpacityPercent = computed(() => Math.round(windowOpacity.value * 100));
 const quietHoursHint = computed(() =>
@@ -226,7 +255,7 @@ const quietHoursHint = computed(() =>
 );
 const currentVersionLabel = computed(() => (props.appVersion ? formatVersionLabel(props.appVersion) : "-"));
 
-const handleShortcutKeydown = (event: KeyboardEvent) => {
+const handleShortcutKeydown = (event: KeyboardEvent, field: ShortcutField) => {
   const target = event.target as HTMLInputElement | null;
   if (event.key === "Escape") {
     target?.blur();
@@ -236,7 +265,11 @@ const handleShortcutKeydown = (event: KeyboardEvent) => {
   if (!accelerator) {
     return;
   }
-  settingsDraft.quickAddShortcut = accelerator;
+  if (field === "quickAdd") {
+    settingsDraft.quickAddShortcut = accelerator;
+  } else {
+    settingsDraft.stickyToggleShortcut = accelerator;
+  }
   target?.blur();
 };
 

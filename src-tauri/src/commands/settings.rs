@@ -5,7 +5,7 @@ use tauri::{Emitter, State};
 use crate::commands::{into_api, ApiResult};
 use crate::models::{AppSettings, SyncStatus};
 use crate::state::AppState;
-use crate::{autostart, quick_add, sync};
+use crate::{autostart, shortcuts, sync};
 
 const STICKY_NOTE_MIN_OPACITY: f64 = 0.35;
 const STICKY_NOTE_MAX_OPACITY: f64 = 1.0;
@@ -49,11 +49,11 @@ pub fn save_settings(
     Ok(())
 }
 
-/// 按当前设置重新注册快速添加快捷键，失败时返回原因供设置界面展示。
+/// 按当前设置重新注册全局快捷键（快速添加、显示/隐藏便签），失败时返回原因供设置界面展示。
 #[tauri::command]
 pub fn apply_quick_add_shortcut(app: tauri::AppHandle, state: State<AppState>) -> ApiResult<()> {
     let settings = into_api(state.db.load_settings())?;
-    into_api(quick_add::apply_shortcut(&app, &settings))
+    into_api(shortcuts::apply_shortcuts(&app, &settings))
 }
 
 #[tauri::command]
