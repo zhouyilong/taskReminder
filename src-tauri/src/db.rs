@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use chrono::{Local, NaiveDateTime};
 use r2d2::{Pool, PooledConnection};
@@ -14,6 +15,7 @@ use crate::models::{
 };
 use crate::quiet_hours;
 use crate::recurrence::REPEAT_MODE_INTERVAL_RANGE;
+use crate::secrets::{self, SecretStore, Secrets};
 use crate::time::{format_datetime, now_string, parse_datetime_any};
 
 /// 墓碑（软删除行）的保留天数。开启云同步时保留更久，
@@ -56,6 +58,10 @@ fn tombstone_cutoff(retention_days: i64) -> String {
 pub struct DbManager {
     pool: Pool<SqliteConnectionManager>,
     db_path: PathBuf,
+    /// 存放 WebDAV 密码与同步密码的凭据库；None 时存本地数据库。
+    secret_store: Option<Arc<dyn SecretStore>>,
+    /// 已从凭据库读到（或写入）的密码，避免每次读写设置都访问凭据库。
+    secret_cache: Arc<Mutex<Option<Secrets>>>,
 }
 
 fn normalize_sticky_note_opacity(opacity: Option<f64>) -> f64 {
@@ -91,11 +97,139 @@ fn normalize_sticky_item_height(height: Option<f64>) -> f64 {
 
 impl DbManager {
     pub fn new(db_path: PathBuf) -> Result<Self, AppError> {
+        // 测试不访问系统凭据库。
+        let store = if cfg!(test) {
+            None
+        } else {
+            secrets::platform_store()
+        };
+        Self::with_secret_store(db_path, store)
+    }
+
+    pub fn with_secret_store(
+        db_path: PathBuf,
+        secret_store: Option<Arc<dyn SecretStore>>,
+    ) -> Result<Self, AppError> {
         let manager = SqliteConnectionManager::file(&db_path);
         let pool = Pool::new(manager).map_err(|e| AppError::Database(e.to_string()))?;
-        let db = DbManager { pool, db_path };
+        let db = DbManager {
+            pool,
+            db_path,
+            secret_store,
+            secret_cache: Arc::new(Mutex::new(None)),
+        };
         db.init()?;
+        if let Err(err) = db.migrate_secrets_to_store() {
+            eprintln!(
+                "[secrets] 迁移密码到凭据库失败，继续使用本地数据库: {}",
+                err
+            );
+        }
         Ok(db)
+    }
+
+    /// 把仍存在数据库中的密码移入凭据库（升级后首次启动、或上次写入凭据库失败时）。
+    fn migrate_secrets_to_store(&self) -> Result<(), AppError> {
+        let Some(store) = &self.secret_store else {
+            return Ok(());
+        };
+        let conn = self.get_conn()?;
+        let (storage, device_id, webdav_password, sync_passphrase): (String, String, String, String) =
+            conn.query_row(
+                "SELECT secret_storage, webdav_device_id, COALESCE(webdav_password, ''), sync_passphrase
+                 FROM settings WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?;
+        let plain = Secrets {
+            webdav_password,
+            sync_passphrase,
+        };
+        if storage == secrets::STORAGE_KEYRING || plain.is_empty() {
+            return Ok(());
+        }
+        secrets::write_secrets(store.as_ref(), &device_id, &plain).map_err(AppError::System)?;
+        conn.execute(
+            "UPDATE settings SET webdav_password = '', sync_passphrase = '', secret_storage = ? WHERE id = 1",
+            [secrets::STORAGE_KEYRING],
+        )?;
+        *self.secret_cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(plain);
+        Ok(())
+    }
+
+    /// 凭据库中的密码：优先用缓存；读取失败时返回 None（设置中显示为空，同步会报认证失败）。
+    fn keyring_secrets(&self, device_id: &str) -> Option<Secrets> {
+        let store = self.secret_store.as_ref()?;
+        let mut cache = self.secret_cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(cached) = cache.as_ref() {
+            return Some(cached.clone());
+        }
+        match secrets::read_secrets(store.as_ref(), device_id) {
+            Ok(value) => {
+                *cache = Some(value.clone());
+                Some(value)
+            }
+            Err(err) => {
+                eprintln!("[secrets] 读取凭据库失败: {}", err);
+                None
+            }
+        }
+    }
+
+    /// 决定本次保存时密码的去向，返回（写入数据库的 WebDAV 密码, 同步密码, 存放位置）。
+    fn resolve_secret_storage(
+        &self,
+        conn: &Connection,
+        settings: &AppSettings,
+    ) -> Result<(String, String, &'static str), AppError> {
+        let incoming = Secrets {
+            webdav_password: settings.webdav_password.clone(),
+            sync_passphrase: settings.sync_passphrase.clone(),
+        };
+        let plain = |secrets: Secrets| {
+            (
+                secrets.webdav_password,
+                secrets.sync_passphrase,
+                secrets::STORAGE_DB,
+            )
+        };
+        let Some(store) = &self.secret_store else {
+            return Ok(plain(incoming));
+        };
+        let (storage, db_password, db_passphrase): (String, String, String) = conn.query_row(
+            "SELECT secret_storage, COALESCE(webdav_password, ''), sync_passphrase FROM settings WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        let mut cache = self.secret_cache.lock().unwrap_or_else(|e| e.into_inner());
+        if storage == secrets::STORAGE_KEYRING {
+            match cache.as_ref() {
+                Some(cached) if *cached == incoming => {
+                    return Ok((String::new(), String::new(), secrets::STORAGE_KEYRING))
+                }
+                // 凭据库读取失败时设置里的密码是空的，不能拿空值覆盖凭据库。
+                None if incoming.is_empty() => {
+                    return Ok((String::new(), String::new(), secrets::STORAGE_KEYRING))
+                }
+                _ => {}
+            }
+        } else if db_password == incoming.webdav_password
+            && db_passphrase == incoming.sync_passphrase
+        {
+            // 密码没变：保持在数据库中，不在每次保存设置时重试凭据库（启动时会再迁移）。
+            return Ok(plain(incoming));
+        }
+        match secrets::write_secrets(store.as_ref(), &settings.webdav_device_id, &incoming) {
+            Ok(()) => {
+                *cache = Some(incoming);
+                Ok((String::new(), String::new(), secrets::STORAGE_KEYRING))
+            }
+            Err(err) => {
+                eprintln!("[secrets] 写入凭据库失败，改存本地数据库: {}", err);
+                *cache = None;
+                Ok(plain(incoming))
+            }
+        }
     }
 
     pub fn db_path(&self) -> PathBuf {
@@ -114,6 +248,12 @@ impl DbManager {
         self.ensure_version_table(&conn)?;
         self.apply_migrations(&mut conn)?;
         self.ensure_settings_row(&conn)?;
+        // 设备 ID 用于同步锁与凭据库条目名，必须稳定：为空时生成一个并保存。
+        conn.execute(
+            "UPDATE settings SET webdav_device_id = ?
+             WHERE id = 1 AND (webdav_device_id IS NULL OR TRIM(webdav_device_id) = '')",
+            [Uuid::new_v4().to_string()],
+        )?;
         Ok(())
     }
 
@@ -943,7 +1083,7 @@ impl DbManager {
                    webdav_device_id, notification_theme, quick_add_enabled, quick_add_shortcut,
                    sync_encryption_enabled, sync_passphrase,
                    quiet_hours_enabled, quiet_hours_start, quiet_hours_end,
-                   native_notification_enabled, sticky_toggle_shortcut
+                   native_notification_enabled, sticky_toggle_shortcut, secret_storage
                    FROM settings WHERE id = 1";
         let mut stmt = conn.prepare(sql)?;
         let row = stmt.query_row([], |row| {
@@ -1009,13 +1149,25 @@ impl DbManager {
                     .unwrap_or_default()
                     .trim()
                     .to_string(),
+                secret_storage: row
+                    .get::<_, Option<String>>(32)?
+                    .unwrap_or_else(|| secrets::STORAGE_DB.to_string()),
             })
         })?;
-        Ok(row)
+        let mut settings = row;
+        if settings.secret_storage == secrets::STORAGE_KEYRING {
+            if let Some(stored) = self.keyring_secrets(&settings.webdav_device_id) {
+                settings.webdav_password = stored.webdav_password;
+                settings.sync_passphrase = stored.sync_passphrase;
+            }
+        }
+        Ok(settings)
     }
 
     pub fn save_settings(&self, settings: &AppSettings) -> Result<(), AppError> {
         let conn = self.get_conn()?;
+        let (webdav_password, sync_passphrase, secret_storage) =
+            self.resolve_secret_storage(&conn, settings)?;
         conn.execute(
             "UPDATE settings
              SET auto_start_enabled = ?, sound_enabled = ?, snooze_minutes = ?,
@@ -1028,7 +1180,7 @@ impl DbManager {
                  quick_add_enabled = ?, quick_add_shortcut = ?,
                  sync_encryption_enabled = ?, sync_passphrase = ?,
                  quiet_hours_enabled = ?, quiet_hours_start = ?, quiet_hours_end = ?,
-                 native_notification_enabled = ?, sticky_toggle_shortcut = ?
+                 native_notification_enabled = ?, sticky_toggle_shortcut = ?, secret_storage = ?
              WHERE id = 1",
             params![
                 if settings.auto_start_enabled { 1 } else { 0 },
@@ -1045,7 +1197,7 @@ impl DbManager {
                 if settings.webdav_enabled { 1 } else { 0 },
                 settings.webdav_url,
                 settings.webdav_username,
-                settings.webdav_password,
+                webdav_password,
                 settings.webdav_root_path,
                 settings.webdav_sync_interval_minutes,
                 settings.webdav_last_sync_time,
@@ -1057,12 +1209,13 @@ impl DbManager {
                 if settings.quick_add_enabled { 1 } else { 0 },
                 settings.quick_add_shortcut.trim(),
                 if settings.sync_encryption_enabled { 1 } else { 0 },
-                settings.sync_passphrase,
+                sync_passphrase,
                 if settings.quiet_hours_enabled { 1 } else { 0 },
                 quiet_hours::normalize_clock(&settings.quiet_hours_start, quiet_hours::DEFAULT_START),
                 quiet_hours::normalize_clock(&settings.quiet_hours_end, quiet_hours::DEFAULT_END),
                 if settings.native_notification_enabled { 1 } else { 0 },
                 settings.sticky_toggle_shortcut.trim(),
+                secret_storage,
             ],
         )?;
         Ok(())
@@ -1524,6 +1677,11 @@ fn migration_scripts() -> Vec<MigrationScript> {
             sql: include_str!(
                 "../migrations/V2.0.2__add_quiet_hours_notification_and_sticky_shortcut.sql"
             ),
+        },
+        MigrationScript {
+            version: "2.0.3".to_string(),
+            description: "add secret storage".to_string(),
+            sql: include_str!("../migrations/V2.0.3__add_secret_storage.sql"),
         },
     ]
 }

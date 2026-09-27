@@ -37,6 +37,9 @@
         </button>
       </div>
       <div class="form-row compact">
+        <span class="field-hint">{{ secretStorageHint }}</span>
+      </div>
+      <div class="form-row compact">
         <input class="input" v-model="settingsDraft.webdavRootPath" placeholder="远端路径" style="flex: 1" />
         <input class="input" type="number" min="1" v-model.number="settingsDraft.webdavSyncIntervalMinutes" placeholder="同步频率(分钟)" style="width: 160px" />
       </div>
@@ -121,6 +124,11 @@ const passphraseVisible = ref(false);
 const presetId = ref<WebdavPresetId>("custom");
 const presetHint = computed(() => findWebdavPreset(presetId.value).hint);
 const urlWarning = computed(() => webdavUrlPlaceholderWarning(settingsDraft.webdavUrl));
+const secretStorageHint = computed(() =>
+  settingsDraft.secretStorage === "keyring"
+    ? "WebDAV 密码与同步密码保存在 Windows 凭据管理器中，不写入数据库与备份"
+    : "WebDAV 密码与同步密码保存在本机数据库中（不会上传到云端）"
+);
 
 const handlePresetChange = () => {
   Object.assign(settingsDraft, applyWebdavPreset(presetId.value, settingsDraft));

@@ -34,6 +34,8 @@ tauri-plugin-global-shortcut = "2"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.10"
+# WebDAV 密码与同步密码存 Windows 凭据管理器（其他平台仍存本地数据库）。
+keyring = { version = "3", features = ["windows-native"] }
 windows = { version = "0.52", features = ["UI_ViewManagement", "Win32_Graphics_Gdi"] }
 
 [features]

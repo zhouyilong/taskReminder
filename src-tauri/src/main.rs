@@ -14,6 +14,7 @@ mod quick_add;
 mod quiet_hours;
 mod recurrence;
 mod scheduler;
+mod secrets;
 mod shortcuts;
 mod single_instance;
 mod state;
