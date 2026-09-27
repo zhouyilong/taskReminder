@@ -21,6 +21,7 @@
     <label class="field-label">时间</label>
     <input class="input" type="time" v-model="draft.scheduleTime" style="width: 140px" />
     <span class="field-hint">{{ workdayHint }}</span>
+    <span v-if="workdayWarning" class="field-hint is-warning">{{ workdayWarning }}</span>
   </template>
   <template v-else-if="draft.mode === 'MONTHLY'">
     <label class="field-label">每月几号</label>
@@ -38,11 +39,12 @@
 // 循环提醒各模式的规则字段，新建表单与编辑弹窗共用；直接修改传入的草稿对象。
 import { computed } from "vue";
 import WeekdayPicker from "./WeekdayPicker.vue";
-import { formatWorkdayHint, type RecurringDraft } from "../recurring";
+import { formatWorkdayHint, workdayDraftWarning, type RecurringDraft } from "../recurring";
 import { useAppData } from "../composables/useAppData";
 
 defineProps<{ draft: RecurringDraft }>();
 
 const { holidayYears } = useAppData();
 const workdayHint = computed(() => formatWorkdayHint(holidayYears.value));
+const workdayWarning = computed(() => workdayDraftWarning(holidayYears.value));
 </script>

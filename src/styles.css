@@ -997,6 +997,10 @@ textarea:focus-visible {
   color: var(--danger-text);
 }
 
+.field-hint.is-warning {
+  color: var(--warning-text);
+}
+
 .shortcut-input {
   width: 180px;
   cursor: pointer;
@@ -1290,6 +1294,17 @@ label:has(> input[type="checkbox"]) {
 .chip.is-recurring {
   background: var(--violet-soft);
   color: var(--violet-text);
+}
+
+.chip.is-warning {
+  background: var(--warning-soft);
+  color: var(--warning-text);
+}
+
+.col-rule .chip.is-warning {
+  margin-left: 6px;
+  height: 18px;
+  padding: 0 6px;
 }
 
 .status-pill {

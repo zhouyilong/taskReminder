@@ -50,6 +50,54 @@ export const formatWorkdayHint = (years: number[]) => {
   return `跳过法定节假日，调休上班日照常提醒（${coverage}）`;
 };
 
+/** 法定工作日提醒提前多少天提示节假日数据缺失。 */
+export const HOLIDAY_LOOKAHEAD_DAYS = 30;
+
+/**
+ * 从 `from` 起 `lookaheadDays` 天内第一个没有内置节假日数据的年份；都已覆盖时返回 null。
+ * `years` 为空视为数据尚未加载，不提示。
+ */
+export const firstUncoveredHolidayYear = (
+  from: Date,
+  years: number[],
+  lookaheadDays = HOLIDAY_LOOKAHEAD_DAYS
+): number | null => {
+  if (!years.length || Number.isNaN(from.getTime())) {
+    return null;
+  }
+  const until = new Date(from.getTime());
+  until.setDate(until.getDate() + lookaheadDays);
+  for (let year = from.getFullYear(); year <= until.getFullYear(); year += 1) {
+    if (!years.includes(year)) {
+      return year;
+    }
+  }
+  return null;
+};
+
+const holidayWarningText = (year: number) => `${year} 年节假日安排尚未内置，暂按周一至周五计算`;
+
+/** 运行中的法定工作日提醒在下次触发后 30 天内遇到未内置的年份时返回提示文案。 */
+export const workdayHolidayWarning = (
+  task: Pick<RecurringTask, "repeatMode" | "isPaused" | "nextTrigger">,
+  years: number[],
+  now = new Date()
+): string | null => {
+  if (task.repeatMode !== "WORKDAY" || task.isPaused) {
+    return null;
+  }
+  const next = task.nextTrigger ? new Date(task.nextTrigger) : now;
+  const from = Number.isNaN(next.getTime()) || next < now ? now : next;
+  const year = firstUncoveredHolidayYear(from, years);
+  return year === null ? null : holidayWarningText(year);
+};
+
+/** 新建或编辑法定工作日提醒时，从现在起 30 天内遇到未内置的年份时返回提示文案。 */
+export const workdayDraftWarning = (years: number[], now = new Date()): string | null => {
+  const year = firstUncoveredHolidayYear(now, years);
+  return year === null ? null : holidayWarningText(year);
+};
+
 export interface RecurringDraft {
   description: string;
   mode: RecurringMode;
