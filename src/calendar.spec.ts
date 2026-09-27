@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { bucketCalendarItems, buildMonthGrid, defaultReminderForDay, moveReminderToDay } from "./calendar";
+import {
+  bucketCalendarItems,
+  buildMonthGrid,
+  buildWeekDays,
+  defaultReminderForDay,
+  formatWeekRange,
+  groupItemsByHour,
+  moveReminderToDay,
+  moveReminderToSlot
+} from "./calendar";
 import { toLocalDateTimeString } from "./format";
 import type { RecurringTask, ReminderRecord, Task } from "./types";
 
@@ -109,5 +118,86 @@ describe("calendar reminders", () => {
   it("keeps the clock when moving a reminder to another day", () => {
     expect(moveReminderToDay("2026-09-27T15:30:00", new Date(2026, 9, 1))).toBe("2026-10-01T15:30:00");
     expect(moveReminderToDay(null, new Date(2026, 9, 1))).toBe("2026-10-01T09:00:00");
+  });
+});
+
+describe("周视图", () => {
+  it("从周一开始的 7 天，周日属于上一周", () => {
+    const days = buildWeekDays(new Date(2026, 8, 27, 15, 0));
+    expect(days.map(day => day.key)).toEqual([
+      "2026-09-21",
+      "2026-09-22",
+      "2026-09-23",
+      "2026-09-24",
+      "2026-09-25",
+      "2026-09-26",
+      "2026-09-27"
+    ]);
+    expect(days[5].isWeekend && days[6].isWeekend).toBe(true);
+    expect(buildWeekDays(new Date(2026, 8, 21))[0].key).toBe("2026-09-21");
+  });
+
+  it("跨月、跨年的周", () => {
+    const crossMonth = buildWeekDays(new Date(2026, 9, 1));
+    expect(crossMonth[0].key).toBe("2026-09-28");
+    expect(crossMonth[6].key).toBe("2026-10-04");
+    expect(formatWeekRange(crossMonth)).toBe("2026 年 9 月 28 日 – 10 月 4 日");
+
+    const crossYear = buildWeekDays(new Date(2026, 11, 31));
+    expect(crossYear[0].key).toBe("2026-12-28");
+    expect(crossYear[6].key).toBe("2027-01-03");
+    expect(formatWeekRange(crossYear)).toBe("2026 年 12 月 28 日 – 2027 年 1 月 3 日");
+
+    expect(formatWeekRange(buildWeekDays(new Date(2026, 8, 23)))).toBe("2026 年 9 月 21 日 – 27 日");
+  });
+
+  it("按钟点分组", () => {
+    const buckets = bucketCalendarItems({
+      now: NOW,
+      startKey: "2026-09-27",
+      endKey: "2026-09-27",
+      tasks: [
+        task("a", { reminderTime: "2026-09-27T09:15:00" }),
+        task("b", { reminderTime: "2026-09-27T09:45:00" }),
+        task("c", { reminderTime: "2026-09-27T14:00:00" })
+      ],
+      completedTasks: [],
+      recurringTasks: [],
+      records: [],
+      previews: []
+    });
+    const byHour = groupItemsByHour(buckets.get("2026-09-27") ?? []);
+    expect(byHour.get(9)?.map(item => item.task?.id)).toEqual(["a", "b"]);
+    expect(byHour.get(14)?.map(item => item.task?.id)).toEqual(["c"]);
+    expect(byHour.has(10)).toBe(false);
+  });
+
+  it("周视图按小时合并循环提醒", () => {
+    const input = {
+      now: NOW,
+      startKey: "2026-09-27",
+      endKey: "2026-09-27",
+      tasks: [],
+      completedTasks: [],
+      recurringTasks: [recurring],
+      records: [],
+      previews: [
+        { taskId: "r1", times: ["2026-09-27T11:00:00", "2026-09-27T11:30:00", "2026-09-27T12:00:00"] }
+      ]
+    };
+    const byDay = bucketCalendarItems(input).get("2026-09-27") ?? [];
+    expect(byDay.map(item => item.count)).toEqual([3]);
+    const byHour = bucketCalendarItems({ ...input, recurringGrouping: "hour" }).get("2026-09-27") ?? [];
+    expect(byHour.map(item => [item.time, item.count])).toEqual([
+      ["2026-09-27T11:00:00", 2],
+      ["2026-09-27T12:00:00", 1]
+    ]);
+  });
+
+  it("拖到某个时段保留分钟", () => {
+    const day = new Date(2026, 9, 2);
+    expect(moveReminderToSlot("2026-09-27T09:30:15", day, 14)).toBe("2026-10-02T14:30:15");
+    expect(moveReminderToSlot(null, day, 8)).toBe("2026-10-02T08:00:00");
+    expect(moveReminderToSlot("2026-09-27T09:30", day, 0)).toBe("2026-10-02T00:30:00");
   });
 });

@@ -4424,6 +4424,110 @@ button.task-tag:disabled {
   font-size: 11px;
 }
 
+/* 日历周视图（v2.0.1）：表头吸顶在滚动容器内，避免滚动条导致列错位。 */
+.calendar-week-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.calendar-week-header,
+.calendar-week-row {
+  display: grid;
+  grid-template-columns: 52px repeat(7, minmax(0, 1fr));
+}
+
+.calendar-week-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.calendar-week-day {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 4px;
+  border: none;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.calendar-week-day:hover {
+  color: var(--text-title);
+}
+
+.calendar-week-day-date {
+  color: var(--text-title);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.calendar-week-day.is-weekend .calendar-week-day-date {
+  color: var(--text-muted);
+}
+
+.calendar-week-day.is-today .calendar-week-day-date {
+  color: var(--primary-text);
+}
+
+.calendar-week-day.is-selected {
+  background: var(--primary-soft);
+}
+
+.calendar-week-row {
+  height: 44px;
+}
+
+.calendar-week-hour {
+  padding: 3px 8px 0 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.calendar-week-slot {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 3px;
+  border-left: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+
+.calendar-week-slot:hover {
+  background: var(--bg-muted);
+}
+
+.calendar-week-slot.is-now {
+  box-shadow: inset 0 2px 0 var(--primary);
+}
+
+.calendar-week-slot.is-drop-target {
+  background: var(--primary-soft);
+  outline: 1px dashed var(--primary);
+  outline-offset: -2px;
+}
+
+.calendar-week-slot .calendar-more {
+  font-size: 10px;
+  line-height: 12px;
+}
+
 .calendar-day-panel {
   min-width: 0;
 }
