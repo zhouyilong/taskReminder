@@ -105,6 +105,14 @@ export interface AppSettings {
   syncEncryptionEnabled: boolean;
   /** 同步密码，只保存在本机。 */
   syncPassphrase: string;
+  /** 勿扰时段（HH:mm，支持跨午夜）：期间提醒只记录不弹窗，结束后一次性弹出。 */
+  quietHoursEnabled: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  /** 弹出提醒时同时发送系统原生通知。 */
+  nativeNotificationEnabled: boolean;
+  /** 显示/隐藏全部便签的全局快捷键，为空表示不启用。 */
+  stickyToggleShortcut: string;
 }
 
 export interface UiStatePayload {

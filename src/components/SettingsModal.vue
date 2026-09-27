@@ -15,6 +15,29 @@
       </div>
       <div class="form-row compact">
         <label>
+          <input type="checkbox" v-model="settingsDraft.quietHoursEnabled" /> 勿扰时段
+        </label>
+        <input
+          class="input"
+          type="time"
+          v-model="settingsDraft.quietHoursStart"
+          :disabled="!settingsDraft.quietHoursEnabled"
+          style="width: 130px"
+        />
+        <span class="field-hint">至</span>
+        <input
+          class="input"
+          type="time"
+          v-model="settingsDraft.quietHoursEnd"
+          :disabled="!settingsDraft.quietHoursEnabled"
+          style="width: 130px"
+        />
+      </div>
+      <div v-if="settingsDraft.quietHoursEnabled" class="form-row compact">
+        <span class="field-hint">{{ quietHoursHint }}</span>
+      </div>
+      <div class="form-row compact">
+        <label>
           <input type="checkbox" v-model="settingsDraft.quickAddEnabled" /> 快速添加快捷键
         </label>
         <input
@@ -154,6 +177,7 @@ import { computed, ref } from "vue";
 import Modal from "./Modal.vue";
 import { api } from "../api";
 import { formatDateTime } from "../format";
+import { formatQuietHoursHint } from "../quietHours";
 import { acceleratorFromEvent, formatAccelerator } from "../shortcut";
 import { formatVersionLabel, normalizeUpdateProxyUrl } from "../update";
 import { useSettings } from "../composables/useSettings";
@@ -194,6 +218,9 @@ const {
 const shortcutRecording = ref(false);
 const uiScalePercent = computed(() => Math.round(uiScale.value * 100));
 const windowOpacityPercent = computed(() => Math.round(windowOpacity.value * 100));
+const quietHoursHint = computed(() =>
+  formatQuietHoursHint(settingsDraft.quietHoursStart, settingsDraft.quietHoursEnd)
+);
 const currentVersionLabel = computed(() => (props.appVersion ? formatVersionLabel(props.appVersion) : "-"));
 
 const handleShortcutKeydown = (event: KeyboardEvent) => {

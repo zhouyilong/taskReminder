@@ -11,6 +11,7 @@ mod models;
 mod notification_queue;
 mod paths;
 mod quick_add;
+mod quiet_hours;
 mod recurrence;
 mod scheduler;
 mod single_instance;

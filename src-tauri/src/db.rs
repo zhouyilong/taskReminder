@@ -12,6 +12,7 @@ use crate::models::{
     default_quick_add_shortcut, normalize_priority, tags_from_db, tags_to_db, AppSettings,
     RecurringTask, ReminderRecord, StickyNote, Task,
 };
+use crate::quiet_hours;
 use crate::recurrence::REPEAT_MODE_INTERVAL_RANGE;
 use crate::time::{format_datetime, now_string, parse_datetime_any};
 
@@ -940,7 +941,9 @@ impl DbManager {
                    webdav_root_path, webdav_sync_interval_minutes, webdav_last_sync_time,
                    webdav_last_local_change_time, webdav_last_sync_status, webdav_last_sync_error,
                    webdav_device_id, notification_theme, quick_add_enabled, quick_add_shortcut,
-                   sync_encryption_enabled, sync_passphrase
+                   sync_encryption_enabled, sync_passphrase,
+                   quiet_hours_enabled, quiet_hours_start, quiet_hours_end,
+                   native_notification_enabled, sticky_toggle_shortcut
                    FROM settings WHERE id = 1";
         let mut stmt = conn.prepare(sql)?;
         let row = stmt.query_row([], |row| {
@@ -991,6 +994,21 @@ impl DbManager {
                 quick_add_shortcut,
                 sync_encryption_enabled: row.get::<_, Option<i64>>(25)?.unwrap_or(0) == 1,
                 sync_passphrase: row.get::<_, Option<String>>(26)?.unwrap_or_default(),
+                quiet_hours_enabled: row.get::<_, Option<i64>>(27)?.unwrap_or(0) == 1,
+                quiet_hours_start: quiet_hours::normalize_clock(
+                    &row.get::<_, Option<String>>(28)?.unwrap_or_default(),
+                    quiet_hours::DEFAULT_START,
+                ),
+                quiet_hours_end: quiet_hours::normalize_clock(
+                    &row.get::<_, Option<String>>(29)?.unwrap_or_default(),
+                    quiet_hours::DEFAULT_END,
+                ),
+                native_notification_enabled: row.get::<_, Option<i64>>(30)?.unwrap_or(0) == 1,
+                sticky_toggle_shortcut: row
+                    .get::<_, Option<String>>(31)?
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string(),
             })
         })?;
         Ok(row)
@@ -1008,7 +1026,9 @@ impl DbManager {
                  webdav_last_local_change_time = ?, webdav_last_sync_status = ?, webdav_last_sync_error = ?,
                  webdav_device_id = ?, notification_theme = ?,
                  quick_add_enabled = ?, quick_add_shortcut = ?,
-                 sync_encryption_enabled = ?, sync_passphrase = ?
+                 sync_encryption_enabled = ?, sync_passphrase = ?,
+                 quiet_hours_enabled = ?, quiet_hours_start = ?, quiet_hours_end = ?,
+                 native_notification_enabled = ?, sticky_toggle_shortcut = ?
              WHERE id = 1",
             params![
                 if settings.auto_start_enabled { 1 } else { 0 },
@@ -1038,6 +1058,11 @@ impl DbManager {
                 settings.quick_add_shortcut.trim(),
                 if settings.sync_encryption_enabled { 1 } else { 0 },
                 settings.sync_passphrase,
+                if settings.quiet_hours_enabled { 1 } else { 0 },
+                quiet_hours::normalize_clock(&settings.quiet_hours_start, quiet_hours::DEFAULT_START),
+                quiet_hours::normalize_clock(&settings.quiet_hours_end, quiet_hours::DEFAULT_END),
+                if settings.native_notification_enabled { 1 } else { 0 },
+                settings.sticky_toggle_shortcut.trim(),
             ],
         )?;
         Ok(())
@@ -1491,6 +1516,14 @@ fn migration_scripts() -> Vec<MigrationScript> {
             version: "2.0.1".to_string(),
             description: "add sync encryption".to_string(),
             sql: include_str!("../migrations/V2.0.1__add_sync_encryption.sql"),
+        },
+        MigrationScript {
+            version: "2.0.2".to_string(),
+            description: "add quiet hours, native notification and sticky toggle shortcut"
+                .to_string(),
+            sql: include_str!(
+                "../migrations/V2.0.2__add_quiet_hours_notification_and_sticky_shortcut.sql"
+            ),
         },
     ]
 }

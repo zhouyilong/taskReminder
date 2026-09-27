@@ -30,7 +30,12 @@ const settingsDraft = reactive<AppSettings>({
   quickAddEnabled: true,
   quickAddShortcut: "CommandOrControl+Alt+N",
   syncEncryptionEnabled: false,
-  syncPassphrase: ""
+  syncPassphrase: "",
+  quietHoursEnabled: false,
+  quietHoursStart: "22:00",
+  quietHoursEnd: "08:00",
+  nativeNotificationEnabled: false,
+  stickyToggleShortcut: ""
 });
 const syncStatus = ref<SyncStatus | null>(null);
 const quickAddShortcutError = ref("");

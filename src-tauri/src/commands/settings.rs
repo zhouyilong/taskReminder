@@ -44,6 +44,8 @@ pub fn save_settings(
     let _ = app.emit("settings-updated", sanitized_settings);
     into_api(state.sync.update_settings())?;
     into_api(state.sync.notify_local_change())?;
+    // 关闭或调整勿扰时段后，立即弹出积压的提醒。
+    into_api(state.scheduler.release_quiet_hold())?;
     Ok(())
 }
 
