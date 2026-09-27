@@ -45,6 +45,7 @@ const icon = (body: string) =>
 
 const ICONS: Record<TabKey, string> = {
   today: icon('<rect x="4" y="5" width="16" height="15" rx="2.5" /><path d="M4 9.5h16M8.5 3v4M15.5 3v4" /><circle cx="12" cy="14.5" r="2" />'),
+  calendar: icon('<rect x="4" y="5" width="16" height="15" rx="2.5" /><path d="M4 9.5h16M8.5 3v4M15.5 3v4" /><path d="M8 13.5h.01M12 13.5h.01M16 13.5h.01M8 17h.01M12 17h.01" stroke-width="2.4" />'),
   tasks: icon('<path d="M6 7h12M6 12h12M6 17h8" />'),
   completed: icon('<path d="M6 12l4 4 8-8" />'),
   recurring: icon('<path d="M4 12a8 8 0 0 1 13.6-5.6" /><path d="M20 6v5h-5" /><path d="M20 12a8 8 0 0 1-13.6 5.6" /><path d="M4 18v-5h5" />'),
@@ -55,6 +56,7 @@ const ICONS: Record<TabKey, string> = {
 
 const tabs = computed(() => [
   { key: "today" as const, label: "今天", badge: 0 },
+  { key: "calendar" as const, label: "日历", badge: 0 },
   { key: "tasks" as const, label: "待办事项", badge: tasks.value.length },
   { key: "completed" as const, label: "已办事项", badge: 0 },
   { key: "recurring" as const, label: "循环提醒", badge: activeRecurringCount.value },

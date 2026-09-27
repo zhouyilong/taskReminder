@@ -14,6 +14,64 @@ pub struct Task {
     pub reminder_time: Option<String>,
     pub updated_at: Option<String>,
     pub deleted_at: Option<String>,
+    /// 标签（已去重、去掉前导 `#`），数据库中以逗号分隔存储。
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// 优先级：0 无、1 低、2 中、3 高。
+    #[serde(default)]
+    pub priority: i64,
+}
+
+pub const PRIORITY_MAX: i64 = 3;
+pub const MAX_TAGS_PER_TASK: usize = 10;
+pub const MAX_TAG_CHARS: usize = 24;
+
+/// 规范化标签：去掉首尾空白与前导 `#`，去掉逗号（存储分隔符），按不区分大小写去重，
+/// 截断过长的标签并限制数量。
+pub fn normalize_tags<I, S>(tags: I) -> Vec<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut result: Vec<String> = Vec::new();
+    for raw in tags {
+        let cleaned: String = raw
+            .as_ref()
+            .trim()
+            .trim_start_matches(['#', '＃'])
+            .chars()
+            .filter(|c| *c != ',' && *c != '，' && !c.is_control())
+            .take(MAX_TAG_CHARS)
+            .collect::<String>()
+            .trim()
+            .to_string();
+        if cleaned.is_empty() {
+            continue;
+        }
+        if result
+            .iter()
+            .any(|existing| existing.to_lowercase() == cleaned.to_lowercase())
+        {
+            continue;
+        }
+        result.push(cleaned);
+        if result.len() >= MAX_TAGS_PER_TASK {
+            break;
+        }
+    }
+    result
+}
+
+pub fn tags_to_db(tags: &[String]) -> String {
+    normalize_tags(tags).join(",")
+}
+
+pub fn tags_from_db(value: Option<String>) -> Vec<String> {
+    normalize_tags(value.unwrap_or_default().split(','))
+}
+
+pub fn normalize_priority(value: i64) -> i64 {
+    value.clamp(0, PRIORITY_MAX)
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -108,6 +166,12 @@ pub struct AppSettings {
     pub quick_add_enabled: bool,
     #[serde(default = "default_quick_add_shortcut")]
     pub quick_add_shortcut: String,
+    /// 云同步端到端加密：上传前用同步密码加密快照。
+    #[serde(default)]
+    pub sync_encryption_enabled: bool,
+    /// 同步密码，只保存在本机；上传的快照中会被清空。
+    #[serde(default)]
+    pub sync_passphrase: String,
 }
 
 fn default_true() -> bool {

@@ -27,12 +27,15 @@ const settingsDraft = reactive<AppSettings>({
   webdavDeviceId: "",
   notificationTheme: "app",
   quickAddEnabled: true,
-  quickAddShortcut: "CommandOrControl+Alt+N"
+  quickAddShortcut: "CommandOrControl+Alt+N",
+  syncEncryptionEnabled: false,
+  syncPassphrase: ""
 });
 const syncStatus = ref<SyncStatus | null>(null);
 const quickAddShortcutError = ref("");
 const settingsOpen = ref(false);
 const webdavOpen = ref(false);
+const dataOpen = ref(false);
 
 const syncStatusLabel = computed(() => syncStatus.value?.status || "未同步");
 
@@ -97,9 +100,16 @@ const openWebdav = async () => {
   webdavOpen.value = true;
 };
 
+const openData = () => {
+  settingsOpen.value = false;
+  dataOpen.value = true;
+};
+
 export const useSettings = () => ({
   settingsOpen,
   webdavOpen,
+  dataOpen,
+  openData,
   openSettings,
   openWebdav,
   settingsDraft,

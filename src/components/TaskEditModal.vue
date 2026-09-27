@@ -21,13 +21,24 @@
       />
       <button class="button secondary" @click="reminder = ''">清除提醒</button>
     </div>
+    <div class="form-row compact">
+      <span class="form-row-label">优先级</span>
+      <PriorityPicker v-model="priority" />
+    </div>
+    <div class="form-row compact">
+      <span class="form-row-label">标签</span>
+      <TagInput v-model="tags" :suggestions="tagSuggestions" />
+    </div>
   </Modal>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import Modal from "./Modal.vue";
 import MarkdownNoteEditor from "./MarkdownNoteEditor.vue";
+import PriorityPicker from "./PriorityPicker.vue";
+import TagInput from "./TagInput.vue";
+import { collectTags, priorityOf } from "../tasks";
 import { api } from "../api";
 import { fromDatetimeLocal, isLinuxPlatform, toDatetimeLocal } from "../format";
 import { useAppData } from "../composables/useAppData";
@@ -36,7 +47,7 @@ import { useItemActions } from "../composables/useItemActions";
 import { useUiPrefs } from "../composables/useUiPrefs";
 
 const { taskEditor } = useDialogs();
-const { refreshAll } = useAppData();
+const { tasks, completedTasks, refreshAll } = useAppData();
 const { confirmDeleteTask } = useItemActions();
 const { isLightTheme } = useUiPrefs();
 
@@ -44,6 +55,9 @@ const description = ref("");
 const stickyContent = ref("");
 const reminder = ref("");
 const reminderInput = ref<HTMLInputElement | null>(null);
+const priority = ref(0);
+const tags = ref<string[]>([]);
+const tagSuggestions = computed(() => collectTags([...tasks.value, ...completedTasks.value]).map(item => item.tag));
 
 watch(
   () => taskEditor.open,
@@ -55,6 +69,8 @@ watch(
     description.value = task.description;
     stickyContent.value = task.stickyContent || "";
     reminder.value = toDatetimeLocal(task.reminderTime ?? null);
+    priority.value = priorityOf(task);
+    tags.value = [...(task.tags ?? [])];
   }
 );
 
@@ -82,7 +98,9 @@ const save = async () => {
     id: task.id,
     description: description.value,
     stickyContent: stickyContent.value.trim() ? stickyContent.value : null,
-    reminderTime: fromDatetimeLocal(reminder.value)
+    reminderTime: fromDatetimeLocal(reminder.value),
+    tags: tags.value,
+    priority: priority.value
   });
   close();
   await refreshAll();

@@ -47,6 +47,13 @@
     </div>
     <div class="modal-section">
       <div class="form-row compact">
+        <label>数据</label>
+        <button class="button secondary" type="button" @click="openData">导入导出与备份…</button>
+        <span class="field-hint">JSON 备份、Markdown、日历（ICS），每天自动备份</span>
+      </div>
+    </div>
+    <div class="modal-section">
+      <div class="form-row compact">
         <label>提醒弹窗主题</label>
         <select class="select" v-model="settingsDraft.notificationTheme">
           <option value="system">跟随系统</option>
@@ -160,7 +167,8 @@ const {
   settingsDraft,
   quickAddShortcutError,
   applyQuickAddShortcut,
-  refreshSyncStatus
+  refreshSyncStatus,
+  openData
 } = useSettings();
 const { uiScale, windowOpacity } = useUiPrefs();
 const {

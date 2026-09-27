@@ -30,6 +30,35 @@
       </div>
     </div>
     <div class="modal-section">
+      <div class="form-row compact">
+        <label>
+          <input type="checkbox" v-model="settingsDraft.syncEncryptionEnabled" /> 端到端加密
+        </label>
+        <span class="field-hint">上传前用同步密码加密，服务器只能看到密文</span>
+      </div>
+      <template v-if="settingsDraft.syncEncryptionEnabled">
+        <div class="form-row compact">
+          <input
+            class="input"
+            :type="passphraseVisible ? 'text' : 'password'"
+            v-model="settingsDraft.syncPassphrase"
+            placeholder="同步密码（至少 8 个字符）"
+            autocomplete="new-password"
+            style="flex: 1"
+          />
+          <button class="button secondary" type="button" @click="passphraseVisible = !passphraseVisible">
+            {{ passphraseVisible ? "隐藏" : "显示" }}
+          </button>
+        </div>
+        <div class="field-hint" :class="{ 'is-error': passphraseError }">
+          {{
+            passphraseError ||
+            "所有设备需开启加密并填写相同的密码。密码只保存在本机，忘记后无法解密云端数据（本机数据不受影响）。旧版本无法再同步此目录，请一起升级。"
+          }}
+        </div>
+      </template>
+    </div>
+    <div class="modal-section">
       <div class="form-row compact" style="gap: 8px;">
         <button class="button secondary" type="button" @click="handleTestWebdav">测试连接</button>
         <button class="button secondary" type="button" @click="handleSyncNow">立即同步</button>
@@ -59,7 +88,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import Modal from "./Modal.vue";
 import { api } from "../api";
 import { formatDateTime } from "../format";
@@ -67,17 +96,33 @@ import { useSettings } from "../composables/useSettings";
 
 const { webdavOpen, settingsDraft, loadSettings, refreshSyncStatus } = useSettings();
 const webdavPasswordVisible = ref(false);
+const passphraseVisible = ref(false);
+
+const MIN_PASSPHRASE_CHARS = 8;
+const passphraseError = computed(() => {
+  if (!settingsDraft.syncEncryptionEnabled) {
+    return "";
+  }
+  const length = [...settingsDraft.syncPassphrase].length;
+  return length > 0 && length < MIN_PASSPHRASE_CHARS ? `同步密码至少需要 ${MIN_PASSPHRASE_CHARS} 个字符` : "";
+});
 
 watch(webdavOpen, open => {
   if (open) {
     webdavPasswordVisible.value = false;
+    passphraseVisible.value = false;
   }
 });
 
 const saveWebdavSettings = async () => {
+  if (settingsDraft.syncEncryptionEnabled && [...settingsDraft.syncPassphrase].length < MIN_PASSPHRASE_CHARS) {
+    alert(`开启端到端加密需要设置至少 ${MIN_PASSPHRASE_CHARS} 个字符的同步密码`);
+    return;
+  }
   await api.saveSettings({ ...settingsDraft });
   await api.setAutoStart(settingsDraft.autoStartEnabled);
   webdavPasswordVisible.value = false;
+  passphraseVisible.value = false;
   webdavOpen.value = false;
   await refreshSyncStatus();
 };

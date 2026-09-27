@@ -17,9 +17,11 @@
       </section>
     </div>
 
-    <SharedDialogs />
     <SettingsModal :app-version="appVersion" />
     <WebdavModal />
+    <DataModal />
+    <!-- 放在最后：确认框需要叠在设置类弹窗之上。 -->
+    <SharedDialogs />
   </div>
 </template>
 
@@ -31,7 +33,9 @@ import AppSidebar from "./components/AppSidebar.vue";
 import SharedDialogs from "./components/SharedDialogs.vue";
 import SettingsModal from "./components/SettingsModal.vue";
 import WebdavModal from "./components/WebdavModal.vue";
+import DataModal from "./components/DataModal.vue";
 import TodayView from "./views/TodayView.vue";
+import CalendarView from "./views/CalendarView.vue";
 import TasksView from "./views/TasksView.vue";
 import CompletedView from "./views/CompletedView.vue";
 import RecurringView from "./views/RecurringView.vue";
@@ -50,6 +54,7 @@ import type { SyncStatus } from "./types";
 
 const VIEWS: Record<TabKey, Component> = {
   today: TodayView,
+  calendar: CalendarView,
   tasks: TasksView,
   completed: CompletedView,
   recurring: RecurringView,

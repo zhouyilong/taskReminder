@@ -15,6 +15,10 @@ export interface Task {
   reminderTime?: string | null;
   updatedAt?: string | null;
   deletedAt?: string | null;
+  /** 标签（已去重、不含 #）。 */
+  tags?: string[];
+  /** 优先级：0 无、1 低、2 中、3 高。 */
+  priority?: number;
 }
 
 export interface RecurringTask {
@@ -97,6 +101,10 @@ export interface AppSettings {
   quickAddEnabled: boolean;
   /** Tauri 加速键格式，如 CommandOrControl+Alt+N。 */
   quickAddShortcut: string;
+  /** 云同步端到端加密。 */
+  syncEncryptionEnabled: boolean;
+  /** 同步密码，只保存在本机。 */
+  syncPassphrase: string;
 }
 
 export interface UiStatePayload {
@@ -132,4 +140,27 @@ export interface RecurringPreview {
   taskId: string;
   /** 预估的触发时间（本地时间），按先后排列。 */
   times: string[];
+}
+
+export interface ExportResult {
+  path: string;
+  /** 导出日历时无法表达而跳过的循环提醒数量。 */
+  skipped: number;
+}
+
+export interface ImportSummary {
+  inserted: number;
+  updated: number;
+  skipped: number;
+}
+
+export interface BackupInfo {
+  name: string;
+  size: number;
+  createdAt: string;
+}
+
+export interface BackupListPayload {
+  dir: string;
+  backups: BackupInfo[];
 }

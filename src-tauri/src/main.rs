@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod autostart;
+mod backup;
 mod db;
 mod errors;
 mod holidays;
@@ -14,6 +15,7 @@ mod scheduler;
 mod single_instance;
 mod state;
 mod sync;
+mod sync_crypto;
 mod time;
 mod tray;
 
@@ -26,7 +28,7 @@ use tauri::{
     WindowEvent,
 };
 
-use crate::db::DbManager;
+use crate::db::{DbManager, TaskMeta};
 use crate::errors::AppError;
 use crate::models::{
     AppSettings, NotificationPayload, RecurringTask, ReminderRecord, StickyNote, SyncStatus, Task,
@@ -155,6 +157,23 @@ struct TaskUpdatePayload {
     description: String,
     sticky_content: Option<String>,
     reminder_time: Option<String>,
+    /// 为空时保留原有标签与优先级。
+    #[serde(default)]
+    tags: Option<Vec<String>>,
+    #[serde(default)]
+    priority: Option<i64>,
+}
+
+impl TaskUpdatePayload {
+    fn meta(&self) -> Option<TaskMeta> {
+        if self.tags.is_none() && self.priority.is_none() {
+            return None;
+        }
+        Some(TaskMeta {
+            tags: self.tags.clone().unwrap_or_default(),
+            priority: self.priority.unwrap_or(0),
+        })
+    }
 }
 
 #[derive(Deserialize)]
@@ -162,6 +181,13 @@ struct TaskUpdatePayload {
 struct CreateTaskPayload {
     description: String,
     sticky_content: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    priority: i64,
+    /// 创建时一并设置提醒（自然语言输入识别出的时间）。
+    #[serde(default)]
+    reminder_time: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -169,6 +195,10 @@ struct CreateTaskPayload {
 struct QuickAddPayload {
     description: String,
     reminder_time: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    priority: i64,
 }
 
 #[derive(Deserialize)]
@@ -296,12 +326,17 @@ fn list_reminder_records(state: State<AppState>) -> ApiResult<Vec<ReminderRecord
 
 #[tauri::command]
 fn create_task(state: State<AppState>, payload: CreateTaskPayload) -> ApiResult<Task> {
-    let task = into_api(state.db.create_task(
+    let meta = TaskMeta {
+        tags: payload.tags,
+        priority: payload.priority,
+    };
+    create_task_with_reminder(
+        &state,
         payload.description.trim(),
         payload.sticky_content.as_deref(),
-    ))?;
-    into_api(state.sync.notify_local_change())?;
-    Ok(task)
+        payload.reminder_time,
+        &meta,
+    )
 }
 
 /// 快速添加窗口：一次完成创建待办与设置提醒，并通知主窗口刷新。
@@ -311,17 +346,42 @@ fn quick_add_task(
     state: State<AppState>,
     payload: QuickAddPayload,
 ) -> ApiResult<Task> {
-    let description = payload.description.trim();
+    let meta = TaskMeta {
+        tags: payload.tags,
+        priority: payload.priority,
+    };
+    let task = create_task_with_reminder(
+        &state,
+        payload.description.trim(),
+        None,
+        payload.reminder_time,
+        &meta,
+    )?;
+    let _ = app.emit("data-updated", ());
+    Ok(task)
+}
+
+fn create_task_with_reminder(
+    state: &AppState,
+    description: &str,
+    sticky_content: Option<&str>,
+    reminder_time: Option<String>,
+    meta: &TaskMeta,
+) -> ApiResult<Task> {
     if description.is_empty() {
         return Err("待办内容不能为空".to_string());
     }
-    let reminder_time = normalize_reminder_time(payload.reminder_time);
+    let reminder_time = normalize_reminder_time(reminder_time);
     if let Some(value) = reminder_time.as_deref() {
         if !into_api(scheduler::is_future(value))? {
             return Err("提醒时间需晚于当前时间".to_string());
         }
     }
-    let mut task = into_api(state.db.create_task(description, None))?;
+    let mut task = into_api(
+        state
+            .db
+            .create_task_with_meta(description, sticky_content, meta),
+    )?;
     if let Some(reminder_time) = reminder_time {
         into_api(
             state
@@ -332,7 +392,6 @@ fn quick_add_task(
         into_api(state.scheduler.schedule_task(task.clone()))?;
     }
     into_api(state.sync.notify_local_change())?;
-    let _ = app.emit("data-updated", ());
     Ok(task)
 }
 
@@ -350,11 +409,13 @@ fn update_task(
     task: TaskUpdatePayload,
 ) -> ApiResult<()> {
     let reminder_time = task.reminder_time.clone();
+    let meta = task.meta();
     into_api(state.db.update_task(
         &task.id,
         task.description.trim(),
         task.sticky_content.clone(),
         reminder_time.clone(),
+        meta.as_ref(),
     ))?;
     state.scheduler.cancel_task(&task.id);
     if let Some(reminder_time) = reminder_time.clone() {
@@ -623,6 +684,132 @@ fn preview_recurring_triggers(
     Ok(result)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportResult {
+    path: String,
+    /// 导出日历时无法用日历规则表达而跳过的循环提醒数量。
+    skipped: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupListPayload {
+    dir: String,
+    backups: Vec<backup::BackupInfo>,
+}
+
+fn file_dialog(app: &tauri::AppHandle) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
+    use tauri_plugin_dialog::DialogExt;
+    let dialog = app.dialog().file();
+    match app.get_webview_window("main") {
+        Some(window) => dialog.set_parent(&window),
+        None => dialog,
+    }
+}
+
+/// 导入或恢复后：重新计算调度并通知同步与界面。
+fn after_bulk_change(state: &AppState) -> Result<(), AppError> {
+    state.scheduler.schedule_existing()?;
+    state.sync.notify_local_change()
+}
+
+/// 弹出保存对话框并导出；用户取消时返回 None。对话框需要在非主线程阻塞等待，因此是 async 命令。
+#[tauri::command]
+async fn export_data(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    format: String,
+) -> ApiResult<Option<ExportResult>> {
+    let format = into_api(backup::ExportFormat::parse(&format))?;
+    let now = Local::now().naive_local();
+    let Some(file) = file_dialog(&app)
+        .set_title("导出数据")
+        .add_filter(format.filter_name(), &[format.extension()])
+        .set_file_name(format.default_file_name(&now))
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let path = file.into_path().map_err(|e| e.to_string())?;
+    let data = into_api(backup::build_backup(
+        &state.db,
+        &app.package_info().version.to_string(),
+    ))?;
+    let (content, skipped) = match format {
+        backup::ExportFormat::Json => (into_api(backup::render_json(&data))?, 0),
+        backup::ExportFormat::Markdown => (backup::render_markdown(&data), 0),
+        backup::ExportFormat::Ics => {
+            let dtstamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+            backup::render_ics(&data, &dtstamp)
+        }
+    };
+    std::fs::write(&path, content).map_err(|e| format!("写入文件失败：{}", e))?;
+    Ok(Some(ExportResult {
+        path: path.to_string_lossy().to_string(),
+        skipped,
+    }))
+}
+
+/// 选择 JSON 备份并按 id 合并导入；用户取消时返回 None。
+#[tauri::command]
+async fn import_data(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> ApiResult<Option<backup::ImportSummary>> {
+    let Some(file) = file_dialog(&app)
+        .set_title("导入备份")
+        .add_filter("JSON 备份", &["json"])
+        .blocking_pick_file()
+    else {
+        return Ok(None);
+    };
+    let path = file.into_path().map_err(|e| e.to_string())?;
+    let content = std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败：{}", e))?;
+    let data = into_api(backup::parse_backup(&content))?;
+    // 导入前先留一份本地快照，出问题时可以从备份恢复。
+    into_api(backup::create_backup(
+        &state.db.db_path(),
+        &Local::now().naive_local(),
+    ))?;
+    let summary = into_api(backup::import_backup(&state.db, &data))?;
+    into_api(after_bulk_change(&state))?;
+    Ok(Some(summary))
+}
+
+#[tauri::command]
+fn list_backups(state: State<AppState>) -> ApiResult<BackupListPayload> {
+    let dir = backup::backup_dir(&state.db.db_path());
+    Ok(BackupListPayload {
+        dir: dir.to_string_lossy().to_string(),
+        backups: backup::list_backups(&dir),
+    })
+}
+
+#[tauri::command]
+fn create_backup_now(state: State<AppState>) -> ApiResult<()> {
+    into_api(backup::create_backup(
+        &state.db.db_path(),
+        &Local::now().naive_local(),
+    ))?;
+    Ok(())
+}
+
+/// 把本地备份按“较新的版本胜出”合并回当前数据库：找回丢失或被误删清理的数据，不会覆盖之后的修改。
+#[tauri::command]
+fn restore_backup(state: State<AppState>, name: String) -> ApiResult<()> {
+    let db_path = state.db.db_path();
+    let source = into_api(backup::resolve_backup(&db_path, &name))?;
+    // 先复制一份再合并，避免合并时改动备份文件（补列等）。
+    let temp =
+        std::env::temp_dir().join(format!("taskreminder-restore-{}.db", uuid::Uuid::new_v4()));
+    std::fs::copy(&source, &temp).map_err(|e| format!("读取备份失败：{}", e))?;
+    let result = sync::merge_databases(&db_path, &temp);
+    let _ = std::fs::remove_file(&temp);
+    into_api(result)?;
+    into_api(after_bulk_change(&state))
+}
+
 #[tauri::command]
 fn get_settings(state: State<AppState>) -> ApiResult<AppSettings> {
     let mut settings = into_api(state.db.load_settings())?;
@@ -646,6 +833,9 @@ fn save_settings(
     sanitized_settings.sticky_note_opacity =
         normalize_sticky_note_opacity(sanitized_settings.sticky_note_opacity);
     sanitized_settings.window_opacity = normalize_window_opacity(sanitized_settings.window_opacity);
+    // 广播给便签等窗口的设置不需要携带密码。
+    sanitized_settings.webdav_password.clear();
+    sanitized_settings.sync_passphrase.clear();
     let _ = app.emit("sticky-note-settings-updated", sanitized_settings.clone());
     let _ = app.emit("settings-updated", sanitized_settings);
     into_api(state.sync.update_settings())?;
@@ -1046,6 +1236,7 @@ fn snooze_notification(
                     &task.description,
                     task.sticky_content.clone(),
                     Some(reminder_time.clone()),
+                    None,
                 ))?;
                 task.reminder_time = Some(reminder_time);
                 state.scheduler.cancel_task(&task.id);
@@ -1374,6 +1565,7 @@ fn restore_open_sticky_note_items(app: &tauri::AppHandle, db: &DbManager) -> Res
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .on_window_event(|window, event| {
@@ -1475,7 +1667,12 @@ fn main() {
             get_debug_info,
             is_dev_mode,
             emit_ui_state_changed,
-            get_ui_state
+            get_ui_state,
+            export_data,
+            import_data,
+            list_backups,
+            create_backup_now,
+            restore_backup
         ])
         .setup(|app| {
             let result: Result<(), AppError> = (|| {

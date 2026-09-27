@@ -6,9 +6,11 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
+use crate::backup::ImportSummary;
 use crate::errors::AppError;
 use crate::models::{
-    default_quick_add_shortcut, AppSettings, RecurringTask, ReminderRecord, StickyNote, Task,
+    default_quick_add_shortcut, normalize_priority, tags_from_db, tags_to_db, AppSettings,
+    RecurringTask, ReminderRecord, StickyNote, Task,
 };
 use crate::recurrence::REPEAT_MODE_INTERVAL_RANGE;
 use crate::time::{format_datetime, now_string, parse_datetime_any};
@@ -200,7 +202,7 @@ impl DbManager {
     pub fn list_active_tasks(&self) -> Result<Vec<Task>, AppError> {
         let conn = self.get_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, description, sticky_content, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at
+            "SELECT id, description, sticky_content, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at, tags, priority
              FROM tasks
              WHERE deleted_at IS NULL AND status != 'COMPLETED'
              ORDER BY created_at ASC",
@@ -212,7 +214,7 @@ impl DbManager {
     pub fn list_completed_tasks(&self) -> Result<Vec<Task>, AppError> {
         let conn = self.get_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, description, sticky_content, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at
+            "SELECT id, description, sticky_content, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at, tags, priority
              FROM tasks
              WHERE deleted_at IS NULL AND status = 'COMPLETED'
              ORDER BY completed_at DESC",
@@ -224,7 +226,7 @@ impl DbManager {
     pub fn get_task(&self, task_id: &str) -> Result<Option<Task>, AppError> {
         let conn = self.get_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, description, sticky_content, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at
+            "SELECT id, description, sticky_content, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at, tags, priority
              FROM tasks WHERE id = ?",
         )?;
         let task = stmt
@@ -306,19 +308,31 @@ impl DbManager {
         Ok(false)
     }
 
+    #[cfg(test)]
     pub fn create_task(
         &self,
         description: &str,
         sticky_content: Option<&str>,
     ) -> Result<Task, AppError> {
+        self.create_task_with_meta(description, sticky_content, &TaskMeta::default())
+    }
+
+    pub fn create_task_with_meta(
+        &self,
+        description: &str,
+        sticky_content: Option<&str>,
+        meta: &TaskMeta,
+    ) -> Result<Task, AppError> {
         let conn = self.get_conn()?;
         let now = now_string();
         let id = Uuid::new_v4().to_string();
         let note = sticky_content.unwrap_or("").trim().to_string();
+        let tags = tags_to_db(&meta.tags);
+        let priority = normalize_priority(meta.priority);
         conn.execute(
-            "INSERT INTO tasks (id, description, type, status, created_at, completed_at, reminder_time, sticky_content, updated_at, deleted_at)
-             VALUES (?, ?, 'ONE_TIME', 'PENDING', ?, NULL, NULL, ?, ?, NULL)",
-            params![id, description, now, note, now],
+            "INSERT INTO tasks (id, description, type, status, created_at, completed_at, reminder_time, sticky_content, updated_at, deleted_at, tags, priority)
+             VALUES (?, ?, 'ONE_TIME', 'PENDING', ?, NULL, NULL, ?, ?, NULL, ?, ?)",
+            params![id, description, now, note, now, tags, priority],
         )?;
         Ok(Task {
             id,
@@ -331,24 +345,41 @@ impl DbManager {
             reminder_time: None,
             updated_at: Some(now),
             deleted_at: None,
+            tags: tags_from_db(Some(tags)),
+            priority,
         })
     }
 
+    /// 更新待办。`meta` 为 `None` 时保留原有标签与优先级（如稍后提醒只改时间）。
     pub fn update_task(
         &self,
         task_id: &str,
         description: &str,
         sticky_content: Option<String>,
         reminder_time: Option<String>,
+        meta: Option<&TaskMeta>,
     ) -> Result<(), AppError> {
         let conn = self.get_conn()?;
         let now = now_string();
         let note = sticky_content
             .map(|value| value.trim().to_string())
             .unwrap_or_default();
+        let tags = meta.map(|meta| tags_to_db(&meta.tags));
+        let priority = meta.map(|meta| normalize_priority(meta.priority));
         conn.execute(
-            "UPDATE tasks SET description = ?, sticky_content = ?, reminder_time = ?, updated_at = ? WHERE id = ?",
-            params![description, note, reminder_time, now, task_id],
+            "UPDATE tasks
+             SET description = ?, sticky_content = ?, reminder_time = ?,
+                 tags = COALESCE(?, tags), priority = COALESCE(?, priority), updated_at = ?
+             WHERE id = ?",
+            params![
+                description,
+                note,
+                reminder_time,
+                tags,
+                priority,
+                now,
+                task_id
+            ],
         )?;
         Ok(())
     }
@@ -387,7 +418,7 @@ impl DbManager {
     pub fn list_deleted_tasks(&self, retention_days: i64) -> Result<Vec<Task>, AppError> {
         let conn = self.get_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, description, sticky_content, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at
+            "SELECT id, description, sticky_content, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at, tags, priority
              FROM tasks
              WHERE deleted_at IS NOT NULL AND deleted_at >= ?
              ORDER BY deleted_at DESC",
@@ -924,7 +955,8 @@ impl DbManager {
                    webdav_enabled, webdav_url, webdav_username, webdav_password,
                    webdav_root_path, webdav_sync_interval_minutes, webdav_last_sync_time,
                    webdav_last_local_change_time, webdav_last_sync_status, webdav_last_sync_error,
-                   webdav_device_id, notification_theme, quick_add_enabled, quick_add_shortcut
+                   webdav_device_id, notification_theme, quick_add_enabled, quick_add_shortcut,
+                   sync_encryption_enabled, sync_passphrase
                    FROM settings WHERE id = 1";
         let mut stmt = conn.prepare(sql)?;
         let row = stmt.query_row([], |row| {
@@ -973,6 +1005,8 @@ impl DbManager {
                 notification_theme,
                 quick_add_enabled: row.get::<_, Option<i64>>(23)?.unwrap_or(1) == 1,
                 quick_add_shortcut,
+                sync_encryption_enabled: row.get::<_, Option<i64>>(25)?.unwrap_or(0) == 1,
+                sync_passphrase: row.get::<_, Option<String>>(26)?.unwrap_or_default(),
             })
         })?;
         Ok(row)
@@ -989,7 +1023,8 @@ impl DbManager {
                  webdav_root_path = ?, webdav_sync_interval_minutes = ?, webdav_last_sync_time = ?,
                  webdav_last_local_change_time = ?, webdav_last_sync_status = ?, webdav_last_sync_error = ?,
                  webdav_device_id = ?, notification_theme = ?,
-                 quick_add_enabled = ?, quick_add_shortcut = ?
+                 quick_add_enabled = ?, quick_add_shortcut = ?,
+                 sync_encryption_enabled = ?, sync_passphrase = ?
              WHERE id = 1",
             params![
                 if settings.auto_start_enabled { 1 } else { 0 },
@@ -1017,6 +1052,8 @@ impl DbManager {
                 settings.notification_theme,
                 if settings.quick_add_enabled { 1 } else { 0 },
                 settings.quick_add_shortcut.trim(),
+                if settings.sync_encryption_enabled { 1 } else { 0 },
+                settings.sync_passphrase,
             ],
         )?;
         Ok(())
@@ -1092,6 +1129,147 @@ impl DbManager {
         Ok(())
     }
 
+    /// 按 id 合并导入的数据：本地没有的插入；本地已有时只有导入的版本更新（`updated_at` 更晚）才覆盖。
+    /// 与云同步的“较新的版本胜出”一致，不会覆盖本地更新的修改，也不会复活本地更晚删除的行。
+    pub fn import_rows(
+        &self,
+        tasks: &[Task],
+        recurring: &[RecurringTask],
+        records: &[ReminderRecord],
+    ) -> Result<ImportSummary, AppError> {
+        let mut conn = self.get_conn()?;
+        let tx = conn.transaction()?;
+        let mut summary = ImportSummary::default();
+
+        for task in tasks {
+            let valid = !task.id.trim().is_empty()
+                && !task.description.trim().is_empty()
+                && matches!(task.status.as_str(), "PENDING" | "COMPLETED");
+            let outcome = if valid {
+                import_outcome(&tx, "tasks", &task.id, &task.updated_at, &task.created_at)?
+            } else {
+                ImportOutcome::Skipped
+            };
+            if outcome == ImportOutcome::Skipped {
+                summary.skipped += 1;
+                continue;
+            }
+            tx.execute(
+                "INSERT INTO tasks (id, description, sticky_content, type, status, created_at, completed_at,
+                                    reminder_time, updated_at, deleted_at, tags, priority)
+                 VALUES (?1, ?2, ?3, 'ONE_TIME', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                 ON CONFLICT(id) DO UPDATE SET
+                    description = excluded.description, sticky_content = excluded.sticky_content,
+                    status = excluded.status, created_at = excluded.created_at,
+                    completed_at = excluded.completed_at, reminder_time = excluded.reminder_time,
+                    updated_at = excluded.updated_at, deleted_at = excluded.deleted_at,
+                    tags = excluded.tags, priority = excluded.priority",
+                params![
+                    task.id,
+                    task.description.trim(),
+                    task.sticky_content.clone().unwrap_or_default(),
+                    task.status,
+                    task.created_at,
+                    task.completed_at,
+                    task.reminder_time,
+                    task.updated_at.clone().unwrap_or_else(|| task.created_at.clone()),
+                    task.deleted_at,
+                    tags_to_db(&task.tags),
+                    normalize_priority(task.priority),
+                ],
+            )?;
+            summary.count(outcome);
+        }
+
+        for task in recurring {
+            let valid = !task.id.trim().is_empty() && !task.description.trim().is_empty();
+            let outcome = if valid {
+                import_outcome(
+                    &tx,
+                    "recurring_tasks",
+                    &task.id,
+                    &task.updated_at,
+                    &task.created_at,
+                )?
+            } else {
+                ImportOutcome::Skipped
+            };
+            if outcome == ImportOutcome::Skipped {
+                summary.skipped += 1;
+                continue;
+            }
+            tx.execute(
+                "INSERT OR REPLACE INTO recurring_tasks (
+                    id, description, type, status, created_at, completed_at, interval_minutes,
+                    last_triggered, next_trigger, is_paused, start_time, end_time,
+                    repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
+                    updated_at, deleted_at, schedule_weekdays
+                 )
+                 VALUES (?, ?, 'RECURRING', 'PENDING', ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    task.id,
+                    task.description.trim(),
+                    task.created_at,
+                    task.interval_minutes.max(1),
+                    task.last_triggered,
+                    task.next_trigger,
+                    if task.is_paused { 1 } else { 0 },
+                    task.start_time,
+                    task.end_time,
+                    task.repeat_mode,
+                    task.schedule_time,
+                    task.schedule_weekday,
+                    task.schedule_day,
+                    task.cron_expression,
+                    task.updated_at.clone().unwrap_or_else(|| task.created_at.clone()),
+                    task.deleted_at,
+                    task.schedule_weekdays,
+                ],
+            )?;
+            summary.count(outcome);
+        }
+
+        for record in records {
+            let valid = !record.id.trim().is_empty() && !record.reminder_id.trim().is_empty();
+            let outcome = if valid {
+                import_outcome(
+                    &tx,
+                    "reminder_records",
+                    &record.id,
+                    &record.updated_at,
+                    &record.trigger_time,
+                )?
+            } else {
+                ImportOutcome::Skipped
+            };
+            if outcome == ImportOutcome::Skipped {
+                summary.skipped += 1;
+                continue;
+            }
+            tx.execute(
+                "INSERT OR REPLACE INTO reminder_records (
+                    id, reminder_id, description, type, trigger_time, close_time, action, updated_at, deleted_at
+                 )
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    record.id,
+                    record.reminder_id,
+                    record.description,
+                    record.reminder_type,
+                    record.trigger_time,
+                    record.close_time,
+                    record.action,
+                    record.updated_at.clone().unwrap_or_else(|| record.trigger_time.clone()),
+                    record.deleted_at,
+                ],
+            )?;
+            summary.count(outcome);
+        }
+
+        tx.commit()?;
+        Ok(summary)
+    }
+
     pub fn optimize_database(&self) -> Result<(), AppError> {
         let conn = self.get_conn()?;
         conn.execute_batch(
@@ -1099,6 +1277,63 @@ impl DbManager {
         )?;
         Ok(())
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ImportOutcome {
+    Inserted,
+    Updated,
+    Skipped,
+}
+
+impl ImportSummary {
+    fn count(&mut self, outcome: ImportOutcome) {
+        match outcome {
+            ImportOutcome::Inserted => self.inserted += 1,
+            ImportOutcome::Updated => self.updated += 1,
+            ImportOutcome::Skipped => self.skipped += 1,
+        }
+    }
+}
+
+/// 比较导入行与本地行的更新时间，决定插入、覆盖还是跳过。
+fn import_outcome(
+    conn: &Connection,
+    table: &str,
+    id: &str,
+    updated_at: &Option<String>,
+    fallback_time: &str,
+) -> Result<ImportOutcome, AppError> {
+    let local: Option<(Option<String>, Option<String>)> = conn
+        .query_row(
+            &format!("SELECT updated_at, deleted_at FROM {} WHERE id = ?", table),
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let Some((local_updated, local_deleted)) = local else {
+        return Ok(ImportOutcome::Inserted);
+    };
+    let incoming = updated_at
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback_time);
+    let existing = local_updated.or(local_deleted);
+    match (
+        parse_datetime_any(incoming),
+        existing.as_deref().and_then(parse_datetime_any),
+    ) {
+        (Some(incoming), Some(existing)) if incoming > existing => Ok(ImportOutcome::Updated),
+        (Some(_), None) => Ok(ImportOutcome::Updated),
+        _ => Ok(ImportOutcome::Skipped),
+    }
+}
+
+/// 待办的组织信息：标签与优先级。
+#[derive(Clone, Debug, Default)]
+pub struct TaskMeta {
+    pub tags: Vec<String>,
+    pub priority: i64,
 }
 
 fn task_from_row(row: &rusqlite::Row<'_>) -> Result<Task, rusqlite::Error> {
@@ -1113,6 +1348,8 @@ fn task_from_row(row: &rusqlite::Row<'_>) -> Result<Task, rusqlite::Error> {
         reminder_time: row.get(7)?,
         updated_at: row.get(8)?,
         deleted_at: row.get(9)?,
+        tags: tags_from_db(row.get::<_, Option<String>>(10)?),
+        priority: normalize_priority(row.get::<_, Option<i64>>(11)?.unwrap_or(0)),
     })
 }
 
@@ -1262,6 +1499,16 @@ fn migration_scripts() -> Vec<MigrationScript> {
             version: "1.6.0".to_string(),
             description: "add weekday mask and quick add shortcut".to_string(),
             sql: include_str!("../migrations/V1.6.0__add_weekday_mask_and_quick_add.sql"),
+        },
+        MigrationScript {
+            version: "2.0.0".to_string(),
+            description: "add task tags and priority".to_string(),
+            sql: include_str!("../migrations/V2.0.0__add_task_tags_and_priority.sql"),
+        },
+        MigrationScript {
+            version: "2.0.1".to_string(),
+            description: "add sync encryption".to_string(),
+            sql: include_str!("../migrations/V2.0.1__add_sync_encryption.sql"),
         },
     ]
 }
@@ -1549,6 +1796,52 @@ mod tests {
         let settings = db.load_settings().unwrap();
         assert!(!settings.quick_add_enabled);
         assert_eq!(settings.quick_add_shortcut, "Alt+Space");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn task_tags_and_priority_roundtrip() {
+        let (db, dir) = temp_db();
+        let meta = TaskMeta {
+            tags: vec![
+                "#工作".to_string(),
+                " 周报 ".to_string(),
+                "工作".to_string(),
+                "a,b".to_string(),
+                String::new(),
+            ],
+            priority: 7,
+        };
+        let task = db.create_task_with_meta("写周报", None, &meta).unwrap();
+        assert_eq!(task.tags, vec!["工作", "周报", "ab"]);
+        assert_eq!(task.priority, 3);
+        let loaded = db.get_task(&task.id).unwrap().unwrap();
+        assert_eq!(loaded.tags, task.tags);
+        assert_eq!(loaded.priority, 3);
+
+        // 不传 meta 时保留原有标签与优先级。
+        db.update_task(&task.id, "写周报 v2", None, None, None)
+            .unwrap();
+        let loaded = db.get_task(&task.id).unwrap().unwrap();
+        assert_eq!(loaded.description, "写周报 v2");
+        assert_eq!(loaded.tags, vec!["工作", "周报", "ab"]);
+        assert_eq!(loaded.priority, 3);
+
+        let cleared = TaskMeta {
+            tags: Vec::new(),
+            priority: -1,
+        };
+        db.update_task(&task.id, "写周报 v2", None, None, Some(&cleared))
+            .unwrap();
+        let loaded = db.get_task(&task.id).unwrap().unwrap();
+        assert!(loaded.tags.is_empty());
+        assert_eq!(loaded.priority, 0);
+
+        // 旧版本创建的行没有标签：默认空。
+        let plain = db.create_task("plain", None).unwrap();
+        let loaded = db.get_task(&plain.id).unwrap().unwrap();
+        assert!(loaded.tags.is_empty());
+        assert_eq!(loaded.priority, 0);
         let _ = std::fs::remove_dir_all(dir);
     }
 

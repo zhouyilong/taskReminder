@@ -1,3 +1,6 @@
+use chrono::Local;
+
+use crate::backup;
 use crate::db::{tombstone_retention_days, DbManager};
 
 use tokio::time::sleep;
@@ -12,6 +15,20 @@ pub fn start_maintenance(db: DbManager) {
                 .map(|settings| settings.webdav_enabled)
                 .unwrap_or(true);
             let _ = db_cleanup.cleanup_data(tombstone_retention_days(sync_enabled));
+        }
+    });
+
+    // 每天一份本地快照：启动 1 分钟后检查一次，之后每小时检查（跨天或长时间运行时补上）。
+    let db_backup = db.clone();
+    tauri::async_runtime::spawn(async move {
+        sleep(std::time::Duration::from_secs(60)).await;
+        loop {
+            if let Err(err) =
+                backup::ensure_daily_backup(&db_backup.db_path(), &Local::now().naive_local())
+            {
+                eprintln!("[backup] 自动备份失败: {}", err);
+            }
+            sleep(std::time::Duration::from_secs(3600)).await;
         }
     });
 

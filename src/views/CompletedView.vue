@@ -9,7 +9,7 @@
         <circle cx="11" cy="11" r="6.5" />
         <path d="M16 16l4 4" />
       </svg>
-      <input class="input" v-model="completedFilter" placeholder="按标题或描述搜索已办事项" />
+      <input class="input" v-model="completedFilter" placeholder="按标题、描述或 #标签搜索已办事项" />
       <button v-if="completedFilter" class="search-clear" type="button" title="清空" @click="completedFilter = ''">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M7 7l10 10M17 7L7 17" />
@@ -39,7 +39,12 @@
               <td class="col-select">
                 <input type="checkbox" class="check-round" title="取消完成" checked @change="toggleTask(task)" />
               </td>
-              <td class="col-desc cell-title is-done" :title="task.description">{{ task.description }}</td>
+              <td class="col-desc cell-title is-done" :title="task.description">
+                <div class="task-title-cell">
+                  <span class="task-title-text">{{ task.description }}</span>
+                  <TaskBadges :task="task" />
+                </div>
+              </td>
               <td class="col-note cell-muted" :class="{ 'cell-empty': !task.stickyContent?.trim() }" :title="taskStickyPreview(task.stickyContent)">{{ taskStickyPreview(task.stickyContent) }}</td>
               <td class="col-datetime cell-time" :title="formatDateTime(task.createdAt)">{{ formatDateTime(task.createdAt) }}</td>
               <td class="col-datetime cell-time" :title="formatDateTime(task.completedAt)">{{ formatDateTime(task.completedAt) }}</td>
@@ -63,6 +68,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import Pagination from "../components/Pagination.vue";
+import TaskBadges from "../components/TaskBadges.vue";
 import { formatDateTime, taskStickyPreview } from "../format";
 import { markdownToPlainText } from "../markdown";
 import { useAppData } from "../composables/useAppData";
@@ -82,7 +88,8 @@ const filteredCompleted = computed(() => {
   return completedTasks.value.filter(task => {
     const descriptionMatched = task.description.toLowerCase().includes(keyword);
     const stickyContentMatched = markdownToPlainText(task.stickyContent).toLowerCase().includes(keyword);
-    return descriptionMatched || stickyContentMatched;
+    const tagMatched = (task.tags ?? []).some(tag => `#${tag}`.toLowerCase().includes(keyword));
+    return descriptionMatched || stickyContentMatched || tagMatched;
   });
 });
 
