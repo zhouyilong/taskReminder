@@ -76,7 +76,7 @@
         </div>
         <div class="sync-status-row">
           <span class="sync-status-label">同步状态:</span>
-          <span class="sync-status-value">{{ settingsDraft.webdavLastSyncStatus || "未同步" }}</span>
+          <span class="sync-status-value">{{ syncStateLabel(settingsDraft.webdavLastSyncStatus) }}</span>
         </div>
         <div class="sync-status-row">
           <span class="sync-status-label">最近错误:</span>
@@ -92,6 +92,7 @@ import { computed, ref, watch } from "vue";
 import Modal from "./Modal.vue";
 import { api } from "../api";
 import { formatDateTime } from "../format";
+import { syncStateLabel } from "../syncStatus";
 import { useSettings } from "../composables/useSettings";
 
 const { webdavOpen, settingsDraft, loadSettings, refreshSyncStatus } = useSettings();

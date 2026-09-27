@@ -114,6 +114,7 @@ export interface UiStatePayload {
 }
 
 export interface SyncStatus {
+  /** 状态码（`SyncStateCode`），文案用 `syncStateLabel` 映射。 */
   status: string;
   error?: string | null;
   time?: string | null;
