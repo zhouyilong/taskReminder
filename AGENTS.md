@@ -36,10 +36,12 @@
   - `src-tauri/capabilities/default.json` 定义各窗口的权限。
   - `src-tauri/tauri.conf.json` 定义窗口、打包、更新器与应用元数据；`src-tauri/tauri.updater.conf.json` 为签名构建时的覆盖配置。
 - `docs/ROADMAP.md` 为功能扩展与重构路线图，完成条目后同步勾选并补充变更记录。
+- `.github/workflows/release.yml` 推送 `v*` tag 时签名构建 MSI 并上传到草稿 Release（发布说明取 `docs/release-notes/v{version}.md`）。
 - `.github/workflows/ci.yml` 为 CI（Ubuntu + Windows：`pnpm build`、`pnpm test`、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`）。
 - `scripts/` 存放构建与发布脚本。
   - `scripts/build-updater.ps1` 签名构建 MSI + 生成更新清单。
   - `scripts/write-updater-manifest.mjs` 生成 `latest.json` 更新清单。
+  - `scripts/check-release-version.mjs` 检查三处版本号一致且与发布 tag 相符（`release.yml` 使用）。
   - `scripts/tauri.mjs` Tauri CLI 包装器（处理 VS Dev Shell 环境）。
 
 ## 构建、测试与开发命令
