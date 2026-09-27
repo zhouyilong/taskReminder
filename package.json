@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
     "preview": "vite preview",
     "tauri": "node scripts/tauri.mjs",
     "release:updater": "powershell -ExecutionPolicy Bypass -File scripts/build-updater.ps1"
@@ -23,6 +24,7 @@
     "@vitejs/plugin-vue": "^5.0.4",
     "typescript": "^5.4.0",
     "vite": "^5.1.0",
+    "vitest": "^3.2.7",
     "vue-tsc": "^3.3.11"
   }
 }
