@@ -1,0 +1,119 @@
+name: Release
+
+# 推送 v* tag 时签名构建 MSI，生成 latest.json，并上传到对应的 GitHub Release。
+# 默认创建草稿：检查安装包后在 GitHub 上点“Publish release”，自动更新才会拿到新版本
+# （更新地址是 releases/latest，只认已发布的正式版本）。
+# 需要先在仓库 Settings → Secrets and variables → Actions 中配置：
+#   TAURI_SIGNING_PRIVATE_KEY           ~/.tauri/taskReminder-updater.key 的内容
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  私钥密码（没有密码可不配置）
+# 可选：docs/release-notes/v{version}.md 作为发布说明与应用内更新说明。
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的 tag（如 v2.0.1，需已存在）"
+        required: true
+      draft:
+        description: "创建为草稿"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      RELEASE_DRAFT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.draft || 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Check signing key
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::未配置 TAURI_SIGNING_PRIVATE_KEY，无法生成更新签名"
+            exit 1
+          fi
+
+      - name: Check versions
+        run: node scripts/check-release-version.mjs "${{ env.RELEASE_TAG }}"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend unit tests
+        run: pnpm test
+
+      - name: Build signed MSI
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --bundles msi --config src-tauri/tauri.updater.conf.json
+
+      - name: Write latest.json
+        shell: bash
+        run: |
+          version="${RELEASE_TAG#v}"
+          notes_file="docs/release-notes/v${version}.md"
+          if [ -f "$notes_file" ]; then
+            export RELEASE_NOTES="$(cat "$notes_file")"
+          fi
+          node scripts/write-updater-manifest.mjs
+
+      - name: Upload to GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          dir="src-tauri/target/release/bundle/msi"
+          msi="$dir/TaskReminderApp_${version}_x64_zh-CN.msi"
+          files=("$msi" "$msi.sig" "$dir/latest.json")
+          for file in "${files[@]}"; do
+            [ -f "$file" ] || { echo "::error::缺少产物 $file"; exit 1; }
+          done
+          notes_file="docs/release-notes/v${version}.md"
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            # 重新运行时覆盖已有的产物。
+            gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+          else
+            args=(--title "v${version}" --verify-tag)
+            if [ -f "$notes_file" ]; then
+              args+=(--notes-file "$notes_file")
+            else
+              args+=(--notes "TaskReminderApp ${version}")
+            fi
+            if [ "$RELEASE_DRAFT" = "true" ]; then
+              args+=(--draft)
+            fi
+            gh release create "$RELEASE_TAG" "${files[@]}" "${args[@]}"
+          fi

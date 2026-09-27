@@ -64,6 +64,8 @@
 4. 发布：`gh release create v{version}` 上传 MSI + .sig + latest.json
 5. 签名私钥位于 `~/.tauri/taskReminder-updater.key`
 
+也可以交给 CI（`.github/workflows/release.yml`）：改好三处版本号、写好 `docs/release-notes/v{version}.md` 后推送 `v{version}` tag，工作流会检查版本号（`scripts/check-release-version.mjs`）、签名构建 MSI、生成 `latest.json` 并上传到**草稿** Release，检查无误后在 GitHub 上点“Publish release”。需要先在仓库 Secrets 中配置 `TAURI_SIGNING_PRIVATE_KEY`（私钥文件内容）与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。
+
 ## 编码风格与命名约定
 - 缩进：`.vue`、`.ts`、`.css` 使用 2 个空格（保持现有格式）。
 - Vue 组件文件名使用 `PascalCase`（如 `NotificationApp.vue`）。
@@ -143,6 +145,12 @@
 ### Cron 表达式
 - `recurrence::cron_schedule_expr` 把 5 段表达式转换为 `cron` crate 的 6 段格式：周字段按标准 Unix 含义（0/7 = 周日），数字周几会换成英文缩写，因为 `cron` crate 的数字周几是 1 = 周日。6、7 段原样透传。
 - 库里保存用户输入的原始表达式，转换只在计算时进行。
+
+### 密码存放（凭据库）
+- WebDAV 密码与同步密码在 Windows 上存凭据管理器（`secrets.rs`，服务名 `TaskReminderApp`，开发构建为 `TaskReminderApp-dev`，条目名 `{设备 ID}:{字段}`），数据库中留空，`settings.secret_storage` 记为 `keyring`；其他平台或写入失败时存数据库（`db`）。
+- 读写都经 `DbManager::load_settings` / `save_settings`，调用方拿到的 `AppSettings` 里总是明文密码。密码不变时 `save_settings` 不会写凭据库；凭据库读取失败时不会用空值覆盖。
+- 测试中的 `DbManager::new` 不访问系统凭据库；需要时用 `DbManager::with_secret_store` 注入 `secrets::MemoryStore`。
+- 新增敏感设置时同样经 `resolve_secret_storage` 处理，并在 `export_local_snapshot_bytes` 中清空。
 
 ### 同步端到端加密
 - 远端文件：明文为 `taskreminder.db`；开启加密后为 `taskreminder.db.enc`，同时把 `taskreminder.db` 换成以 `TaskReminder-Encrypted-Placeholder` 开头的占位说明（旧版本把它当数据库合并会失败，从而不会上传明文）。

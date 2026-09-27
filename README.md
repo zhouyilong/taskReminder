@@ -204,6 +204,8 @@ pnpm tauri build --bundles msi
 ### 自动更新发布（GitHub Releases）
 项目已接入 Tauri 官方 updater，Windows 客户端会从 GitHub Releases 检查新版本。
 
+除下面的手动流程外，也可以推送 `v{version}` tag 交给 GitHub Actions（`.github/workflows/release.yml`）构建并上传到草稿 Release，检查后手动发布；需先在仓库 Secrets 中配置 `TAURI_SIGNING_PRIVATE_KEY` 与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。
+
 当前更新清单地址固定为：
 ```
 https://github.com/zhouyilong/taskReminder/releases/latest/download/latest.json
