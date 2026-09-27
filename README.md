@@ -284,7 +284,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build-updater.ps1 -ReleaseNotes
 - 前端便签窗口：`src/StickyNoteItemApp.vue`（入口 `src/stickyNoteItem.ts`）
 - 前端主窗口“新建便签”入口：`src/App.vue`
 - 托盘菜单“新建便签”：`src-tauri/src/tray.rs`
-- 后端窗口创建、URL 与层级（锚定/贴桌面）：`src-tauri/src/main.rs`
+- 后端窗口创建、URL 与层级（锚定/贴桌面）：`src-tauri/src/windows/sticky.rs`（命令在 `src-tauri/src/commands/sticky.rs`）
 - 便签数据读写与锚定状态持久化：`src-tauri/src/db.rs`
 
 ### 回归检查清单

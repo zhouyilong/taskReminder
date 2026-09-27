@@ -23,19 +23,20 @@
 - `src/markdown.ts` Markdown 转纯文本/预览文本工具（列表描述、提醒记录去掉前导列表标记）。
 - `src/format.ts` 主窗口共用的时间与文案格式化；`src/recurring.ts` 循环规则展示、表单草稿、校验与提交载荷。
 - `src/timeline.ts`（“今天”时间线）、`src/stats.ts`（统计面板）、`src/calendar.ts`（日历网格与按天归类）、`src/tasks.ts`（标签、优先级、筛选排序）、`src/nlp.ts`（自然语言时间/标签/优先级/循环规则识别）为纯函数，测试在同名 `*.spec.ts`。
+- `src/syncStatus.ts` 云同步状态码到文案与色调的映射（兼容旧版中文状态）。
 - `src/safeStorage.ts` 带异常保护的 `localStorage` 封装；`src/startupError.ts` 启动失败时渲染错误页。
 - `src/styles.css` 为三个窗口共用的全局样式表（设计令牌、主窗口、提醒弹窗、便签）；组件私有样式放在 `.vue` 文件内。
 - `src/update.ts` 自动更新逻辑模块（检查更新、安装更新、偏好管理）。
 - `src/weekdays.ts` 每周位掩码工具（与后端一致：周一 = bit0 … 周日 = bit6）；`src/shortcut.ts` 全局快捷键录制与展示。
 - `src-tauri/` 存放 Tauri 应用的 Rust 后端。
-  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（命令注册、窗口管理、便签窗口）、`db.rs`（SQLite 读写）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync.rs`（WebDAV 同步）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（本地时间格式化与解析）、`holidays.rs`（中国法定节假日与调休）、`quick_add.rs`（快速添加窗口与全局快捷键）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
+  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（插件、命令注册与启动流程）、`commands/`（前端 `invoke` 的命令，按业务分为 `tasks`、`recurring`、`notification`、`trash`、`settings`、`sticky`、`system`、`data`，公共的 `ApiResult` / `into_api` 在 `commands/mod.rs`）、`windows/`（窗口事件；`windows/sticky.rs` 为便签窗口的标签编码、创建显示、层级与 UI 状态注入）、`db.rs`（SQLite 读写）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync.rs`（WebDAV 同步）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（本地时间格式化与解析）、`holidays.rs`（中国法定节假日与调休）、`quick_add.rs`（快速添加窗口与全局快捷键）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
   - `src-tauri/migrations/` 存放数据库迁移文件；新增迁移后需在 `db.rs` 的 `migration_scripts()` 中登记，并同步 `sync.rs` 的列清单与 `ensure_sync_columns`。
   - `src-tauri/data/holidays-cn.json` 为内置法定节假日数据（`off` 放假日、`work` 调休上班日，支持 `[开始, 结束]` 区间），每年国务院发布次年安排后追加，并补充 `holidays.rs` 中的测试。
   - `src-tauri/icons/` 存放应用图标；源文件在 `src-tauri/icons/source/`（`icon.svg` 为主图标，`icon-small.svg` 为 16–32px 简化版），修改后执行 `python3 src-tauri/icons/source/render.py` 重新生成 PNG 与 `icon.ico`（需 `pip install cairosvg pillow`）。
   - `src-tauri/capabilities/default.json` 定义各窗口的权限。
   - `src-tauri/tauri.conf.json` 定义窗口、打包、更新器与应用元数据；`src-tauri/tauri.updater.conf.json` 为签名构建时的覆盖配置。
 - `docs/ROADMAP.md` 为功能扩展与重构路线图，完成条目后同步勾选并补充变更记录。
-- `.github/workflows/ci.yml` 为 CI（Ubuntu + Windows：`pnpm build`、`pnpm test`、`cargo fmt --check`、`cargo clippy`、`cargo test`）。
+- `.github/workflows/ci.yml` 为 CI（Ubuntu + Windows：`pnpm build`、`pnpm test`、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`）。
 - `scripts/` 存放构建与发布脚本。
   - `scripts/build-updater.ps1` 签名构建 MSI + 生成更新清单。
   - `scripts/write-updater-manifest.mjs` 生成 `latest.json` 更新清单。
@@ -104,7 +105,7 @@
 
 ### Linux 下便签窗口必须使用 App URL
 - **问题**：开发模式下便签窗口曾使用 `WebviewUrl::External(localhost)`，Linux WebKitGTK 会将其视为远程源并拒绝 `invoke`，导致便签无法保存。
-- **解决**：`sticky_note_item_url()` 在所有平台都返回 `WebviewUrl::App("sticky-note-item.html")`，`tauri dev` 会自动改写为 `build.devUrl`，与主窗口同源；`main.rs` 中有对应单元测试守护。
+- **解决**：`sticky_note_item_url()` 在所有平台都返回 `WebviewUrl::App("sticky-note-item.html")`，`tauri dev` 会自动改写为 `build.devUrl`，与主窗口同源；`windows/sticky.rs` 中有对应单元测试守护。
 - **规则**：新增的 Tauri 窗口一律使用 `WebviewUrl::App(...)`，不要为开发模式单独改用 External URL。
 
 ### Linux 下透明便签窗口不重绘
@@ -135,6 +136,14 @@
 - 导入、备份恢复都按“较新的 `updated_at` 胜出”合并（导入走 `DbManager::import_rows`，恢复复用 `sync::merge_databases`），之后调用 `schedule_existing` 并 `notify_local_change`。
 - 备份文件名固定为 `taskreminder-YYYYMMDD-HHMMSS.db`，`backup::resolve_backup` 只接受这种名字，防止路径穿越。
 
+### 同步状态码
+- `settings.webdav_last_sync_status` 存状态码（`sync::SyncState`：`never` / `syncing` / `success` / `first_sync` / `lock_busy` / `failed`），`get_status` 与 `sync-status` 事件也返回状态码；文案只在前端 `src/syncStatus.ts` 映射。
+- **规则**：不要再按中文文案判断同步状态；新增状态时同时更新 `SyncState::parse` 与 `syncStatus.ts`。读取时兼容 2.0.1 之前存的中文文案。
+
+### Cron 表达式
+- `recurrence::cron_schedule_expr` 把 5 段表达式转换为 `cron` crate 的 6 段格式：周字段按标准 Unix 含义（0/7 = 周日），数字周几会换成英文缩写，因为 `cron` crate 的数字周几是 1 = 周日。6、7 段原样透传。
+- 库里保存用户输入的原始表达式，转换只在计算时进行。
+
 ### 同步端到端加密
 - 远端文件：明文为 `taskreminder.db`；开启加密后为 `taskreminder.db.enc`，同时把 `taskreminder.db` 换成以 `TaskReminder-Encrypted-Placeholder` 开头的占位说明（旧版本把它当数据库合并会失败，从而不会上传明文）。
 - `sync_with_remote` 的顺序不能随意调整：先判断远端是否加密（未开启加密却遇到加密文件、或解密失败都直接报错，**绝不上传**），合并后先传 `.enc` 再替换明文文件。
@@ -155,7 +164,7 @@
 - 前端使用 Vitest：测试与被测模块同目录，命名为 `*.spec.ts`，运行 `pnpm test`。前端改动至少执行 `pnpm build`（含 `vue-tsc` 类型检查）与 `pnpm test`。
 - 视图里的计算逻辑（如时间线、统计）优先抽成 `src/` 下的纯函数再写测试，组件只做展示。
 - Rust 测试位于 `src-tauri/src/` 各模块的 `#[cfg(test)]` 中（便签窗口标签/URL、提醒队列、墓碑清理、同步合并、时间解析、节假日、循环规则），通过 `cargo test` 运行；需要数据库的测试用临时目录创建 `DbManager`，会自动执行迁移。
-- 提交前运行 `cargo fmt`，CI 会执行 `cargo fmt --check`。
+- 提交前运行 `cargo fmt` 与 `cargo clippy --all-targets -- -D warnings`，CI 会执行 `cargo fmt --check` 并在 clippy 有告警时失败。只在 Windows 编译的代码（`#[cfg(target_os = "windows")]`）在 Linux 上检查不到，可用 `rustup target add x86_64-pc-windows-gnu`（需 `mingw-w64`）后执行 `cargo clippy --target x86_64-pc-windows-gnu --all-targets` 预检。
 - 在 Linux 上构建会改写 `src-tauri/gen/schemas/`，这些生成文件的无关变动不要提交。
 - 仅调整前端 UI 时，可用 `pnpm dev` 在浏览器中预览；浏览器中没有 Tauri 运行时，需要在页面加载前注入 `window.__TAURI_INTERNALS__`（模拟 `invoke`、`transformCallback`、`metadata.currentWindow`）并返回示例数据，否则列表为空。
 
