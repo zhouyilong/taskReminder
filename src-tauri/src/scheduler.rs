@@ -318,20 +318,16 @@ fn emit_notification(app: &AppHandle, queue: &[NotificationPayload]) -> Result<(
     )));
     let _ = window.set_shadow(false);
 
-    if let Ok(monitor) = window.current_monitor() {
-        if let Some(monitor) = monitor {
-            let size = monitor.size();
-            let bottom_margin = if cfg!(target_os = "windows") { 84 } else { 48 };
-            let pos_x = size
-                .width
-                .saturating_sub((notification_width as u32).saturating_add(16))
-                as f64;
-            let pos_y = size
-                .height
-                .saturating_sub(notification_height as u32 + bottom_margin)
-                as f64;
-            let _ = window.set_position(tauri::LogicalPosition { x: pos_x, y: pos_y });
-        }
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        let size = monitor.size();
+        let bottom_margin = if cfg!(target_os = "windows") { 84 } else { 48 };
+        let pos_x =
+            size.width
+                .saturating_sub((notification_width as u32).saturating_add(16)) as f64;
+        let pos_y = size
+            .height
+            .saturating_sub(notification_height as u32 + bottom_margin) as f64;
+        let _ = window.set_position(tauri::LogicalPosition { x: pos_x, y: pos_y });
     }
 
     window.emit(NOTIFICATION_QUEUE_EVENT, queue).ok();

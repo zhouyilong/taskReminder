@@ -103,7 +103,7 @@ fn main() {
         .setup(|app| {
             let result: Result<(), AppError> = (|| {
                 let app_handle = app.handle();
-                let data_dir = paths::resolve_data_dir(&app_handle)?;
+                let data_dir = paths::resolve_data_dir(app_handle)?;
                 let lock_path = paths::lock_path(&data_dir);
                 let dev_mode = paths::is_dev_mode();
                 let dialog_title = if dev_mode {
@@ -122,7 +122,7 @@ fn main() {
                     }
                 }
 
-                tray::setup_tray(&app_handle).map_err(|e| AppError::System(e.to_string()))?;
+                tray::setup_tray(app_handle).map_err(|e| AppError::System(e.to_string()))?;
 
                 if autostart::launched_from_autostart() {
                     if let Some(window) = app.get_webview_window("main") {
@@ -182,11 +182,11 @@ fn main() {
                 app.manage(state);
                 // 快捷键被占用等失败不应阻止应用启动，设置界面可重新应用并查看原因。
                 if let Ok(settings) = db_for_restore.load_settings() {
-                    if let Err(err) = quick_add::apply_shortcut(&app_handle, &settings) {
+                    if let Err(err) = quick_add::apply_shortcut(app_handle, &settings) {
                         eprintln!("[quick-add] {}", err);
                     }
                 }
-                windows::sticky::restore_open_sticky_note_items(&app_handle, &db_for_restore)?;
+                windows::sticky::restore_open_sticky_note_items(app_handle, &db_for_restore)?;
                 Ok(())
             })();
             result.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)

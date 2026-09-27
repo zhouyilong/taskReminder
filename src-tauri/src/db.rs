@@ -207,7 +207,7 @@ impl DbManager {
              WHERE deleted_at IS NULL AND status != 'COMPLETED'
              ORDER BY created_at ASC",
         )?;
-        let rows = stmt.query_map([], |row| task_from_row(row))?;
+        let rows = stmt.query_map([], task_from_row)?;
         Ok(rows.filter_map(Result::ok).collect())
     }
 
@@ -219,7 +219,7 @@ impl DbManager {
              WHERE deleted_at IS NULL AND status = 'COMPLETED'
              ORDER BY completed_at DESC",
         )?;
-        let rows = stmt.query_map([], |row| task_from_row(row))?;
+        let rows = stmt.query_map([], task_from_row)?;
         Ok(rows.filter_map(Result::ok).collect())
     }
 
@@ -229,9 +229,7 @@ impl DbManager {
             "SELECT id, description, sticky_content, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at, tags, priority
              FROM tasks WHERE id = ?",
         )?;
-        let task = stmt
-            .query_row([task_id], |row| task_from_row(row))
-            .optional()?;
+        let task = stmt.query_row([task_id], task_from_row).optional()?;
         Ok(task)
     }
 
@@ -246,7 +244,7 @@ impl DbManager {
              WHERE deleted_at IS NULL
              ORDER BY created_at ASC",
         )?;
-        let rows = stmt.query_map([], |row| recurring_from_row(row))?;
+        let rows = stmt.query_map([], recurring_from_row)?;
         Ok(rows.filter_map(Result::ok).collect())
     }
 
@@ -259,9 +257,7 @@ impl DbManager {
                     updated_at, deleted_at, schedule_weekdays
              FROM recurring_tasks WHERE id = ?",
         )?;
-        let task = stmt
-            .query_row([task_id], |row| recurring_from_row(row))
-            .optional()?;
+        let task = stmt.query_row([task_id], recurring_from_row).optional()?;
         Ok(task)
     }
 
@@ -273,7 +269,7 @@ impl DbManager {
              WHERE deleted_at IS NULL
              ORDER BY trigger_time DESC",
         )?;
-        let rows = stmt.query_map([], |row| record_from_row(row))?;
+        let rows = stmt.query_map([], record_from_row)?;
         Ok(rows.filter_map(Result::ok).collect())
     }
 
@@ -283,9 +279,7 @@ impl DbManager {
             "SELECT id, reminder_id, description, type, trigger_time, close_time, action, updated_at, deleted_at
              FROM reminder_records WHERE id = ?",
         )?;
-        let record = stmt
-            .query_row([record_id], |row| record_from_row(row))
-            .optional()?;
+        let record = stmt.query_row([record_id], record_from_row).optional()?;
         Ok(record)
     }
 
@@ -530,16 +524,6 @@ impl DbManager {
         let now = now_string();
         conn.execute(
             "UPDATE recurring_tasks SET is_paused = 1, updated_at = ? WHERE id = ?",
-            params![now, task_id],
-        )?;
-        Ok(())
-    }
-
-    pub fn resume_recurring_task(&self, task_id: &str) -> Result<(), AppError> {
-        let conn = self.get_conn()?;
-        let now = now_string();
-        conn.execute(
-            "UPDATE recurring_tasks SET is_paused = 0, updated_at = ? WHERE id = ?",
             params![now, task_id],
         )?;
         Ok(())
@@ -1415,9 +1399,7 @@ fn sticky_note_from_task_row(row: &rusqlite::Row<'_>) -> Result<StickyNote, rusq
         is_open: row.get::<_, i64>(7)? == 1,
         is_pinned: row.get::<_, Option<i64>>(8)?.unwrap_or(0) == 1,
         created_at: row.get(9)?,
-        updated_at: row
-            .get::<_, Option<String>>(10)?
-            .unwrap_or_else(|| now_string()),
+        updated_at: row.get::<_, Option<String>>(10)?.unwrap_or_else(now_string),
         reminder_time: row.get(11)?,
     })
 }

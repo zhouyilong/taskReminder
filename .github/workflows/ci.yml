@@ -62,8 +62,7 @@ jobs:
 
       - name: cargo clippy
         working-directory: src-tauri
-        # 存量告警尚未清理，先只输出不阻断；清零后改为 -D warnings。
-        run: cargo clippy --all-targets
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: cargo test
         working-directory: src-tauri

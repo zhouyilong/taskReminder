@@ -35,7 +35,7 @@ fn read_winrt_theme() -> Option<String> {
 #[cfg(target_os = "windows")]
 fn read_syscolor_theme() -> Option<String> {
     use windows::Win32::Graphics::Gdi::{GetSysColor, COLOR_WINDOW};
-    let color = unsafe { GetSysColor(COLOR_WINDOW) } as u32;
+    let color = unsafe { GetSysColor(COLOR_WINDOW) };
     let r = (color & 0x0000_00FF) as f32;
     let g = ((color & 0x0000_FF00) >> 8) as f32;
     let b = ((color & 0x00FF_0000) >> 16) as f32;

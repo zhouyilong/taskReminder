@@ -15,6 +15,8 @@ impl InstanceLock {
             .read(true)
             .write(true)
             .create(true)
+            // 锁文件没有内容，只用来加独占锁；不截断，避免抢锁前改动另一实例的文件。
+            .truncate(false)
             .open(path)?;
         match file.try_lock_exclusive() {
             Ok(_) => Ok(Some(Self { _file: file })),

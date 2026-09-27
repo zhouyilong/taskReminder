@@ -25,7 +25,7 @@ fn encode_note_id(note_id: &str) -> String {
 }
 
 fn decode_note_id(encoded: &str) -> Option<String> {
-    if encoded.len() % 2 != 0 {
+    if !encoded.len().is_multiple_of(2) {
         return None;
     }
     let bytes = (0..encoded.len())

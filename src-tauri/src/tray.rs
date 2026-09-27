@@ -4,7 +4,7 @@ use tauri::{
     AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 
-use crate::commands::sticky::create_custom_sticky_note_via_app;
+use crate::commands::sticky::{create_custom_sticky_note_via_app, CreateStickyNotePayload};
 use crate::paths;
 use crate::state::AppState;
 
@@ -32,9 +32,11 @@ fn show_main(app: &AppHandle) {
 
 fn create_sticky_note(app: &AppHandle) {
     if let Some(state) = app.try_state::<AppState>() {
-        if let Err(err) =
-            create_custom_sticky_note_via_app(app, state.inner(), "", None, None, None, None, None)
-        {
+        if let Err(err) = create_custom_sticky_note_via_app(
+            app,
+            state.inner(),
+            &CreateStickyNotePayload::default(),
+        ) {
             eprintln!("[tray] 新建便签失败: {}", err);
         }
     } else {
@@ -94,7 +96,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
                 ..
             } = event
             {
-                show_main(&tray.app_handle());
+                show_main(tray.app_handle());
             }
         });
 

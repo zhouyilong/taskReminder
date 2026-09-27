@@ -117,16 +117,6 @@ impl CloudSyncService {
         Ok(())
     }
 
-    pub fn stop(&self) {
-        if let Some(handle) = self.scheduled.lock().unwrap().take() {
-            handle.abort();
-        }
-        if let Some(handle) = self.pending.lock().unwrap().take() {
-            handle.abort();
-        }
-        *self.next_auto_sync_due.lock().unwrap() = None;
-    }
-
     pub fn update_settings(&self) -> Result<(), AppError> {
         self.refresh_dirty_from_settings()?;
         self.schedule_if_needed()?;
