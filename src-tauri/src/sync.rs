@@ -449,7 +449,7 @@ fn download_remote(client: &WebDavClient) -> Result<std::path::PathBuf, AppError
     Ok(target)
 }
 
-fn merge_databases(
+pub(crate) fn merge_databases(
     local_path: &std::path::Path,
     remote_path: &std::path::Path,
 ) -> Result<(), AppError> {

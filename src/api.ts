@@ -10,7 +10,10 @@ import type {
   NotificationPayload,
   UiStatePayload,
   TrashPayload,
-  RecurringPreview
+  RecurringPreview,
+  ExportResult,
+  ImportSummary,
+  BackupListPayload
 } from "./types";
 
 export const api = {
@@ -103,6 +106,23 @@ export const api = {
   /** 预估各循环提醒在 until（含）之前的触发时间。 */
   async previewRecurringTriggers(until: string, limit?: number): Promise<RecurringPreview[]> {
     return invoke("preview_recurring_triggers", { until, limit: limit ?? null });
+  },
+  /** 弹出保存对话框导出数据；取消时返回 null。 */
+  async exportData(format: "json" | "markdown" | "ics"): Promise<ExportResult | null> {
+    return invoke("export_data", { format });
+  },
+  /** 选择 JSON 备份并合并导入；取消时返回 null。 */
+  async importData(): Promise<ImportSummary | null> {
+    return invoke("import_data");
+  },
+  async listBackups(): Promise<BackupListPayload> {
+    return invoke("list_backups");
+  },
+  async createBackupNow(): Promise<void> {
+    return invoke("create_backup_now");
+  },
+  async restoreBackup(name: string): Promise<void> {
+    return invoke("restore_backup", { name });
   },
   async getSettings(): Promise<AppSettings> {
     return invoke("get_settings");

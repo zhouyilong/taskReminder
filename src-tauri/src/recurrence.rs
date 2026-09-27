@@ -29,7 +29,7 @@ fn first_weekday(mask: i64) -> Option<i64> {
 }
 
 /// 读取任务的每周位掩码；旧数据只有 `schedule_weekday` 时由它换算。
-fn weekday_mask(task: &RecurringTask) -> Option<i64> {
+pub fn weekday_mask(task: &RecurringTask) -> Option<i64> {
     match task.schedule_weekdays {
         Some(mask) if mask & WEEKDAY_MASK_ALL != 0 => Some(mask & WEEKDAY_MASK_ALL),
         _ => task

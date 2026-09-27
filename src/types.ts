@@ -137,3 +137,26 @@ export interface RecurringPreview {
   /** 预估的触发时间（本地时间），按先后排列。 */
   times: string[];
 }
+
+export interface ExportResult {
+  path: string;
+  /** 导出日历时无法表达而跳过的循环提醒数量。 */
+  skipped: number;
+}
+
+export interface ImportSummary {
+  inserted: number;
+  updated: number;
+  skipped: number;
+}
+
+export interface BackupInfo {
+  name: string;
+  size: number;
+  createdAt: string;
+}
+
+export interface BackupListPayload {
+  dir: string;
+  backups: BackupInfo[];
+}
