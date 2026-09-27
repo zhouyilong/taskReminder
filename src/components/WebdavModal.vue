@@ -9,7 +9,19 @@
     </div>
     <div class="modal-section">
       <div class="form-row compact">
+        <label>服务</label>
+        <select class="select" v-model="presetId" @change="handlePresetChange">
+          <option v-for="preset in WEBDAV_PRESETS" :key="preset.id" :value="preset.id">{{ preset.label }}</option>
+        </select>
+      </div>
+      <div class="form-row compact">
+        <span class="field-hint">{{ presetHint }}</span>
+      </div>
+      <div class="form-row compact">
         <input class="input" v-model="settingsDraft.webdavUrl" placeholder="WebDAV 地址" style="flex: 1" />
+      </div>
+      <div v-if="urlWarning" class="form-row compact">
+        <span class="field-hint is-warning">{{ urlWarning }}</span>
       </div>
       <div class="form-row compact">
         <input class="input" v-model="settingsDraft.webdavUsername" placeholder="用户名" style="flex: 1" />
@@ -93,11 +105,26 @@ import Modal from "./Modal.vue";
 import { api } from "../api";
 import { formatDateTime } from "../format";
 import { syncStateLabel } from "../syncStatus";
+import {
+  WEBDAV_PRESETS,
+  applyWebdavPreset,
+  detectWebdavPreset,
+  findWebdavPreset,
+  webdavUrlPlaceholderWarning,
+  type WebdavPresetId
+} from "../webdavPresets";
 import { useSettings } from "../composables/useSettings";
 
 const { webdavOpen, settingsDraft, loadSettings, refreshSyncStatus } = useSettings();
 const webdavPasswordVisible = ref(false);
 const passphraseVisible = ref(false);
+const presetId = ref<WebdavPresetId>("custom");
+const presetHint = computed(() => findWebdavPreset(presetId.value).hint);
+const urlWarning = computed(() => webdavUrlPlaceholderWarning(settingsDraft.webdavUrl));
+
+const handlePresetChange = () => {
+  Object.assign(settingsDraft, applyWebdavPreset(presetId.value, settingsDraft));
+};
 
 const MIN_PASSPHRASE_CHARS = 8;
 const passphraseError = computed(() => {
@@ -112,6 +139,7 @@ watch(webdavOpen, open => {
   if (open) {
     webdavPasswordVisible.value = false;
     passphraseVisible.value = false;
+    presetId.value = detectWebdavPreset(settingsDraft.webdavUrl);
   }
 });
 
