@@ -101,6 +101,10 @@ export interface AppSettings {
   quickAddEnabled: boolean;
   /** Tauri 加速键格式，如 CommandOrControl+Alt+N。 */
   quickAddShortcut: string;
+  /** 云同步端到端加密。 */
+  syncEncryptionEnabled: boolean;
+  /** 同步密码，只保存在本机。 */
+  syncPassphrase: string;
 }
 
 export interface UiStatePayload {

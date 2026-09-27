@@ -15,6 +15,7 @@ mod scheduler;
 mod single_instance;
 mod state;
 mod sync;
+mod sync_crypto;
 mod time;
 mod tray;
 
@@ -832,6 +833,9 @@ fn save_settings(
     sanitized_settings.sticky_note_opacity =
         normalize_sticky_note_opacity(sanitized_settings.sticky_note_opacity);
     sanitized_settings.window_opacity = normalize_window_opacity(sanitized_settings.window_opacity);
+    // 广播给便签等窗口的设置不需要携带密码。
+    sanitized_settings.webdav_password.clear();
+    sanitized_settings.sync_passphrase.clear();
     let _ = app.emit("sticky-note-settings-updated", sanitized_settings.clone());
     let _ = app.emit("settings-updated", sanitized_settings);
     into_api(state.sync.update_settings())?;

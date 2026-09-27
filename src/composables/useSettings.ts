@@ -27,7 +27,9 @@ const settingsDraft = reactive<AppSettings>({
   webdavDeviceId: "",
   notificationTheme: "app",
   quickAddEnabled: true,
-  quickAddShortcut: "CommandOrControl+Alt+N"
+  quickAddShortcut: "CommandOrControl+Alt+N",
+  syncEncryptionEnabled: false,
+  syncPassphrase: ""
 });
 const syncStatus = ref<SyncStatus | null>(null);
 const quickAddShortcutError = ref("");

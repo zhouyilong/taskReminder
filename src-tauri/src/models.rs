@@ -166,6 +166,12 @@ pub struct AppSettings {
     pub quick_add_enabled: bool,
     #[serde(default = "default_quick_add_shortcut")]
     pub quick_add_shortcut: String,
+    /// 云同步端到端加密：上传前用同步密码加密快照。
+    #[serde(default)]
+    pub sync_encryption_enabled: bool,
+    /// 同步密码，只保存在本机；上传的快照中会被清空。
+    #[serde(default)]
+    pub sync_passphrase: String,
 }
 
 fn default_true() -> bool {

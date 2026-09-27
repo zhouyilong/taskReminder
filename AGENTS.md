@@ -28,7 +28,7 @@
 - `src/update.ts` 自动更新逻辑模块（检查更新、安装更新、偏好管理）。
 - `src/weekdays.ts` 每周位掩码工具（与后端一致：周一 = bit0 … 周日 = bit6）；`src/shortcut.ts` 全局快捷键录制与展示。
 - `src-tauri/` 存放 Tauri 应用的 Rust 后端。
-  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（命令注册、窗口管理、便签窗口）、`db.rs`（SQLite 读写）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync.rs`（WebDAV 同步）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（本地时间格式化与解析）、`holidays.rs`（中国法定节假日与调休）、`quick_add.rs`（快速添加窗口与全局快捷键）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
+  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（命令注册、窗口管理、便签窗口）、`db.rs`（SQLite 读写）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync.rs`（WebDAV 同步）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（本地时间格式化与解析）、`holidays.rs`（中国法定节假日与调休）、`quick_add.rs`（快速添加窗口与全局快捷键）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
   - `src-tauri/migrations/` 存放数据库迁移文件；新增迁移后需在 `db.rs` 的 `migration_scripts()` 中登记，并同步 `sync.rs` 的列清单与 `ensure_sync_columns`。
   - `src-tauri/data/holidays-cn.json` 为内置法定节假日数据（`off` 放假日、`work` 调休上班日，支持 `[开始, 结束]` 区间），每年国务院发布次年安排后追加，并补充 `holidays.rs` 中的测试。
   - `src-tauri/icons/` 存放应用图标；源文件在 `src-tauri/icons/source/`（`icon.svg` 为主图标，`icon-small.svg` 为 16–32px 简化版），修改后执行 `python3 src-tauri/icons/source/render.py` 重新生成 PNG 与 `icon.ico`（需 `pip install cairosvg pillow`）。
@@ -134,6 +134,14 @@
 - 文件对话框由后端 `tauri-plugin-dialog` 弹出（`export_data` / `import_data` 为 async 命令，阻塞对话框不能在主线程等待），前端不传文件路径；因此不需要为对话框添加前端权限。
 - 导入、备份恢复都按“较新的 `updated_at` 胜出”合并（导入走 `DbManager::import_rows`，恢复复用 `sync::merge_databases`），之后调用 `schedule_existing` 并 `notify_local_change`。
 - 备份文件名固定为 `taskreminder-YYYYMMDD-HHMMSS.db`，`backup::resolve_backup` 只接受这种名字，防止路径穿越。
+
+### 同步端到端加密
+- 远端文件：明文为 `taskreminder.db`；开启加密后为 `taskreminder.db.enc`，同时把 `taskreminder.db` 换成以 `TaskReminder-Encrypted-Placeholder` 开头的占位说明（旧版本把它当数据库合并会失败，从而不会上传明文）。
+- `sync_with_remote` 的顺序不能随意调整：先判断远端是否加密（未开启加密却遇到加密文件、或解密失败都直接报错，**绝不上传**），合并后先传 `.enc` 再替换明文文件。
+- 远端存储经 `RemoteStore` 接口访问，测试用内存实现（`sync.rs` 测试中的 `MemoryStore`）覆盖首次同步、明文转加密、密码错误等流程；测试使用 `sync_crypto::TEST_PARAMS` 的小 KDF 参数。
+- 上传的快照由 `export_local_snapshot_bytes` 生成并清空 `webdav_password` 与 `sync_passphrase`；新增敏感设置时要一并清空。
+- 同步密码存于本机 `settings.sync_passphrase`（settings 表不参与合并）；`save_settings` 广播给其他窗口的设置会清空两个密码。
+- 开发构建对 `argon2`/`blake2` 单独开启优化（`Cargo.toml` 的 `profile.dev.package`），否则每次同步派生密钥要数秒。
 
 ### 全局快捷键
 - 快捷键由 `quick_add::apply_shortcut` 统一注册（先 `unregister_all` 再注册），启动时与保存设置后调用；失败（格式无效、被其他程序占用、Wayland 不支持等）不能阻止应用启动，原因通过 `apply_quick_add_shortcut` 命令返回给设置界面。

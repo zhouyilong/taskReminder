@@ -15,9 +15,14 @@ use tokio::time::sleep;
 use crate::db::{DbManager, TOMBSTONE_RETENTION_DAYS_SYNC};
 use crate::errors::AppError;
 use crate::models::{AppSettings, SyncStatus};
+use crate::sync_crypto::{self, KdfParams};
 use crate::time::parse_datetime_any;
 
 const REMOTE_DB_NAME: &str = "taskreminder.db";
+/// 开启端到端加密后的远端文件；`REMOTE_DB_NAME` 处改放占位说明，旧版本读到后同步失败而不会上传明文。
+const REMOTE_ENC_NAME: &str = "taskreminder.db.enc";
+const PLACEHOLDER_MARKER: &[u8] = b"TaskReminder-Encrypted-Placeholder";
+const SQLITE_MAGIC: &[u8] = b"SQLite format 3\0";
 const LOCK_FILE_NAME: &str = "taskreminder.lock";
 const LOCK_TTL_SECONDS: i64 = 120;
 
@@ -315,8 +320,6 @@ impl CloudSyncService {
         let lock = LockInfo::new(&settings.webdav_device_id);
 
         let _ = self.update_sync_status("同步中", None);
-        let mut remote: Option<std::path::PathBuf> = None;
-        let mut snapshot: Option<std::path::PathBuf> = None;
         let mut lock_acquired = false;
 
         let result = (|| -> Result<SyncOutcome, AppError> {
@@ -326,25 +329,16 @@ impl CloudSyncService {
                 return Ok(SyncOutcome::Skipped);
             }
 
-            if !client.exists(REMOTE_DB_NAME)? {
-                let local_snapshot = export_local_snapshot(&self.db.db_path())?;
-                client.upload(REMOTE_DB_NAME, &local_snapshot)?;
-                snapshot = Some(local_snapshot);
-                let _ = self.update_sync_status("首次同步完成", None);
-                return Ok(SyncOutcome::Success);
+            let result = sync_with_remote(&client, &self.db, &settings, KdfParams::DEFAULT)?;
+            match result {
+                RemoteSyncResult::FirstUpload => {
+                    let _ = self.update_sync_status("首次同步完成", None);
+                }
+                RemoteSyncResult::Merged => {
+                    let _ = self.update_sync_status("同步成功", None);
+                    let _ = self.app.emit("data-updated", ());
+                }
             }
-
-            let downloaded = download_remote(&client)?;
-            remote = Some(downloaded.clone());
-            merge_databases(&self.db.db_path(), &downloaded)?;
-            // 合并后再清理过期墓碑，随后上传的快照中也不再包含它们。
-            self.db
-                .purge_expired_tombstones(TOMBSTONE_RETENTION_DAYS_SYNC)?;
-            let local_snapshot = export_local_snapshot(&self.db.db_path())?;
-            client.upload(REMOTE_DB_NAME, &local_snapshot)?;
-            snapshot = Some(local_snapshot);
-            let _ = self.update_sync_status("同步成功", None);
-            let _ = self.app.emit("data-updated", ());
             Ok(SyncOutcome::Success)
         })();
 
@@ -359,8 +353,6 @@ impl CloudSyncService {
         if lock_acquired {
             client.release_lock();
         }
-        cleanup_temp_file(&remote);
-        cleanup_temp_file(&snapshot);
         Ok(outcome)
     }
 
@@ -430,23 +422,171 @@ fn next_allowed_auto_sync_time(
 
 pub fn test_webdav(settings: &AppSettings) -> Result<(bool, String), AppError> {
     let client = WebDavClient::new(settings)?;
-    client.test_connection()
+    let (ok, message) = client.test_connection()?;
+    if !ok {
+        return Ok((ok, message));
+    }
+    Ok(check_encryption(&client, settings))
 }
 
-fn export_local_snapshot(db_path: &std::path::Path) -> Result<std::path::PathBuf, AppError> {
-    let snapshot =
-        std::env::temp_dir().join(format!("taskreminder-snapshot-{}.db", uuid::Uuid::new_v4()));
-    let conn = Connection::open(db_path)?;
-    let escaped = snapshot.to_string_lossy().replace('"', "''");
-    conn.execute_batch(&format!("VACUUM INTO '{}'", escaped))?;
-    Ok(snapshot)
+/// 连接成功后检查加密设置与远端数据是否匹配，给出提示。
+fn check_encryption(store: &dyn RemoteStore, settings: &AppSettings) -> (bool, String) {
+    let remote_encrypted = match store.exists(REMOTE_ENC_NAME) {
+        Ok(value) => value,
+        Err(err) => return (false, format!("连接成功，但读取远端数据失败：{}", err)),
+    };
+    if !settings.sync_encryption_enabled {
+        return if remote_encrypted {
+            (
+                false,
+                "连接成功，但远端数据已加密：请开启端到端加密并填写同步密码".to_string(),
+            )
+        } else {
+            (true, "连接成功".to_string())
+        };
+    }
+    if let Err(err) = sync_crypto::validate_passphrase(&settings.sync_passphrase) {
+        return (false, format!("连接成功，但{}", err));
+    }
+    if !remote_encrypted {
+        return (true, "连接成功，下次同步时将加密上传".to_string());
+    }
+    match store
+        .get(REMOTE_ENC_NAME)
+        .map_err(|e| e.to_string())
+        .and_then(|data| {
+            sync_crypto::decrypt(&data, &settings.sync_passphrase).map_err(|e| e.to_string())
+        }) {
+        Ok(_) => (true, "连接成功，同步密码正确".to_string()),
+        Err(message) => (false, format!("连接成功，但{}", message)),
+    }
 }
 
-fn download_remote(client: &WebDavClient) -> Result<std::path::PathBuf, AppError> {
-    let target =
-        std::env::temp_dir().join(format!("taskreminder-remote-{}.db", uuid::Uuid::new_v4()));
-    client.download(REMOTE_DB_NAME, &target)?;
-    Ok(target)
+/// 远端存储的最小接口：WebDAV 客户端实现它，测试中用内存实现替代。
+trait RemoteStore {
+    fn exists(&self, name: &str) -> Result<bool, AppError>;
+    fn get(&self, name: &str) -> Result<Vec<u8>, AppError>;
+    fn put(&self, name: &str, data: Vec<u8>) -> Result<(), AppError>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RemoteSyncResult {
+    /// 远端没有数据，上传了本地快照。
+    FirstUpload,
+    /// 与远端合并后上传。
+    Merged,
+}
+
+fn placeholder_content() -> Vec<u8> {
+    let mut data = PLACEHOLDER_MARKER.to_vec();
+    data.extend_from_slice(
+        "\n此目录的任务提醒同步数据已开启端到端加密，保存在 taskreminder.db.enc 中。\n\
+         请把所有设备升级到 2.0 及以上版本，并在“云同步设置”中开启加密、填写相同的同步密码。\n"
+            .as_bytes(),
+    );
+    data
+}
+
+fn crypto_error(err: sync_crypto::CryptoError) -> AppError {
+    AppError::Sync(err.to_string())
+}
+
+/// 加锁之后的同步主体：下载（必要时解密）远端快照并合并，再上传本地快照（必要时加密）。
+///
+/// - 远端已加密而本机未开启加密：报错，不上传，避免把明文传回服务器。
+/// - 同步密码错误：解密失败即报错，不会用另一个密码覆盖远端数据。
+/// - 本机开启加密而远端还是明文：合并明文后改为上传加密文件，并把明文文件替换为占位说明。
+fn sync_with_remote(
+    store: &dyn RemoteStore,
+    db: &DbManager,
+    settings: &AppSettings,
+    params: KdfParams,
+) -> Result<RemoteSyncResult, AppError> {
+    let encrypt = settings.sync_encryption_enabled;
+    if encrypt {
+        sync_crypto::validate_passphrase(&settings.sync_passphrase).map_err(crypto_error)?;
+    }
+
+    let remote_snapshot = if store.exists(REMOTE_ENC_NAME)? {
+        if !encrypt {
+            return Err(AppError::Sync(
+                "远端数据已开启端到端加密：请在云同步设置中开启加密并填写同步密码".to_string(),
+            ));
+        }
+        let data = store.get(REMOTE_ENC_NAME)?;
+        Some(sync_crypto::decrypt(&data, &settings.sync_passphrase).map_err(crypto_error)?)
+    } else if store.exists(REMOTE_DB_NAME)? {
+        let data = store.get(REMOTE_DB_NAME)?;
+        if data.starts_with(PLACEHOLDER_MARKER) {
+            // 加密文件被手动删除，只剩占位说明：按首次同步处理。
+            None
+        } else if data.starts_with(SQLITE_MAGIC) {
+            Some(data)
+        } else {
+            return Err(AppError::Sync("远端同步文件格式无效".to_string()));
+        }
+    } else {
+        None
+    };
+
+    let merged = remote_snapshot.is_some();
+    if let Some(snapshot) = remote_snapshot {
+        merge_snapshot_bytes(&db.db_path(), &snapshot)?;
+        // 合并后再清理过期墓碑，随后上传的快照中也不再包含它们。
+        db.purge_expired_tombstones(TOMBSTONE_RETENTION_DAYS_SYNC)?;
+    }
+
+    let local_snapshot = export_local_snapshot_bytes(&db.db_path())?;
+    if encrypt {
+        let data = sync_crypto::encrypt(&local_snapshot, &settings.sync_passphrase, params)
+            .map_err(crypto_error)?;
+        store.put(REMOTE_ENC_NAME, data)?;
+        // 先传加密文件再替换明文：中途失败时远端仍有一份可用的数据。
+        store.put(REMOTE_DB_NAME, placeholder_content())?;
+    } else {
+        store.put(REMOTE_DB_NAME, local_snapshot)?;
+    }
+
+    Ok(if merged {
+        RemoteSyncResult::Merged
+    } else {
+        RemoteSyncResult::FirstUpload
+    })
+}
+
+fn temp_db_path(kind: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("taskreminder-{}-{}.db", kind, uuid::Uuid::new_v4()))
+}
+
+/// 导出本地数据库快照并清空其中的敏感设置（WebDAV 密码、同步密码）；远端只用到数据表。
+fn export_local_snapshot_bytes(db_path: &std::path::Path) -> Result<Vec<u8>, AppError> {
+    let snapshot = temp_db_path("snapshot");
+    let result = (|| {
+        {
+            let conn = Connection::open(db_path)?;
+            let escaped = snapshot.to_string_lossy().replace('\'', "''");
+            conn.execute_batch(&format!("VACUUM INTO '{}'", escaped))?;
+        }
+        {
+            let conn = Connection::open(&snapshot)?;
+            conn.execute(
+                "UPDATE settings SET webdav_password = '', sync_passphrase = ''",
+                [],
+            )?;
+        }
+        Ok(std::fs::read(&snapshot)?)
+    })();
+    let _ = std::fs::remove_file(&snapshot);
+    result
+}
+
+fn merge_snapshot_bytes(local_path: &std::path::Path, data: &[u8]) -> Result<(), AppError> {
+    let remote = temp_db_path("remote");
+    let result = std::fs::write(&remote, data)
+        .map_err(AppError::from)
+        .and_then(|_| merge_databases(local_path, &remote));
+    let _ = std::fs::remove_file(&remote);
+    result
 }
 
 pub(crate) fn merge_databases(
@@ -743,55 +883,6 @@ impl WebDavClient {
         Ok((false, format!("连接失败，状态码: {}", status)))
     }
 
-    fn exists(&self, name: &str) -> Result<bool, AppError> {
-        let url = build_url(&self.base_url, name);
-        let mut req = self.client.head(url);
-        if let Some(auth) = &self.auth_header {
-            req = req.header("Authorization", auth);
-        }
-        let resp = req.send().map_err(|e| AppError::Sync(e.to_string()))?;
-        Ok(resp.status() == StatusCode::OK)
-    }
-
-    fn download(&self, name: &str, target: &std::path::Path) -> Result<(), AppError> {
-        let url = build_url(&self.base_url, name);
-        let mut req = self.client.get(url);
-        if let Some(auth) = &self.auth_header {
-            req = req.header("Authorization", auth);
-        }
-        let resp = req.send().map_err(|e| AppError::Sync(e.to_string()))?;
-        if !resp.status().is_success() {
-            return Err(AppError::Sync(format!(
-                "下载失败，状态码: {}",
-                resp.status()
-            )));
-        }
-        let bytes = resp.bytes().map_err(|e| AppError::Sync(e.to_string()))?;
-        std::fs::write(target, bytes)?;
-        Ok(())
-    }
-
-    fn upload(&self, name: &str, source: &std::path::Path) -> Result<(), AppError> {
-        let url = build_url(&self.base_url, name);
-        let data = std::fs::read(source)?;
-        let mut req = self
-            .client
-            .put(url)
-            .body(data)
-            .header("Content-Type", "application/octet-stream");
-        if let Some(auth) = &self.auth_header {
-            req = req.header("Authorization", auth);
-        }
-        let resp = req.send().map_err(|e| AppError::Sync(e.to_string()))?;
-        if !resp.status().is_success() {
-            return Err(AppError::Sync(format!(
-                "上传失败，状态码: {}",
-                resp.status()
-            )));
-        }
-        Ok(())
-    }
-
     fn try_acquire_lock(&self, info: &LockInfo) -> Result<bool, AppError> {
         if let Some(existing) = self.get_lock()? {
             if !existing.is_expired() && existing.device_id != info.device_id {
@@ -855,6 +946,55 @@ impl WebDavClient {
     }
 }
 
+impl RemoteStore for WebDavClient {
+    fn exists(&self, name: &str) -> Result<bool, AppError> {
+        let url = build_url(&self.base_url, name);
+        let mut req = self.client.head(url);
+        if let Some(auth) = &self.auth_header {
+            req = req.header("Authorization", auth);
+        }
+        let resp = req.send().map_err(|e| AppError::Sync(e.to_string()))?;
+        Ok(resp.status() == StatusCode::OK)
+    }
+
+    fn get(&self, name: &str) -> Result<Vec<u8>, AppError> {
+        let url = build_url(&self.base_url, name);
+        let mut req = self.client.get(url);
+        if let Some(auth) = &self.auth_header {
+            req = req.header("Authorization", auth);
+        }
+        let resp = req.send().map_err(|e| AppError::Sync(e.to_string()))?;
+        if !resp.status().is_success() {
+            return Err(AppError::Sync(format!(
+                "下载失败，状态码: {}",
+                resp.status()
+            )));
+        }
+        let bytes = resp.bytes().map_err(|e| AppError::Sync(e.to_string()))?;
+        Ok(bytes.to_vec())
+    }
+
+    fn put(&self, name: &str, data: Vec<u8>) -> Result<(), AppError> {
+        let url = build_url(&self.base_url, name);
+        let mut req = self
+            .client
+            .put(url)
+            .body(data)
+            .header("Content-Type", "application/octet-stream");
+        if let Some(auth) = &self.auth_header {
+            req = req.header("Authorization", auth);
+        }
+        let resp = req.send().map_err(|e| AppError::Sync(e.to_string()))?;
+        if !resp.status().is_success() {
+            return Err(AppError::Sync(format!(
+                "上传失败，状态码: {}",
+                resp.status()
+            )));
+        }
+        Ok(())
+    }
+}
+
 fn build_base_url(url: &str, root: &str) -> String {
     let mut base = url.trim().trim_end_matches('/').to_string();
     let mut root = root.trim().to_string();
@@ -886,12 +1026,6 @@ fn build_auth_header(username: &str, password: &str) -> Option<String> {
     let token =
         base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", username, password));
     Some(format!("Basic {}", token))
-}
-
-fn cleanup_temp_file(path: &Option<std::path::PathBuf>) {
-    if let Some(path) = path {
-        let _ = std::fs::remove_file(path);
-    }
 }
 
 #[cfg(test)]
@@ -1016,5 +1150,242 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(local_dir);
         let _ = std::fs::remove_dir_all(remote_dir);
+    }
+
+    #[derive(Default)]
+    struct MemoryStore {
+        files: std::cell::RefCell<HashMap<String, Vec<u8>>>,
+    }
+
+    impl MemoryStore {
+        fn file(&self, name: &str) -> Option<Vec<u8>> {
+            self.files.borrow().get(name).cloned()
+        }
+    }
+
+    impl RemoteStore for MemoryStore {
+        fn exists(&self, name: &str) -> Result<bool, AppError> {
+            Ok(self.files.borrow().contains_key(name))
+        }
+
+        fn get(&self, name: &str) -> Result<Vec<u8>, AppError> {
+            self.file(name)
+                .ok_or_else(|| AppError::Sync("not found".to_string()))
+        }
+
+        fn put(&self, name: &str, data: Vec<u8>) -> Result<(), AppError> {
+            self.files.borrow_mut().insert(name.to_string(), data);
+            Ok(())
+        }
+    }
+
+    fn settings_for(db: &DbManager, encrypted: bool, passphrase: &str) -> AppSettings {
+        let mut settings = db.load_settings().unwrap();
+        settings.webdav_password = "webdav-secret".to_string();
+        settings.sync_encryption_enabled = encrypted;
+        settings.sync_passphrase = passphrase.to_string();
+        db.save_settings(&settings).unwrap();
+        settings
+    }
+
+    fn sync(
+        store: &MemoryStore,
+        db: &DbManager,
+        settings: &AppSettings,
+    ) -> Result<RemoteSyncResult, AppError> {
+        sync_with_remote(store, db, settings, crate::sync_crypto::TEST_PARAMS)
+    }
+
+    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
+    }
+
+    fn task_titles(db: &DbManager) -> Vec<String> {
+        let mut titles: Vec<String> = db
+            .list_active_tasks()
+            .unwrap()
+            .into_iter()
+            .map(|task| task.description)
+            .collect();
+        titles.sort();
+        titles
+    }
+
+    const PASS: &str = "correct horse battery";
+
+    #[test]
+    fn plain_sync_uploads_scrubbed_snapshot_and_merges() {
+        let (a, a_dir) = temp_db("plain-a");
+        let (b, b_dir) = temp_db("plain-b");
+        let store = MemoryStore::default();
+        a.create_task("来自 A", None).unwrap();
+        b.create_task("来自 B", None).unwrap();
+
+        let settings_a = settings_for(&a, false, "");
+        assert_eq!(
+            sync(&store, &a, &settings_a).unwrap(),
+            RemoteSyncResult::FirstUpload
+        );
+        let uploaded = store.file(REMOTE_DB_NAME).unwrap();
+        assert!(uploaded.starts_with(SQLITE_MAGIC));
+        // 上传的快照不含 WebDAV 密码。
+        assert!(!contains(&uploaded, b"webdav-secret"));
+
+        let settings_b = settings_for(&b, false, "");
+        assert_eq!(
+            sync(&store, &b, &settings_b).unwrap(),
+            RemoteSyncResult::Merged
+        );
+        assert_eq!(task_titles(&b), vec!["来自 A", "来自 B"]);
+        // 本机设置不受影响。
+        assert_eq!(b.load_settings().unwrap().webdav_password, "webdav-secret");
+
+        let _ = std::fs::remove_dir_all(a_dir);
+        let _ = std::fs::remove_dir_all(b_dir);
+    }
+
+    #[test]
+    fn encrypted_sync_roundtrips_without_plaintext_on_server() {
+        let (a, a_dir) = temp_db("enc-a");
+        let (b, b_dir) = temp_db("enc-b");
+        let store = MemoryStore::default();
+        a.create_task("机密会议", None).unwrap();
+
+        let settings_a = settings_for(&a, true, PASS);
+        assert_eq!(
+            sync(&store, &a, &settings_a).unwrap(),
+            RemoteSyncResult::FirstUpload
+        );
+        let encrypted = store.file(REMOTE_ENC_NAME).unwrap();
+        assert!(crate::sync_crypto::is_encrypted(&encrypted));
+        assert!(!contains(&encrypted, "机密会议".as_bytes()));
+        assert!(!contains(&encrypted, PASS.as_bytes()));
+        assert!(store
+            .file(REMOTE_DB_NAME)
+            .unwrap()
+            .starts_with(PLACEHOLDER_MARKER));
+
+        let settings_b = settings_for(&b, true, PASS);
+        assert_eq!(
+            sync(&store, &b, &settings_b).unwrap(),
+            RemoteSyncResult::Merged
+        );
+        assert_eq!(task_titles(&b), vec!["机密会议"]);
+
+        let _ = std::fs::remove_dir_all(a_dir);
+        let _ = std::fs::remove_dir_all(b_dir);
+    }
+
+    #[test]
+    fn enabling_encryption_migrates_plain_remote_and_blocks_plain_devices() {
+        let (a, a_dir) = temp_db("mig-a");
+        let (b, b_dir) = temp_db("mig-b");
+        let store = MemoryStore::default();
+        a.create_task("A 的待办", None).unwrap();
+        b.create_task("B 的待办", None).unwrap();
+
+        let plain_a = settings_for(&a, false, "");
+        sync(&store, &a, &plain_a).unwrap();
+
+        // B 开启加密：合并明文后改为上传加密文件，明文文件被占位说明替换。
+        let encrypted_b = settings_for(&b, true, PASS);
+        assert_eq!(
+            sync(&store, &b, &encrypted_b).unwrap(),
+            RemoteSyncResult::Merged
+        );
+        assert_eq!(task_titles(&b), vec!["A 的待办", "B 的待办"]);
+        assert!(store.file(REMOTE_ENC_NAME).is_some());
+        let placeholder = store.file(REMOTE_DB_NAME).unwrap();
+        assert!(placeholder.starts_with(PLACEHOLDER_MARKER));
+
+        // A 仍未开启加密：报错且不上传明文。
+        let err = sync(&store, &a, &plain_a).unwrap_err().to_string();
+        assert!(err.contains("端到端加密"), "{}", err);
+        assert_eq!(store.file(REMOTE_DB_NAME).unwrap(), placeholder);
+
+        // 旧版本会把占位说明当作数据库合并：必须失败，才不会继续上传明文。
+        let placeholder_path = a_dir.join("placeholder.db");
+        std::fs::write(&placeholder_path, &placeholder).unwrap();
+        assert!(merge_databases(&a.db_path(), &placeholder_path).is_err());
+
+        let _ = std::fs::remove_dir_all(a_dir);
+        let _ = std::fs::remove_dir_all(b_dir);
+    }
+
+    #[test]
+    fn wrong_passphrase_aborts_without_overwriting_remote() {
+        let (a, a_dir) = temp_db("wrong-a");
+        let (b, b_dir) = temp_db("wrong-b");
+        let store = MemoryStore::default();
+        a.create_task("A 的待办", None).unwrap();
+        b.create_task("B 的待办", None).unwrap();
+        sync(&store, &a, &settings_for(&a, true, PASS)).unwrap();
+        let before = store.file(REMOTE_ENC_NAME).unwrap();
+
+        let wrong = settings_for(&b, true, "another passphrase");
+        let err = sync(&store, &b, &wrong).unwrap_err().to_string();
+        assert!(err.contains("同步密码错误"), "{}", err);
+        assert_eq!(store.file(REMOTE_ENC_NAME).unwrap(), before);
+        assert_eq!(task_titles(&b), vec!["B 的待办"]);
+
+        // 密码太短直接拒绝。
+        let short = settings_for(&b, true, "short");
+        assert!(sync(&store, &b, &short).is_err());
+        assert_eq!(store.file(REMOTE_ENC_NAME).unwrap(), before);
+
+        let _ = std::fs::remove_dir_all(a_dir);
+        let _ = std::fs::remove_dir_all(b_dir);
+    }
+
+    #[test]
+    fn placeholder_without_encrypted_file_counts_as_first_sync() {
+        let (a, a_dir) = temp_db("ph-a");
+        let store = MemoryStore::default();
+        store.put(REMOTE_DB_NAME, placeholder_content()).unwrap();
+        a.create_task("A 的待办", None).unwrap();
+
+        assert_eq!(
+            sync(&store, &a, &settings_for(&a, true, PASS)).unwrap(),
+            RemoteSyncResult::FirstUpload
+        );
+        assert!(store.file(REMOTE_ENC_NAME).is_some());
+        // 明文设备同样按首次同步处理，覆盖占位说明。
+        let store = MemoryStore::default();
+        store.put(REMOTE_DB_NAME, placeholder_content()).unwrap();
+        assert_eq!(
+            sync(&store, &a, &settings_for(&a, false, "")).unwrap(),
+            RemoteSyncResult::FirstUpload
+        );
+        assert!(store
+            .file(REMOTE_DB_NAME)
+            .unwrap()
+            .starts_with(SQLITE_MAGIC));
+        // 其他格式的文件不会被当作数据库合并或覆盖。
+        let store = MemoryStore::default();
+        store.put(REMOTE_DB_NAME, b"garbage".to_vec()).unwrap();
+        assert!(sync(&store, &a, &settings_for(&a, false, "")).is_err());
+        assert_eq!(store.file(REMOTE_DB_NAME).unwrap(), b"garbage".to_vec());
+
+        let _ = std::fs::remove_dir_all(a_dir);
+    }
+
+    #[test]
+    fn connection_test_checks_passphrase() {
+        let (a, a_dir) = temp_db("check-a");
+        let store = MemoryStore::default();
+        let plain = settings_for(&a, false, "");
+        assert!(check_encryption(&store, &plain).0);
+
+        sync(&store, &a, &settings_for(&a, true, PASS)).unwrap();
+        let (ok, message) = check_encryption(&store, &plain);
+        assert!(!ok && message.contains("已加密"), "{}", message);
+        let (ok, message) = check_encryption(&store, &settings_for(&a, true, PASS));
+        assert!(ok && message.contains("密码正确"), "{}", message);
+        let (ok, message) = check_encryption(&store, &settings_for(&a, true, "wrong passphrase"));
+        assert!(!ok && message.contains("密码错误"), "{}", message);
+
+        let _ = std::fs::remove_dir_all(a_dir);
     }
 }

@@ -955,7 +955,8 @@ impl DbManager {
                    webdav_enabled, webdav_url, webdav_username, webdav_password,
                    webdav_root_path, webdav_sync_interval_minutes, webdav_last_sync_time,
                    webdav_last_local_change_time, webdav_last_sync_status, webdav_last_sync_error,
-                   webdav_device_id, notification_theme, quick_add_enabled, quick_add_shortcut
+                   webdav_device_id, notification_theme, quick_add_enabled, quick_add_shortcut,
+                   sync_encryption_enabled, sync_passphrase
                    FROM settings WHERE id = 1";
         let mut stmt = conn.prepare(sql)?;
         let row = stmt.query_row([], |row| {
@@ -1004,6 +1005,8 @@ impl DbManager {
                 notification_theme,
                 quick_add_enabled: row.get::<_, Option<i64>>(23)?.unwrap_or(1) == 1,
                 quick_add_shortcut,
+                sync_encryption_enabled: row.get::<_, Option<i64>>(25)?.unwrap_or(0) == 1,
+                sync_passphrase: row.get::<_, Option<String>>(26)?.unwrap_or_default(),
             })
         })?;
         Ok(row)
@@ -1020,7 +1023,8 @@ impl DbManager {
                  webdav_root_path = ?, webdav_sync_interval_minutes = ?, webdav_last_sync_time = ?,
                  webdav_last_local_change_time = ?, webdav_last_sync_status = ?, webdav_last_sync_error = ?,
                  webdav_device_id = ?, notification_theme = ?,
-                 quick_add_enabled = ?, quick_add_shortcut = ?
+                 quick_add_enabled = ?, quick_add_shortcut = ?,
+                 sync_encryption_enabled = ?, sync_passphrase = ?
              WHERE id = 1",
             params![
                 if settings.auto_start_enabled { 1 } else { 0 },
@@ -1048,6 +1052,8 @@ impl DbManager {
                 settings.notification_theme,
                 if settings.quick_add_enabled { 1 } else { 0 },
                 settings.quick_add_shortcut.trim(),
+                if settings.sync_encryption_enabled { 1 } else { 0 },
+                settings.sync_passphrase,
             ],
         )?;
         Ok(())
@@ -1498,6 +1504,11 @@ fn migration_scripts() -> Vec<MigrationScript> {
             version: "2.0.0".to_string(),
             description: "add task tags and priority".to_string(),
             sql: include_str!("../migrations/V2.0.0__add_task_tags_and_priority.sql"),
+        },
+        MigrationScript {
+            version: "2.0.1".to_string(),
+            description: "add sync encryption".to_string(),
+            sql: include_str!("../migrations/V2.0.1__add_sync_encryption.sql"),
         },
     ]
 }
