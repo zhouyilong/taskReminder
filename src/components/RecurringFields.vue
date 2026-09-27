@@ -30,7 +30,7 @@
   </template>
   <template v-else>
     <label class="field-label">Cron</label>
-    <input class="input" v-model="draft.cronExpression" placeholder="如: 0 9 * * *" style="flex: 1" />
+    <input class="input" v-model="draft.cronExpression" placeholder="分 时 日 月 周，如 0 9 * * 1-5（周一至周五 9 点）" style="flex: 1" />
   </template>
 </template>
 
