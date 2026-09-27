@@ -8,7 +8,9 @@ import type {
   AppSettings,
   SyncStatus,
   NotificationPayload,
-  UiStatePayload
+  UiStatePayload,
+  TrashPayload,
+  RecurringPreview
 } from "./types";
 
 export const api = {
@@ -75,6 +77,23 @@ export const api = {
   },
   async deleteReminderRecords(ids: string[]): Promise<void> {
     return invoke("delete_reminder_records", { ids });
+  },
+  async listTrash(): Promise<TrashPayload> {
+    return invoke("list_trash");
+  },
+  async restoreTask(id: string): Promise<void> {
+    return invoke("restore_task", { id });
+  },
+  async restoreRecurringTask(id: string): Promise<void> {
+    return invoke("restore_recurring_task", { id });
+  },
+  /** 永久删除回收站中的条目。 */
+  async purgeTrash(payload: { taskIds: string[]; recurringIds: string[] }): Promise<void> {
+    return invoke("purge_trash", { payload });
+  },
+  /** 预估各循环提醒在 until（含）之前的触发时间。 */
+  async previewRecurringTriggers(until: string, limit?: number): Promise<RecurringPreview[]> {
+    return invoke("preview_recurring_triggers", { until, limit: limit ?? null });
   },
   async getSettings(): Promise<AppSettings> {
     return invoke("get_settings");

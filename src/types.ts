@@ -120,3 +120,16 @@ export interface NotificationPayload {
   /** 原定触发时间；明显早于弹出时间时视为“错过的提醒”。 */
   scheduledTime?: string | null;
 }
+
+export interface TrashPayload {
+  tasks: Task[];
+  recurringTasks: RecurringTask[];
+  /** 墓碑保留天数：超过后自动永久删除。 */
+  retentionDays: number;
+}
+
+export interface RecurringPreview {
+  taskId: string;
+  /** 预估的触发时间（本地时间），按先后排列。 */
+  times: string[];
+}

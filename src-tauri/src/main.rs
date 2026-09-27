@@ -501,6 +501,128 @@ fn delete_reminder_records(state: State<AppState>, ids: Vec<String>) -> ApiResul
     Ok(())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrashPayload {
+    tasks: Vec<Task>,
+    recurring_tasks: Vec<RecurringTask>,
+    /// 墓碑保留天数：超过后自动永久删除。
+    retention_days: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PurgeTrashPayload {
+    #[serde(default)]
+    task_ids: Vec<String>,
+    #[serde(default)]
+    recurring_ids: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecurringPreview {
+    task_id: String,
+    times: Vec<String>,
+}
+
+fn current_retention_days(state: &AppState) -> Result<i64, AppError> {
+    let settings = state.db.load_settings()?;
+    Ok(db::tombstone_retention_days(settings.webdav_enabled))
+}
+
+#[tauri::command]
+fn list_trash(state: State<AppState>) -> ApiResult<TrashPayload> {
+    let retention_days = into_api(current_retention_days(&state))?;
+    Ok(TrashPayload {
+        tasks: into_api(state.db.list_deleted_tasks(retention_days))?,
+        recurring_tasks: into_api(state.db.list_deleted_recurring_tasks(retention_days))?,
+        retention_days,
+    })
+}
+
+#[tauri::command]
+fn restore_task(state: State<AppState>, id: String) -> ApiResult<()> {
+    into_api(state.db.restore_task(&id))?;
+    if let Some(task) = into_api(state.db.get_task(&id))? {
+        if task.status != "COMPLETED" {
+            if let Some(reminder_time) = &task.reminder_time {
+                if scheduler::is_future(reminder_time).unwrap_or(false) {
+                    into_api(state.scheduler.schedule_task(task))?;
+                }
+            }
+        }
+    }
+    into_api(state.sync.notify_local_change())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn restore_recurring_task(state: State<AppState>, id: String) -> ApiResult<()> {
+    into_api(state.db.restore_recurring_task(&id))?;
+    let Some(mut task) = into_api(state.db.get_recurring_task(&id))? else {
+        return Ok(());
+    };
+    // 删除期间错过的触发不补发，从现在起重新计算下次触发时间。
+    into_api(recurrence::sanitize_recurring_task(&mut task))?;
+    task.next_trigger = into_api(recurrence::compute_next_trigger(&task, None))?;
+    into_api(state.db.update_recurring_task(&task))?;
+    if !task.is_paused {
+        into_api(state.scheduler.schedule_recurring(task))?;
+    }
+    into_api(state.sync.notify_local_change())?;
+    Ok(())
+}
+
+/// 永久删除回收站中的条目。未开启同步时立即物理删除；
+/// 开启同步时由下一次同步在本地与远端一起清理，避免远端墓碑合并回来。
+#[tauri::command]
+fn purge_trash(state: State<AppState>, payload: PurgeTrashPayload) -> ApiResult<()> {
+    into_api(
+        state
+            .db
+            .expire_tombstones(db::TrashTable::Tasks, &payload.task_ids),
+    )?;
+    into_api(
+        state
+            .db
+            .expire_tombstones(db::TrashTable::RecurringTasks, &payload.recurring_ids),
+    )?;
+    let settings = into_api(state.db.load_settings())?;
+    if !settings.webdav_enabled {
+        into_api(
+            state
+                .db
+                .purge_expired_tombstones(db::tombstone_retention_days(false)),
+        )?;
+    }
+    into_api(state.sync.notify_local_change())?;
+    Ok(())
+}
+
+/// 预估每个循环提醒在 `until`（含）之前的触发时间，每个任务最多 `limit` 个。
+#[tauri::command]
+fn preview_recurring_triggers(
+    state: State<AppState>,
+    until: String,
+    limit: Option<usize>,
+) -> ApiResult<Vec<RecurringPreview>> {
+    let until = time::parse_datetime_any(&until).ok_or_else(|| "截止时间格式无效".to_string())?;
+    let limit = limit.unwrap_or(48).min(500);
+    let mut result = Vec::new();
+    for task in into_api(state.db.list_recurring_tasks())? {
+        // 单个任务规则异常不影响其他任务的预览。
+        let times = recurrence::upcoming_triggers(&task, until, limit).unwrap_or_default();
+        if !times.is_empty() {
+            result.push(RecurringPreview {
+                task_id: task.id,
+                times,
+            });
+        }
+    }
+    Ok(result)
+}
+
 #[tauri::command]
 fn get_settings(state: State<AppState>) -> ApiResult<AppSettings> {
     let mut settings = into_api(state.db.load_settings())?;
@@ -1318,6 +1440,11 @@ fn main() {
             delete_recurring_task,
             delete_reminder_record,
             delete_reminder_records,
+            list_trash,
+            restore_task,
+            restore_recurring_task,
+            purge_trash,
+            preview_recurring_triggers,
             get_settings,
             save_settings,
             get_sticky_note_by_window_label,

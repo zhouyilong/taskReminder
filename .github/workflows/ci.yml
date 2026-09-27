@@ -53,6 +53,9 @@ jobs:
       - name: Typecheck & build frontend
         run: pnpm build
 
+      - name: Frontend unit tests
+        run: pnpm test
+
       - name: cargo fmt
         working-directory: src-tauri
         run: cargo fmt --check

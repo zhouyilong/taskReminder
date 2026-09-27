@@ -2,16 +2,25 @@
 
 ## 项目结构与模块组织
 - `src/` 存放 Vue 3 + TypeScript 前端，共三个窗口入口：
-  - 主窗口：`index.html` → `src/main.ts` → `src/App.vue`（待办、已办、循环提醒、提醒记录、设置、云同步）。
+  - 主窗口：`index.html` → `src/main.ts` → `src/App.vue`（只负责外壳：标题栏、侧边栏、按 Tab 切换视图、挂载共享弹窗与全局事件监听）。
+    - `src/views/`：每个 Tab 一个视图——`TodayView`（今天时间线）、`TasksView`、`CompletedView`、`RecurringView`、`RecordsView`、`StatsView`（统计）、`TrashView`（回收站）。Tab 键定义在 `src/navigation.ts`，上次打开的 Tab 记在 `localStorage.activeTab`。
+    - `src/composables/`：模块级单例的共享状态——`useAppData`（四个列表、`refreshAll`、`dataVersion`）、`useSettings`（设置草稿、同步状态、设置/云同步弹窗开关）、`useUpdater`、`useUiPrefs`（主题、缩放、透明度、侧边栏）、`useDialogs`（确认框、详情、编辑待办/循环提醒）、`useItemActions`（完成、删除、右键菜单等通用操作）、`useContextMenu`、`usePagination`、`useNow`。
   - 提醒弹窗：`notification.html` → `src/notification.ts` → `src/NotificationApp.vue`。
   - 桌面便签：`sticky-note-item.html` → `src/stickyNoteItem.ts` → `src/StickyNoteItemApp.vue`（每张便签一个独立窗口，窗口标签为 `sticky-note-item-<编码后的 id>`）。
   - 快速添加：`quick-add.html` → `src/quickAdd.ts` → `src/QuickAddApp.vue`（窗口标签 `quick-add`，由全局快捷键或托盘菜单打开）。
 - `src/components/` 存放可复用 UI 组件：
   - `MarkdownNoteEditor.vue`：基于 Milkdown Crepe 的 Markdown 所见即所得编辑器，`variant` 支持 `card`（带边框）与 `ghost`（无边框，嵌入卡片或便签）。
   - `Modal.vue`：通用弹窗（带进出过渡动画）。
+  - `AppTitlebar.vue` / `AppSidebar.vue`：主窗口标题栏与侧边栏。
+  - `SettingsModal.vue` / `WebdavModal.vue`：应用设置与云同步设置。
+  - `SharedDialogs.vue`：挂在 App.vue 的共享弹窗（`TaskEditModal`、`RecurringEditModal`、详情、确认框、右键菜单），由 `useDialogs` 驱动，任何视图都可打开。
+  - `RecurringFields.vue`：循环提醒各模式的规则字段，新建表单与编辑弹窗共用。
+  - `Pagination.vue`：表格分页条，配合 `usePagination`。
   - `WeekdayPicker.vue`：每周多天选择（位掩码 `v-model`，含工作日/周末/每天预设）。
 - `src/api.ts` 封装所有 Tauri `invoke` 命令；`src/types.ts` 为前后端共享的数据类型。
 - `src/markdown.ts` Markdown 转纯文本/预览文本工具（列表描述、提醒记录去掉前导列表标记）。
+- `src/format.ts` 主窗口共用的时间与文案格式化；`src/recurring.ts` 循环规则展示、表单草稿、校验与提交载荷。
+- `src/timeline.ts`（“今天”时间线）与 `src/stats.ts`（统计面板）为纯函数，测试在同名 `*.spec.ts`。
 - `src/safeStorage.ts` 带异常保护的 `localStorage` 封装；`src/startupError.ts` 启动失败时渲染错误页。
 - `src/styles.css` 为三个窗口共用的全局样式表（设计令牌、主窗口、提醒弹窗、便签）；组件私有样式放在 `.vue` 文件内。
 - `src/update.ts` 自动更新逻辑模块（检查更新、安装更新、偏好管理）。
@@ -24,7 +33,7 @@
   - `src-tauri/capabilities/default.json` 定义各窗口的权限。
   - `src-tauri/tauri.conf.json` 定义窗口、打包、更新器与应用元数据；`src-tauri/tauri.updater.conf.json` 为签名构建时的覆盖配置。
 - `docs/ROADMAP.md` 为功能扩展与重构路线图，完成条目后同步勾选并补充变更记录。
-- `.github/workflows/ci.yml` 为 CI（Ubuntu + Windows：`pnpm build`、`cargo fmt --check`、`cargo clippy`、`cargo test`）。
+- `.github/workflows/ci.yml` 为 CI（Ubuntu + Windows：`pnpm build`、`pnpm test`、`cargo fmt --check`、`cargo clippy`、`cargo test`）。
 - `scripts/` 存放构建与发布脚本。
   - `scripts/build-updater.ps1` 签名构建 MSI + 生成更新清单。
   - `scripts/write-updater-manifest.mjs` 生成 `latest.json` 更新清单。
@@ -34,6 +43,7 @@
 - `pnpm dev`：启动 Web UI 的 Vite 开发服务器。
 - `pnpm build`：先执行 `vue-tsc --noEmit` 类型检查，再将前端打包到 `dist/`。
 - `pnpm typecheck`：仅做类型检查。
+- `pnpm test`：运行 Vitest 前端单元测试（`src/**/*.spec.ts`）。
 - `pnpm preview`：本地预览生产构建。
 - `pnpm tauri dev`：以开发模式运行完整的 Tauri 桌面应用。
 - `pnpm tauri build`：生成生产环境桌面应用包，不生成 updater 签名产物。
@@ -70,6 +80,8 @@
   - 复选框已全局自定义样式；圆形“完成”勾选框使用 `.check-round`。
 - `select` 已全局去掉原生外观并使用内联 SVG 箭头；浅色主题的箭头颜色在 `.light-theme .select` 中单独覆盖。
 - 修改样式后需同时检查深色与浅色主题，以及侧边栏展开/收起、窗口宽度小于 980px（侧边栏变为横向标签栏）三种状态。
+- 统计卡片：`.stat-row > .stat-tile`（`.stat-label`、`.stat-value`、`.stat-hint`）；卡片容器 `.stats-card`；分段选择 `.segmented > .segmented-item.active`。
+- 统计图表颜色使用 `--chart-completed` / `--chart-dismissed` / `--chart-snoozed` / `--chart-pending`（深浅主题分别校验过色觉辨识度），图表必须带图例，并提供数据表视图。
 - Rust 代码使用标准 `snake_case` 的模块与函数命名；用 `cargo fmt`（默认 rustfmt）格式化。
 
 ## 踩坑记录与注意事项
@@ -105,6 +117,8 @@
 ### 删除与清理必须走墓碑
 - **问题**：直接 `DELETE` 行后，远端库仍有该行，同步合并会把它重新插回本地（“复活”）。
 - **规则**：业务删除与定期清理一律写 `deleted_at` + `updated_at`（墓碑）；只有 `purge_expired_tombstones` 按保留期（本地 7 天，开启同步 60 天）物理删除，同步在合并后、上传前也会调用它。
+- 回收站（`list_trash`）只列出保留期内的墓碑。恢复即清除 `deleted_at`；恢复循环提醒时从当前时间重新计算下次触发。
+- 回收站的“永久删除”（`purge_trash` → `expire_tombstones`）不能直接 `DELETE`：把 `deleted_at` 改为 `EXPIRED_TOMBSTONE_TIME` 并刷新 `updated_at`，让本地行在合并中胜出，再由清理物理删除（未开启同步时立即清理）。
 
 ### 循环模式的兼容性
 - 每周多天存于 `schedule_weekdays` 位掩码，`schedule_weekday` 始终写入掩码中最早的一天，供旧版本读取；读取时掩码为空则回退到 `schedule_weekday`。
@@ -119,12 +133,12 @@
 - **规则**：`onMounted` 中多个独立的异步初始化操作应分别用 `try/catch` 包裹，互不影响。
 
 ## 测试指南
-- `package.json` 尚未配置 JavaScript 测试框架；前端改动至少执行 `pnpm build`（含 `vue-tsc` 类型检查）确认可编译。
+- 前端使用 Vitest：测试与被测模块同目录，命名为 `*.spec.ts`，运行 `pnpm test`。前端改动至少执行 `pnpm build`（含 `vue-tsc` 类型检查）与 `pnpm test`。
+- 视图里的计算逻辑（如时间线、统计）优先抽成 `src/` 下的纯函数再写测试，组件只做展示。
 - Rust 测试位于 `src-tauri/src/` 各模块的 `#[cfg(test)]` 中（便签窗口标签/URL、提醒队列、墓碑清理、同步合并、时间解析、节假日、循环规则），通过 `cargo test` 运行；需要数据库的测试用临时目录创建 `DbManager`，会自动执行迁移。
 - 提交前运行 `cargo fmt`，CI 会执行 `cargo fmt --check`。
 - 在 Linux 上构建会改写 `src-tauri/gen/schemas/`，这些生成文件的无关变动不要提交。
 - 仅调整前端 UI 时，可用 `pnpm dev` 在浏览器中预览；浏览器中没有 Tauri 运行时，需要在页面加载前注入 `window.__TAURI_INTERNALS__`（模拟 `invoke`、`transformCallback`、`metadata.currentWindow`）并返回示例数据，否则列表为空。
-- 若引入 JS 测试框架，请将测试放在 `src/` 下（如 `*.spec.ts`），并在 `package.json` 中添加脚本。
 
 ## 提交与合并请求指南
 - 提交信息使用简短祈使句，例如：`feat: 新增托盘开关`、`fix: 修复更新安装失败`。

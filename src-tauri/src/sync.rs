@@ -960,6 +960,37 @@ mod tests {
     }
 
     #[test]
+    fn purged_from_trash_does_not_come_back_after_merge() {
+        let (local, local_dir) = temp_db("local");
+        let (remote, remote_dir) = temp_db("remote");
+        let task = local.create_task("trashed", None).unwrap();
+        local.delete_task(&task.id).unwrap();
+        // 远端保留同一条墓碑（删除已同步过）。
+        copy_task(&local.db_path(), &remote.db_path(), &task.id);
+        {
+            let conn = Connection::open(remote.db_path()).unwrap();
+            conn.execute(
+                "UPDATE tasks SET updated_at = '2000-01-01T00:00:00' WHERE id = ?",
+                [&task.id],
+            )
+            .unwrap();
+        }
+
+        local
+            .expire_tombstones(crate::db::TrashTable::Tasks, std::slice::from_ref(&task.id))
+            .unwrap();
+        merge_databases(&local.db_path(), &remote.db_path()).unwrap();
+        // 与 perform_sync 一致：合并后、上传前清理过期墓碑。
+        local
+            .purge_expired_tombstones(crate::db::TOMBSTONE_RETENTION_DAYS_SYNC)
+            .unwrap();
+        assert!(deleted_at(&local.db_path(), &task.id).is_none());
+
+        let _ = std::fs::remove_dir_all(local_dir);
+        let _ = std::fs::remove_dir_all(remote_dir);
+    }
+
+    #[test]
     fn merge_keeps_newer_row() {
         let (local, local_dir) = temp_db("local");
         let (remote, remote_dir) = temp_db("remote");
