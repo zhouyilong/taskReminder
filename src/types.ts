@@ -15,6 +15,10 @@ export interface Task {
   reminderTime?: string | null;
   updatedAt?: string | null;
   deletedAt?: string | null;
+  /** 标签（已去重、不含 #）。 */
+  tags?: string[];
+  /** 优先级：0 无、1 低、2 中、3 高。 */
+  priority?: number;
 }
 
 export interface RecurringTask {

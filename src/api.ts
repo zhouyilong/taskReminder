@@ -26,7 +26,13 @@ export const api = {
   async listReminderRecords(): Promise<ReminderRecord[]> {
     return invoke("list_reminder_records");
   },
-  async createTask(payload: { description: string; stickyContent?: string | null }): Promise<Task> {
+  async createTask(payload: {
+    description: string;
+    stickyContent?: string | null;
+    tags?: string[];
+    priority?: number;
+    reminderTime?: string | null;
+  }): Promise<Task> {
     return invoke("create_task", { payload });
   },
   async updateTask(task: {
@@ -34,6 +40,9 @@ export const api = {
     description: string;
     stickyContent?: string | null;
     reminderTime?: string | null;
+    /** 省略时保留原有标签与优先级。 */
+    tags?: string[];
+    priority?: number;
   }): Promise<void> {
     return invoke("update_task", { task });
   },
@@ -199,7 +208,12 @@ export const api = {
   async getHolidayYears(): Promise<number[]> {
     return invoke("get_holiday_years");
   },
-  async quickAddTask(payload: { description: string; reminderTime?: string | null }): Promise<Task> {
+  async quickAddTask(payload: {
+    description: string;
+    reminderTime?: string | null;
+    tags?: string[];
+    priority?: number;
+  }): Promise<Task> {
     return invoke("quick_add_task", { payload });
   },
   async applyQuickAddShortcut(): Promise<void> {

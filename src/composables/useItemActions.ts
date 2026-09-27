@@ -2,6 +2,7 @@
 import { api } from "../api";
 import { markdownToPlainText } from "../markdown";
 import { errorMessage, formatAction, formatDateTime, recordDescription } from "../format";
+import { priorityLabel, priorityOf } from "../tasks";
 import type { RecurringTask, ReminderRecord, Task } from "../types";
 import { useAppData } from "./useAppData";
 import { useContextMenu } from "./useContextMenu";
@@ -49,6 +50,8 @@ export const useItemActions = () => {
       { label: "创建时间", value: formatDateTime(task.createdAt) },
       { label: "完成时间", value: formatDateTime(task.completedAt) },
       { label: "提醒时间", value: formatDateTime(task.reminderTime) },
+      { label: "优先级", value: priorityLabel(priorityOf(task)) },
+      { label: "标签", value: task.tags?.length ? task.tags.map(tag => `#${tag}`).join(" ") : "-" },
     ]);
   };
 

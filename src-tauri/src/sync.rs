@@ -42,6 +42,8 @@ const TASK_COLUMNS: &[&str] = &[
     "sticky_is_open",
     "updated_at",
     "deleted_at",
+    "tags",
+    "priority",
 ];
 const RECURRING_COLUMNS: &[&str] = &[
     "id",
@@ -626,6 +628,8 @@ fn ensure_sync_columns(conn: &Connection) -> Result<(), AppError> {
         "sticky_is_open",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
+    ensure_column(conn, "tasks", "tags", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column(conn, "tasks", "priority", "INTEGER NOT NULL DEFAULT 0")?;
     ensure_column(conn, "recurring_tasks", "updated_at", "TEXT")?;
     ensure_column(conn, "recurring_tasks", "deleted_at", "TEXT")?;
     ensure_column(
@@ -999,7 +1003,7 @@ mod tests {
         {
             let conn = Connection::open(remote.db_path()).unwrap();
             conn.execute(
-                "UPDATE tasks SET description = 'remote edit', updated_at = '2999-01-01T00:00:00' WHERE id = ?",
+                "UPDATE tasks SET description = 'remote edit', tags = '工作,周报', priority = 2, updated_at = '2999-01-01T00:00:00' WHERE id = ?",
                 [&task.id],
             )
             .unwrap();
@@ -1007,6 +1011,8 @@ mod tests {
         merge_databases(&local.db_path(), &remote.db_path()).unwrap();
         let merged = local.get_task(&task.id).unwrap().unwrap();
         assert_eq!(merged.description, "remote edit");
+        assert_eq!(merged.tags, vec!["工作", "周报"]);
+        assert_eq!(merged.priority, 2);
 
         let _ = std::fs::remove_dir_all(local_dir);
         let _ = std::fs::remove_dir_all(remote_dir);

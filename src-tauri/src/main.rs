@@ -26,7 +26,7 @@ use tauri::{
     WindowEvent,
 };
 
-use crate::db::DbManager;
+use crate::db::{DbManager, TaskMeta};
 use crate::errors::AppError;
 use crate::models::{
     AppSettings, NotificationPayload, RecurringTask, ReminderRecord, StickyNote, SyncStatus, Task,
@@ -155,6 +155,23 @@ struct TaskUpdatePayload {
     description: String,
     sticky_content: Option<String>,
     reminder_time: Option<String>,
+    /// 为空时保留原有标签与优先级。
+    #[serde(default)]
+    tags: Option<Vec<String>>,
+    #[serde(default)]
+    priority: Option<i64>,
+}
+
+impl TaskUpdatePayload {
+    fn meta(&self) -> Option<TaskMeta> {
+        if self.tags.is_none() && self.priority.is_none() {
+            return None;
+        }
+        Some(TaskMeta {
+            tags: self.tags.clone().unwrap_or_default(),
+            priority: self.priority.unwrap_or(0),
+        })
+    }
 }
 
 #[derive(Deserialize)]
@@ -162,6 +179,13 @@ struct TaskUpdatePayload {
 struct CreateTaskPayload {
     description: String,
     sticky_content: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    priority: i64,
+    /// 创建时一并设置提醒（自然语言输入识别出的时间）。
+    #[serde(default)]
+    reminder_time: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -169,6 +193,10 @@ struct CreateTaskPayload {
 struct QuickAddPayload {
     description: String,
     reminder_time: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    priority: i64,
 }
 
 #[derive(Deserialize)]
@@ -296,12 +324,17 @@ fn list_reminder_records(state: State<AppState>) -> ApiResult<Vec<ReminderRecord
 
 #[tauri::command]
 fn create_task(state: State<AppState>, payload: CreateTaskPayload) -> ApiResult<Task> {
-    let task = into_api(state.db.create_task(
+    let meta = TaskMeta {
+        tags: payload.tags,
+        priority: payload.priority,
+    };
+    create_task_with_reminder(
+        &state,
         payload.description.trim(),
         payload.sticky_content.as_deref(),
-    ))?;
-    into_api(state.sync.notify_local_change())?;
-    Ok(task)
+        payload.reminder_time,
+        &meta,
+    )
 }
 
 /// 快速添加窗口：一次完成创建待办与设置提醒，并通知主窗口刷新。
@@ -311,17 +344,42 @@ fn quick_add_task(
     state: State<AppState>,
     payload: QuickAddPayload,
 ) -> ApiResult<Task> {
-    let description = payload.description.trim();
+    let meta = TaskMeta {
+        tags: payload.tags,
+        priority: payload.priority,
+    };
+    let task = create_task_with_reminder(
+        &state,
+        payload.description.trim(),
+        None,
+        payload.reminder_time,
+        &meta,
+    )?;
+    let _ = app.emit("data-updated", ());
+    Ok(task)
+}
+
+fn create_task_with_reminder(
+    state: &AppState,
+    description: &str,
+    sticky_content: Option<&str>,
+    reminder_time: Option<String>,
+    meta: &TaskMeta,
+) -> ApiResult<Task> {
     if description.is_empty() {
         return Err("待办内容不能为空".to_string());
     }
-    let reminder_time = normalize_reminder_time(payload.reminder_time);
+    let reminder_time = normalize_reminder_time(reminder_time);
     if let Some(value) = reminder_time.as_deref() {
         if !into_api(scheduler::is_future(value))? {
             return Err("提醒时间需晚于当前时间".to_string());
         }
     }
-    let mut task = into_api(state.db.create_task(description, None))?;
+    let mut task = into_api(
+        state
+            .db
+            .create_task_with_meta(description, sticky_content, meta),
+    )?;
     if let Some(reminder_time) = reminder_time {
         into_api(
             state
@@ -332,7 +390,6 @@ fn quick_add_task(
         into_api(state.scheduler.schedule_task(task.clone()))?;
     }
     into_api(state.sync.notify_local_change())?;
-    let _ = app.emit("data-updated", ());
     Ok(task)
 }
 
@@ -350,11 +407,13 @@ fn update_task(
     task: TaskUpdatePayload,
 ) -> ApiResult<()> {
     let reminder_time = task.reminder_time.clone();
+    let meta = task.meta();
     into_api(state.db.update_task(
         &task.id,
         task.description.trim(),
         task.sticky_content.clone(),
         reminder_time.clone(),
+        meta.as_ref(),
     ))?;
     state.scheduler.cancel_task(&task.id);
     if let Some(reminder_time) = reminder_time.clone() {
@@ -1046,6 +1105,7 @@ fn snooze_notification(
                     &task.description,
                     task.sticky_content.clone(),
                     Some(reminder_time.clone()),
+                    None,
                 ))?;
                 task.reminder_time = Some(reminder_time);
                 state.scheduler.cancel_task(&task.id);

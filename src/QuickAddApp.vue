@@ -8,7 +8,7 @@
       ref="inputRef"
       v-model="description"
       class="input quick-add-input"
-      placeholder="要做什么？"
+      placeholder="要做什么？如“明天下午3点 交周报 #工作”"
       maxlength="500"
       @keydown.enter.prevent="submit"
     />
@@ -50,6 +50,9 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import { safeStorage } from "./safeStorage";
+import { describeParsedSchedule, parseQuickInput } from "./nlp";
+import { buildRecurringPayload, validateRecurringDraft } from "./recurring";
+import { priorityLabel } from "./tasks";
 
 type ReminderKey = "none" | "30m" | "1h" | "tonight" | "tomorrow" | "custom";
 
@@ -98,6 +101,12 @@ const reminderOptions = computed(() => {
   return options;
 });
 
+/** 选了提醒选项时以选项为准，否则用输入中识别出的时间或循环规则。 */
+const parsed = computed(() => parseQuickInput(description.value));
+const usesParsedSchedule = computed(
+  () => selectedKey.value === "none" && Boolean(parsed.value.reminderTime || parsed.value.recurring)
+);
+
 const resolveReminder = (): Date | null => {
   const now = Date.now();
   switch (selectedKey.value) {
@@ -117,13 +126,27 @@ const resolveReminder = (): Date | null => {
       return Number.isNaN(parsed.getTime()) ? null : parsed;
     }
     default:
-      return null;
+      return parseQuickInput(description.value).reminderTime;
   }
 };
 
+const metaSummary = computed(() => {
+  const parts = parsed.value.tags.map(tag => `#${tag}`);
+  if (parsed.value.priority) {
+    parts.push(`${priorityLabel(parsed.value.priority)}优先级`);
+  }
+  return parts.length ? ` · ${parts.join(" ")}` : "";
+});
+
 const reminderSummary = computed(() => {
   if (selectedKey.value === "none") {
-    return "不设置提醒";
+    if (parsed.value.recurring) {
+      return `识别为循环提醒：${describeParsedSchedule(parsed.value)}`;
+    }
+    if (parsed.value.reminderTime) {
+      return `识别：${describeParsedSchedule(parsed.value)} 提醒${metaSummary.value}`;
+    }
+    return metaSummary.value ? `不设置提醒${metaSummary.value}` : "不设置提醒";
   }
   const target = resolveReminder();
   return target ? `将在 ${formatDisplay(target)} 提醒` : "请选择提醒时间";
@@ -163,9 +186,41 @@ const closeWindow = async () => {
   reset();
 };
 
+const submitRecurring = async (title: string) => {
+  const draft = parsed.value.recurring;
+  if (!draft) {
+    return;
+  }
+  const payload = { ...draft, description: title };
+  const invalid = validateRecurringDraft(payload);
+  if (invalid) {
+    errorMessage.value = invalid;
+    return;
+  }
+  saving.value = true;
+  errorMessage.value = "";
+  try {
+    await api.createRecurringTask(buildRecurringPayload(payload));
+    savedMessage.value = `已添加循环提醒：${describeParsedSchedule(parsed.value)}`;
+    description.value = "";
+    hideTimer = window.setTimeout(() => {
+      void closeWindow();
+    }, 900);
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    saving.value = false;
+  }
+};
+
 const submit = async () => {
-  const text = description.value.trim();
-  if (!text || saving.value) {
+  if (!description.value.trim() || saving.value) {
+    return;
+  }
+  // 识别出的时间、标签等从标题中去掉；全部被识别掉时保留原文。
+  const text = parsed.value.title || description.value.trim();
+  if (usesParsedSchedule.value && parsed.value.recurring) {
+    await submitRecurring(text);
     return;
   }
   const target = resolveReminder();
@@ -182,7 +237,9 @@ const submit = async () => {
   try {
     await api.quickAddTask({
       description: text,
-      reminderTime: target ? `${formatLocal(target)}:00` : null
+      reminderTime: target ? `${formatLocal(target)}:00` : null,
+      tags: parsed.value.tags,
+      priority: parsed.value.priority
     });
     savedMessage.value = target ? `已添加，${formatDisplay(target)} 提醒` : "已添加";
     description.value = "";
