@@ -4,7 +4,7 @@ use tauri::{
     AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 
-use crate::create_custom_sticky_note_via_app;
+use crate::commands::sticky::create_custom_sticky_note_via_app;
 use crate::paths;
 use crate::state::AppState;
 
