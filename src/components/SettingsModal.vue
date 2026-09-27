@@ -8,6 +8,9 @@
         <label>
           <input type="checkbox" v-model="settingsDraft.soundEnabled" /> 提示音
         </label>
+        <label title="全屏程序或游戏中也能看到提醒；勿扰时段内不发送">
+          <input type="checkbox" v-model="settingsDraft.nativeNotificationEnabled" /> 同时发送系统通知
+        </label>
       </div>
       <div class="form-row compact">
         <label>稍后提醒分钟数</label>

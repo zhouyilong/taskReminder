@@ -127,23 +127,37 @@ impl ReminderScheduler {
         let queue = self.queue.snapshot();
         if !queue.is_empty() {
             emit_notification(&self.app, &queue)?;
+            if settings.native_notification_enabled {
+                send_native_notification(
+                    &self.app,
+                    "勿扰已结束",
+                    &format!("勿扰期间有 {} 条提醒待处理", queue.len()),
+                );
+            }
         }
         Ok(())
     }
 
-    /// 提醒入队后展示：勿扰时段内只更新已打开的弹窗（不主动弹出），否则弹窗。
+    /// 提醒入队后展示：勿扰时段内只更新已打开的弹窗（不主动弹出），否则弹窗，
+    /// 并按设置同时发送系统原生通知。
     fn present(
         &self,
         payload: NotificationPayload,
         settings: &AppSettings,
     ) -> Result<(), AppError> {
+        let title = native_notification_title(&payload, Local::now().naive_local());
+        let body = payload.description.clone();
         let queue = self.queue.push(payload);
         if quiet_hours::is_quiet_now(settings) {
             self.quiet_held.store(true, Ordering::SeqCst);
             publish_queue(&self.app, &queue);
             return Ok(());
         }
-        emit_notification(&self.app, &queue)
+        emit_notification(&self.app, &queue)?;
+        if settings.native_notification_enabled {
+            send_native_notification(&self.app, &title, &body);
+        }
+        Ok(())
     }
 
     /// 从弹窗队列中撤下某个任务的提醒（例如在主窗口中完成或删除了该任务），
@@ -314,6 +328,28 @@ impl ReminderScheduler {
     }
 }
 
+/// 系统通知标题：晚于原定时间 2 分钟以上的（错过的提醒）标注原定时间。
+fn native_notification_title(payload: &NotificationPayload, now: NaiveDateTime) -> String {
+    let scheduled = payload
+        .scheduled_time
+        .as_deref()
+        .and_then(parse_datetime_any);
+    match scheduled {
+        Some(time) if now - time > Duration::minutes(2) => {
+            format!("错过的提醒 · 原定 {}", time.format("%H:%M"))
+        }
+        _ => "任务提醒".to_string(),
+    }
+}
+
+/// 发送系统原生通知（全屏程序中也能看到）；失败只记日志，不影响应用内弹窗。
+fn send_native_notification(app: &AppHandle, title: &str, body: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    if let Err(err) = app.notification().builder().title(title).body(body).show() {
+        eprintln!("[scheduler] 发送系统通知失败: {}", err);
+    }
+}
+
 /// 把当前队列推送给提醒弹窗。队列为空时隐藏弹窗。
 pub fn publish_queue(app: &AppHandle, queue: &[NotificationPayload]) {
     let Some(window) = app.get_webview_window("notification") else {
@@ -393,4 +429,38 @@ fn parse_datetime(value: &str) -> Result<NaiveDateTime, AppError> {
 pub fn is_future(value: &str) -> Result<bool, AppError> {
     let target = parse_datetime(value)?;
     Ok(target > Local::now().naive_local())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn payload(scheduled: Option<&str>) -> NotificationPayload {
+        NotificationPayload {
+            record_id: "r".to_string(),
+            reminder_id: "t".to_string(),
+            reminder_type: "TASK".to_string(),
+            description: "开会".to_string(),
+            snooze_minutes: 5,
+            scheduled_time: scheduled.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn native_title_marks_missed_reminders() {
+        let now = parse_datetime("2026-09-27T10:00:00").unwrap();
+        assert_eq!(
+            native_notification_title(&payload(Some("2026-09-27T10:00:00")), now),
+            "任务提醒"
+        );
+        assert_eq!(
+            native_notification_title(&payload(Some("2026-09-27T09:59:00")), now),
+            "任务提醒"
+        );
+        assert_eq!(
+            native_notification_title(&payload(Some("2026-09-27T08:30:00")), now),
+            "错过的提醒 · 原定 08:30"
+        );
+        assert_eq!(native_notification_title(&payload(None), now), "任务提醒");
+    }
 }
