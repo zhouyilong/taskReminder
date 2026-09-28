@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::{Duration, Local, NaiveDateTime};
@@ -7,8 +8,9 @@ use tokio::time::sleep;
 
 use crate::db::DbManager;
 use crate::errors::AppError;
-use crate::models::{NotificationPayload, RecurringTask, Task};
+use crate::models::{AppSettings, NotificationPayload, RecurringTask, Task};
 use crate::notification_queue::NotificationQueue;
+use crate::quiet_hours;
 use crate::recurrence::{compute_next_trigger, sanitize_recurring_task, should_trigger_now};
 use crate::sync::CloudSyncService;
 use crate::time::{now_string, parse_datetime_any};
@@ -35,6 +37,8 @@ pub struct ReminderScheduler {
     /// 串行化“判断是否到点 + 写记录 + 推进下次时间”，
     /// 防止计时器与巡检同时命中同一条提醒而重复触发。
     fire_lock: Arc<Mutex<()>>,
+    /// 勿扰时段内有提醒进入队列但没有弹窗；勿扰结束后由巡检弹出。
+    quiet_held: Arc<AtomicBool>,
 }
 
 impl ReminderScheduler {
@@ -52,6 +56,7 @@ impl ReminderScheduler {
             task_jobs: Arc::new(Mutex::new(HashMap::new())),
             queue,
             fire_lock: Arc::new(Mutex::new(())),
+            quiet_held: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -67,6 +72,9 @@ impl ReminderScheduler {
             loop {
                 if let Err(err) = scheduler.fire_due() {
                     eprintln!("[scheduler] 巡检提醒失败: {}", err);
+                }
+                if let Err(err) = scheduler.release_quiet_hold() {
+                    eprintln!("[scheduler] 勿扰结束弹出提醒失败: {}", err);
                 }
                 sleep(std::time::Duration::from_secs(WATCHDOG_INTERVAL_SECONDS)).await;
             }
@@ -104,6 +112,52 @@ impl ReminderScheduler {
 
     pub fn queue(&self) -> &NotificationQueue {
         &self.queue
+    }
+
+    /// 勿扰时段已结束（或被关闭）时，弹出勿扰期间积压的提醒。
+    pub fn release_quiet_hold(&self) -> Result<(), AppError> {
+        if !self.quiet_held.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let settings = self.db.load_settings()?;
+        if quiet_hours::is_quiet_now(&settings) {
+            return Ok(());
+        }
+        self.quiet_held.store(false, Ordering::SeqCst);
+        let queue = self.queue.snapshot();
+        if !queue.is_empty() {
+            emit_notification(&self.app, &queue)?;
+            if settings.native_notification_enabled {
+                send_native_notification(
+                    &self.app,
+                    "勿扰已结束",
+                    &format!("勿扰期间有 {} 条提醒待处理", queue.len()),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// 提醒入队后展示：勿扰时段内只更新已打开的弹窗（不主动弹出），否则弹窗，
+    /// 并按设置同时发送系统原生通知。
+    fn present(
+        &self,
+        payload: NotificationPayload,
+        settings: &AppSettings,
+    ) -> Result<(), AppError> {
+        let title = native_notification_title(&payload, Local::now().naive_local());
+        let body = payload.description.clone();
+        let queue = self.queue.push(payload);
+        if quiet_hours::is_quiet_now(settings) {
+            self.quiet_held.store(true, Ordering::SeqCst);
+            publish_queue(&self.app, &queue);
+            return Ok(());
+        }
+        emit_notification(&self.app, &queue)?;
+        if settings.native_notification_enabled {
+            send_native_notification(&self.app, &title, &body);
+        }
+        Ok(())
     }
 
     /// 从弹窗队列中撤下某个任务的提醒（例如在主窗口中完成或删除了该任务），
@@ -226,8 +280,7 @@ impl ReminderScheduler {
             snooze_minutes: settings.snooze_minutes,
             scheduled_time: Some(scheduled_time),
         };
-        let queue = self.queue.push(payload);
-        emit_notification(&self.app, &queue)?;
+        self.present(payload, &settings)?;
 
         self.schedule_recurring(task)?;
         Ok(())
@@ -270,9 +323,30 @@ impl ReminderScheduler {
             snooze_minutes: settings.snooze_minutes,
             scheduled_time: Some(reminder_time),
         };
-        let queue = self.queue.push(payload);
-        emit_notification(&self.app, &queue)?;
+        self.present(payload, &settings)?;
         Ok(())
+    }
+}
+
+/// 系统通知标题：晚于原定时间 2 分钟以上的（错过的提醒）标注原定时间。
+fn native_notification_title(payload: &NotificationPayload, now: NaiveDateTime) -> String {
+    let scheduled = payload
+        .scheduled_time
+        .as_deref()
+        .and_then(parse_datetime_any);
+    match scheduled {
+        Some(time) if now - time > Duration::minutes(2) => {
+            format!("错过的提醒 · 原定 {}", time.format("%H:%M"))
+        }
+        _ => "任务提醒".to_string(),
+    }
+}
+
+/// 发送系统原生通知（全屏程序中也能看到）；失败只记日志，不影响应用内弹窗。
+fn send_native_notification(app: &AppHandle, title: &str, body: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    if let Err(err) = app.notification().builder().title(title).body(body).show() {
+        eprintln!("[scheduler] 发送系统通知失败: {}", err);
     }
 }
 
@@ -318,20 +392,16 @@ fn emit_notification(app: &AppHandle, queue: &[NotificationPayload]) -> Result<(
     )));
     let _ = window.set_shadow(false);
 
-    if let Ok(monitor) = window.current_monitor() {
-        if let Some(monitor) = monitor {
-            let size = monitor.size();
-            let bottom_margin = if cfg!(target_os = "windows") { 84 } else { 48 };
-            let pos_x = size
-                .width
-                .saturating_sub((notification_width as u32).saturating_add(16))
-                as f64;
-            let pos_y = size
-                .height
-                .saturating_sub(notification_height as u32 + bottom_margin)
-                as f64;
-            let _ = window.set_position(tauri::LogicalPosition { x: pos_x, y: pos_y });
-        }
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        let size = monitor.size();
+        let bottom_margin = if cfg!(target_os = "windows") { 84 } else { 48 };
+        let pos_x =
+            size.width
+                .saturating_sub((notification_width as u32).saturating_add(16)) as f64;
+        let pos_y = size
+            .height
+            .saturating_sub(notification_height as u32 + bottom_margin) as f64;
+        let _ = window.set_position(tauri::LogicalPosition { x: pos_x, y: pos_y });
     }
 
     window.emit(NOTIFICATION_QUEUE_EVENT, queue).ok();
@@ -359,4 +429,38 @@ fn parse_datetime(value: &str) -> Result<NaiveDateTime, AppError> {
 pub fn is_future(value: &str) -> Result<bool, AppError> {
     let target = parse_datetime(value)?;
     Ok(target > Local::now().naive_local())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn payload(scheduled: Option<&str>) -> NotificationPayload {
+        NotificationPayload {
+            record_id: "r".to_string(),
+            reminder_id: "t".to_string(),
+            reminder_type: "TASK".to_string(),
+            description: "开会".to_string(),
+            snooze_minutes: 5,
+            scheduled_time: scheduled.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn native_title_marks_missed_reminders() {
+        let now = parse_datetime("2026-09-27T10:00:00").unwrap();
+        assert_eq!(
+            native_notification_title(&payload(Some("2026-09-27T10:00:00")), now),
+            "任务提醒"
+        );
+        assert_eq!(
+            native_notification_title(&payload(Some("2026-09-27T09:59:00")), now),
+            "任务提醒"
+        );
+        assert_eq!(
+            native_notification_title(&payload(Some("2026-09-27T08:30:00")), now),
+            "错过的提醒 · 原定 08:30"
+        );
+        assert_eq!(native_notification_title(&payload(None), now), "任务提醒");
+    }
 }

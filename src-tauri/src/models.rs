@@ -172,6 +172,30 @@ pub struct AppSettings {
     /// 同步密码，只保存在本机；上传的快照中会被清空。
     #[serde(default)]
     pub sync_passphrase: String,
+    /// 勿扰时段：期间提醒只记录不弹窗，结束后一次性弹出。
+    #[serde(default)]
+    pub quiet_hours_enabled: bool,
+    #[serde(default = "default_quiet_hours_start")]
+    pub quiet_hours_start: String,
+    #[serde(default = "default_quiet_hours_end")]
+    pub quiet_hours_end: String,
+    /// 弹出提醒时同时发送系统原生通知（全屏程序中也能看到）。
+    #[serde(default)]
+    pub native_notification_enabled: bool,
+    /// 显示/隐藏全部便签的全局快捷键，为空表示不启用。
+    #[serde(default)]
+    pub sticky_toggle_shortcut: String,
+    /// 密码存放位置（`secrets::STORAGE_*`），只读：保存时由后端决定。
+    #[serde(default)]
+    pub secret_storage: String,
+}
+
+fn default_quiet_hours_start() -> String {
+    crate::quiet_hours::DEFAULT_START.to_string()
+}
+
+fn default_quiet_hours_end() -> String {
+    crate::quiet_hours::DEFAULT_END.to_string()
 }
 
 fn default_true() -> bool {

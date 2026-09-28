@@ -117,16 +117,6 @@ impl CloudSyncService {
         Ok(())
     }
 
-    pub fn stop(&self) {
-        if let Some(handle) = self.scheduled.lock().unwrap().take() {
-            handle.abort();
-        }
-        if let Some(handle) = self.pending.lock().unwrap().take() {
-            handle.abort();
-        }
-        *self.next_auto_sync_due.lock().unwrap() = None;
-    }
-
     pub fn update_settings(&self) -> Result<(), AppError> {
         self.refresh_dirty_from_settings()?;
         self.schedule_if_needed()?;
@@ -178,9 +168,7 @@ impl CloudSyncService {
     pub fn get_status(&self) -> Result<SyncStatus, AppError> {
         let settings = self.db.load_settings()?;
         Ok(SyncStatus {
-            status: settings
-                .webdav_last_sync_status
-                .unwrap_or_else(|| "未同步".to_string()),
+            status: status_code(settings.webdav_last_sync_status.as_deref()),
             error: settings.webdav_last_sync_error,
             time: settings.webdav_last_sync_time,
         })
@@ -319,23 +307,23 @@ impl CloudSyncService {
         let client = WebDavClient::new(&settings)?;
         let lock = LockInfo::new(&settings.webdav_device_id);
 
-        let _ = self.update_sync_status("同步中", None);
+        let _ = self.update_sync_status(SyncState::Syncing, None);
         let mut lock_acquired = false;
 
         let result = (|| -> Result<SyncOutcome, AppError> {
             lock_acquired = client.try_acquire_lock(&lock)?;
             if !lock_acquired {
-                let _ = self.update_sync_status("锁被占用，稍后重试", None);
+                let _ = self.update_sync_status(SyncState::LockBusy, None);
                 return Ok(SyncOutcome::Skipped);
             }
 
             let result = sync_with_remote(&client, &self.db, &settings, KdfParams::DEFAULT)?;
             match result {
                 RemoteSyncResult::FirstUpload => {
-                    let _ = self.update_sync_status("首次同步完成", None);
+                    let _ = self.update_sync_status(SyncState::FirstSync, None);
                 }
                 RemoteSyncResult::Merged => {
-                    let _ = self.update_sync_status("同步成功", None);
+                    let _ = self.update_sync_status(SyncState::Success, None);
                     let _ = self.app.emit("data-updated", ());
                 }
             }
@@ -345,7 +333,7 @@ impl CloudSyncService {
         let outcome = match result {
             Ok(outcome) => outcome,
             Err(err) => {
-                let _ = self.update_sync_status("同步失败", Some(err.to_string()));
+                let _ = self.update_sync_status(SyncState::Failed, Some(err.to_string()));
                 SyncOutcome::Failed
             }
         };
@@ -356,12 +344,10 @@ impl CloudSyncService {
         Ok(outcome)
     }
 
-    fn update_sync_status(&self, status: &str, error: Option<String>) -> Result<(), AppError> {
-        let settings = self.db.update_sync_status(status, error)?;
+    fn update_sync_status(&self, state: SyncState, error: Option<String>) -> Result<(), AppError> {
+        let settings = self.db.update_sync_status(state.code(), error)?;
         let payload = SyncStatus {
-            status: settings
-                .webdav_last_sync_status
-                .unwrap_or_else(|| status.to_string()),
+            status: status_code(settings.webdav_last_sync_status.as_deref()),
             error: settings.webdav_last_sync_error.clone(),
             time: settings.webdav_last_sync_time.clone(),
         };
@@ -377,8 +363,60 @@ enum SyncOutcome {
     Failed,
 }
 
+/// 同步状态码：存库与发给前端的都是状态码，文案只在前端（`src/syncStatus.ts`）映射。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncState {
+    Never,
+    Syncing,
+    Success,
+    FirstSync,
+    LockBusy,
+    Failed,
+}
+
+impl SyncState {
+    pub fn code(self) -> &'static str {
+        match self {
+            SyncState::Never => "never",
+            SyncState::Syncing => "syncing",
+            SyncState::Success => "success",
+            SyncState::FirstSync => "first_sync",
+            SyncState::LockBusy => "lock_busy",
+            SyncState::Failed => "failed",
+        }
+    }
+
+    /// 解析存库的状态；兼容 2.0.1 之前直接存中文文案的旧值。
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim() {
+            "" | "never" | "未同步" => Some(SyncState::Never),
+            "syncing" | "同步中" => Some(SyncState::Syncing),
+            "success" | "同步成功" => Some(SyncState::Success),
+            "first_sync" | "首次同步完成" => Some(SyncState::FirstSync),
+            "lock_busy" | "锁被占用，稍后重试" => Some(SyncState::LockBusy),
+            "failed" | "同步失败" => Some(SyncState::Failed),
+            _ => None,
+        }
+    }
+
+    fn is_success(self) -> bool {
+        matches!(self, SyncState::Success | SyncState::FirstSync)
+    }
+}
+
+/// 把存库的状态转成状态码；无法识别的值原样返回，前端按原文显示。
+fn status_code(stored: Option<&str>) -> String {
+    let raw = stored.unwrap_or("");
+    SyncState::parse(raw)
+        .map(|state| state.code().to_string())
+        .unwrap_or_else(|| raw.to_string())
+}
+
 fn is_success_status(status: &Option<String>) -> bool {
-    matches!(status.as_deref(), Some("同步成功") | Some("首次同步完成"))
+    status
+        .as_deref()
+        .and_then(SyncState::parse)
+        .is_some_and(SyncState::is_success)
 }
 
 fn compute_dirty_from_settings(settings: &AppSettings) -> bool {
@@ -1177,6 +1215,75 @@ mod tests {
             self.files.borrow_mut().insert(name.to_string(), data);
             Ok(())
         }
+    }
+
+    #[test]
+    fn sync_state_parses_codes_and_legacy_text() {
+        for state in [
+            SyncState::Never,
+            SyncState::Syncing,
+            SyncState::Success,
+            SyncState::FirstSync,
+            SyncState::LockBusy,
+            SyncState::Failed,
+        ] {
+            assert_eq!(SyncState::parse(state.code()), Some(state));
+        }
+        assert_eq!(SyncState::parse("同步成功"), Some(SyncState::Success));
+        assert_eq!(SyncState::parse("首次同步完成"), Some(SyncState::FirstSync));
+        assert_eq!(SyncState::parse("同步失败"), Some(SyncState::Failed));
+        assert_eq!(
+            SyncState::parse("锁被占用，稍后重试"),
+            Some(SyncState::LockBusy)
+        );
+        assert_eq!(SyncState::parse("未知"), None);
+
+        assert_eq!(status_code(None), "never");
+        assert_eq!(status_code(Some("同步成功")), "success");
+        assert_eq!(status_code(Some("first_sync")), "first_sync");
+        assert_eq!(status_code(Some("未知")), "未知");
+    }
+
+    #[test]
+    fn dirty_check_uses_status_codes_and_legacy_text() {
+        let (db, dir) = temp_db("dirty");
+        let mut settings = db.load_settings().unwrap();
+        settings.webdav_last_local_change_time = Some("2026-09-27T10:00:00".to_string());
+        settings.webdav_last_sync_time = Some("2026-09-27T11:00:00".to_string());
+
+        for (status, dirty) in [
+            ("success", false),
+            ("first_sync", false),
+            ("同步成功", false),
+            ("首次同步完成", false),
+            ("failed", true),
+            ("syncing", true),
+            ("lock_busy", true),
+            ("同步失败", true),
+        ] {
+            settings.webdav_last_sync_status = Some(status.to_string());
+            assert_eq!(compute_dirty_from_settings(&settings), dirty, "{status}");
+        }
+
+        // 成功同步之后又有本地修改：仍需同步。
+        settings.webdav_last_sync_status = Some("success".to_string());
+        settings.webdav_last_local_change_time = Some("2026-09-27T12:00:00".to_string());
+        assert!(compute_dirty_from_settings(&settings));
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn update_sync_status_stores_code() {
+        let (db, dir) = temp_db("status-code");
+        let settings = db
+            .update_sync_status(SyncState::Success.code(), None)
+            .unwrap();
+        assert_eq!(settings.webdav_last_sync_status.as_deref(), Some("success"));
+        assert!(!compute_dirty_from_settings(&settings));
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     fn settings_for(db: &DbManager, encrypted: bool, passphrase: &str) -> AppSettings {

@@ -42,7 +42,10 @@
               <td class="col-mode" :title="formatRecurringMode(task.repeatMode)">
                 <span class="chip">{{ formatRecurringMode(task.repeatMode) }}</span>
               </td>
-              <td class="col-rule cell-muted" :title="formatRecurringRule(task)">{{ formatRecurringRule(task) }}</td>
+              <td class="col-rule cell-muted" :title="workdayHolidayWarning(task, holidayYears) || formatRecurringRule(task)">
+                {{ formatRecurringRule(task) }}
+                <span v-if="workdayHolidayWarning(task, holidayYears)" class="chip is-warning">节假日待更新</span>
+              </td>
               <td class="col-datetime col-next-trigger cell-time" :title="formatDateTime(task.nextTrigger)">{{ formatDateTime(task.nextTrigger) }}</td>
               <td class="col-status" :title="task.isPaused ? '已暂停' : '运行中'">
                 <span class="status-pill" :class="task.isPaused ? 'is-paused' : 'is-running'">{{ task.isPaused ? "已暂停" : "运行中" }}</span>
@@ -76,13 +79,14 @@ import {
   formatRecurringMode,
   formatRecurringRule,
   recurringModeOptions,
-  validateRecurringDraft
+  validateRecurringDraft,
+  workdayHolidayWarning
 } from "../recurring";
 import { useAppData } from "../composables/useAppData";
 import { useItemActions } from "../composables/useItemActions";
 import { usePagination } from "../composables/usePagination";
 
-const { recurringTasks, refreshAll } = useAppData();
+const { recurringTasks, holidayYears, refreshAll } = useAppData();
 const { openRecurringMenu, openRecurringEditor } = useItemActions();
 const {
   pageIndex: recurringPageIndex,

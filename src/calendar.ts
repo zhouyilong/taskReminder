@@ -1,4 +1,4 @@
-// 日历视图的数据整理：生成月份网格，并把待办、已完成待办、循环提醒（已触发记录与预估）
+// 日历视图的数据整理：生成月份网格与周视图，并把待办、已完成待办、循环提醒（已触发记录与预估）
 // 按天归类。纯函数，便于测试。
 import { addDays, dateKey, toLocalDateTimeString } from "./format";
 import type { RecurringPreview, RecurringTask, ReminderRecord, Task } from "./types";
@@ -26,6 +26,50 @@ export const buildMonthGrid = (year: number, month: number): CalendarDay[] => {
   });
 };
 
+/** 周视图：包含 `anchor` 的那一周，周一到周日。 */
+export const buildWeekDays = (anchor: Date): CalendarDay[] => {
+  const day = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+  const start = addDays(day, -((day.getDay() + 6) % 7));
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = addDays(start, index);
+    return {
+      date,
+      key: dateKey(date),
+      inMonth: true,
+      isWeekend: date.getDay() === 0 || date.getDay() === 6,
+    };
+  });
+};
+
+/** 周视图标题，如“2026 年 9 月 21 日 – 27 日”；跨月、跨年时补全月份与年份。 */
+export const formatWeekRange = (days: CalendarDay[]) => {
+  const first = days[0].date;
+  const last = days[days.length - 1].date;
+  const head = `${first.getFullYear()} 年 ${first.getMonth() + 1} 月 ${first.getDate()} 日`;
+  if (first.getFullYear() !== last.getFullYear()) {
+    return `${head} – ${last.getFullYear()} 年 ${last.getMonth() + 1} 月 ${last.getDate()} 日`;
+  }
+  if (first.getMonth() !== last.getMonth()) {
+    return `${head} – ${last.getMonth() + 1} 月 ${last.getDate()} 日`;
+  }
+  return `${head} – ${last.getDate()} 日`;
+};
+
+/** 按钟点（0–23）分组，供周视图按时段展示。 */
+export const groupItemsByHour = (items: CalendarItem[]): Map<number, CalendarItem[]> => {
+  const groups = new Map<number, CalendarItem[]>();
+  for (const item of items) {
+    const hour = Number(item.time.slice(11, 13)) || 0;
+    const list = groups.get(hour);
+    if (list) {
+      list.push(item);
+    } else {
+      groups.set(hour, [item]);
+    }
+  }
+  return groups;
+};
+
 export type CalendarItemState = "upcoming" | "overdue" | "done" | "fired";
 
 export interface CalendarItem {
@@ -51,6 +95,8 @@ export interface CalendarInput {
   recurringTasks: RecurringTask[];
   records: ReminderRecord[];
   previews: RecurringPreview[];
+  /** 循环提醒的合并粒度：月视图按天合并，周视图按小时合并。默认按天。 */
+  recurringGrouping?: "day" | "hour";
 }
 
 const STATE_ORDER: Record<CalendarItemState, number> = { overdue: 0, upcoming: 1, fired: 2, done: 3 };
@@ -103,7 +149,8 @@ export const bucketCalendarItems = (input: CalendarInput): Map<string, CalendarI
   // 循环提醒按“任务 + 日期”合并：已触发的来自提醒记录，未来的来自预估。
   const recurringGroups = new Map<string, CalendarItem>();
   const addRecurring = (taskId: string, time: string, title: string, state: CalendarItemState) => {
-    const groupKey = `${taskId}|${time.slice(0, 10)}|${state === "fired" ? "fired" : "upcoming"}`;
+    const period = input.recurringGrouping === "hour" ? time.slice(0, 13) : time.slice(0, 10);
+    const groupKey = `${taskId}|${period}|${state === "fired" ? "fired" : "upcoming"}`;
     const existing = recurringGroups.get(groupKey);
     if (existing) {
       existing.count += 1;
@@ -169,4 +216,11 @@ export const defaultReminderForDay = (day: Date, now: Date): Date | null => {
 export const moveReminderToDay = (reminderTime: string | null | undefined, day: Date): string => {
   const clock = reminderTime ? reminderTime.slice(11, 19) : "09:00:00";
   return `${dateKey(day)}T${clock.length === 8 ? clock : `${clock.slice(0, 5)}:00`}`;
+};
+
+/** 把待办拖到周视图的某个时段：日期与钟点取目标，分钟保留原值（没有提醒时为整点）。 */
+export const moveReminderToSlot = (reminderTime: string | null | undefined, day: Date, hour: number): string => {
+  const rest = reminderTime ? reminderTime.slice(14, 19) : "00:00";
+  const minutesSeconds = rest.length === 5 ? rest : `${rest.slice(0, 2)}:00`;
+  return `${dateKey(day)}T${String(hour).padStart(2, "0")}:${minutesSeconds}`;
 };

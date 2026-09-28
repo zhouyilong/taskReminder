@@ -8,6 +8,9 @@
         <label>
           <input type="checkbox" v-model="settingsDraft.soundEnabled" /> 提示音
         </label>
+        <label title="全屏程序或游戏中也能看到提醒；勿扰时段内不发送">
+          <input type="checkbox" v-model="settingsDraft.nativeNotificationEnabled" /> 同时发送系统通知
+        </label>
       </div>
       <div class="form-row compact">
         <label>稍后提醒分钟数</label>
@@ -15,19 +18,70 @@
       </div>
       <div class="form-row compact">
         <label>
+          <input type="checkbox" v-model="settingsDraft.quietHoursEnabled" /> 勿扰时段
+        </label>
+        <input
+          class="input"
+          type="time"
+          v-model="settingsDraft.quietHoursStart"
+          :disabled="!settingsDraft.quietHoursEnabled"
+          style="width: 130px"
+        />
+        <span class="field-hint">至</span>
+        <input
+          class="input"
+          type="time"
+          v-model="settingsDraft.quietHoursEnd"
+          :disabled="!settingsDraft.quietHoursEnabled"
+          style="width: 130px"
+        />
+      </div>
+      <div v-if="settingsDraft.quietHoursEnabled" class="form-row compact">
+        <span class="field-hint">{{ quietHoursHint }}</span>
+      </div>
+      <div class="form-row compact">
+        <label>
           <input type="checkbox" v-model="settingsDraft.quickAddEnabled" /> 快速添加快捷键
         </label>
         <input
           class="input shortcut-input"
-          :class="{ 'is-recording': shortcutRecording }"
+          :class="{ 'is-recording': shortcutRecording === 'quickAdd' }"
           readonly
           :disabled="!settingsDraft.quickAddEnabled"
-          :value="shortcutRecording ? '请按下组合键…' : formatAccelerator(settingsDraft.quickAddShortcut)"
+          :value="shortcutRecording === 'quickAdd' ? '请按下组合键…' : formatAccelerator(settingsDraft.quickAddShortcut)"
           title="点击后按下新的组合键，Esc 取消"
-          @focus="shortcutRecording = true"
-          @blur="shortcutRecording = false"
-          @keydown.prevent="handleShortcutKeydown"
+          @focus="shortcutRecording = 'quickAdd'"
+          @blur="shortcutRecording = null"
+          @keydown.prevent="handleShortcutKeydown($event, 'quickAdd')"
         />
+      </div>
+      <div class="form-row compact">
+        <label>显示/隐藏全部便签</label>
+        <input
+          class="input shortcut-input"
+          :class="{ 'is-recording': shortcutRecording === 'stickyToggle' }"
+          readonly
+          :value="
+            shortcutRecording === 'stickyToggle'
+              ? '请按下组合键…'
+              : settingsDraft.stickyToggleShortcut
+                ? formatAccelerator(settingsDraft.stickyToggleShortcut)
+                : '未设置'
+          "
+          title="点击后按下新的组合键，Esc 取消"
+          @focus="shortcutRecording = 'stickyToggle'"
+          @blur="shortcutRecording = null"
+          @keydown.prevent="handleShortcutKeydown($event, 'stickyToggle')"
+        />
+        <button
+          v-if="settingsDraft.stickyToggleShortcut"
+          class="button secondary"
+          type="button"
+          @click="settingsDraft.stickyToggleShortcut = ''"
+        >
+          清除
+        </button>
+        <span class="field-hint">托盘菜单也可以显示或隐藏全部便签</span>
       </div>
       <div v-if="quickAddShortcutError" class="form-row compact">
         <span class="field-hint is-error">{{ quickAddShortcutError }}</span>
@@ -154,6 +208,7 @@ import { computed, ref } from "vue";
 import Modal from "./Modal.vue";
 import { api } from "../api";
 import { formatDateTime } from "../format";
+import { formatQuietHoursHint } from "../quietHours";
 import { acceleratorFromEvent, formatAccelerator } from "../shortcut";
 import { formatVersionLabel, normalizeUpdateProxyUrl } from "../update";
 import { useSettings } from "../composables/useSettings";
@@ -191,12 +246,16 @@ const {
   handleInstallUpdate
 } = useUpdater();
 
-const shortcutRecording = ref(false);
+type ShortcutField = "quickAdd" | "stickyToggle";
+const shortcutRecording = ref<ShortcutField | null>(null);
 const uiScalePercent = computed(() => Math.round(uiScale.value * 100));
 const windowOpacityPercent = computed(() => Math.round(windowOpacity.value * 100));
+const quietHoursHint = computed(() =>
+  formatQuietHoursHint(settingsDraft.quietHoursStart, settingsDraft.quietHoursEnd)
+);
 const currentVersionLabel = computed(() => (props.appVersion ? formatVersionLabel(props.appVersion) : "-"));
 
-const handleShortcutKeydown = (event: KeyboardEvent) => {
+const handleShortcutKeydown = (event: KeyboardEvent, field: ShortcutField) => {
   const target = event.target as HTMLInputElement | null;
   if (event.key === "Escape") {
     target?.blur();
@@ -206,7 +265,11 @@ const handleShortcutKeydown = (event: KeyboardEvent) => {
   if (!accelerator) {
     return;
   }
-  settingsDraft.quickAddShortcut = accelerator;
+  if (field === "quickAdd") {
+    settingsDraft.quickAddShortcut = accelerator;
+  } else {
+    settingsDraft.stickyToggleShortcut = accelerator;
+  }
   target?.blur();
 };
 

@@ -3,7 +3,7 @@
 ## 项目结构与模块组织
 - `src/` 存放 Vue 3 + TypeScript 前端，共三个窗口入口：
   - 主窗口：`index.html` → `src/main.ts` → `src/App.vue`（只负责外壳：标题栏、侧边栏、按 Tab 切换视图、挂载共享弹窗与全局事件监听）。
-    - `src/views/`：每个 Tab 一个视图——`TodayView`（今天时间线）、`CalendarView`（日历月视图，可拖动待办改期）、`TasksView`（含搜索、标签/优先级筛选与排序）、`CompletedView`、`RecurringView`、`RecordsView`、`StatsView`（统计）、`TrashView`（回收站）。Tab 键定义在 `src/navigation.ts`，上次打开的 Tab 记在 `localStorage.activeTab`。
+    - `src/views/`：每个 Tab 一个视图——`TodayView`（今天时间线）、`CalendarView`（日历月视图 / 周视图，可拖动待办改期到某天或某个时段）、`TasksView`（含搜索、标签/优先级筛选与排序）、`CompletedView`、`RecurringView`、`RecordsView`、`StatsView`（统计）、`TrashView`（回收站）。Tab 键定义在 `src/navigation.ts`，上次打开的 Tab 记在 `localStorage.activeTab`。
     - `src/composables/`：模块级单例的共享状态——`useAppData`（四个列表、`refreshAll`、`dataVersion`）、`useSettings`（设置草稿、同步状态、设置/云同步弹窗开关）、`useUpdater`、`useUiPrefs`（主题、缩放、透明度、侧边栏）、`useDialogs`（确认框、详情、编辑待办/循环提醒）、`useItemActions`（完成、删除、右键菜单等通用操作）、`useSmartAdd`（带自然语言识别的新建待办/循环提醒）、`useContextMenu`、`usePagination`、`useNow`。
   - 提醒弹窗：`notification.html` → `src/notification.ts` → `src/NotificationApp.vue`。
   - 桌面便签：`sticky-note-item.html` → `src/stickyNoteItem.ts` → `src/StickyNoteItemApp.vue`（每张便签一个独立窗口，窗口标签为 `sticky-note-item-<编码后的 id>`）。
@@ -23,22 +23,25 @@
 - `src/markdown.ts` Markdown 转纯文本/预览文本工具（列表描述、提醒记录去掉前导列表标记）。
 - `src/format.ts` 主窗口共用的时间与文案格式化；`src/recurring.ts` 循环规则展示、表单草稿、校验与提交载荷。
 - `src/timeline.ts`（“今天”时间线）、`src/stats.ts`（统计面板）、`src/calendar.ts`（日历网格与按天归类）、`src/tasks.ts`（标签、优先级、筛选排序）、`src/nlp.ts`（自然语言时间/标签/优先级/循环规则识别）为纯函数，测试在同名 `*.spec.ts`。
+- `src/syncStatus.ts` 云同步状态码到文案与色调的映射（兼容旧版中文状态）；`src/quietHours.ts` 勿扰时段说明文案。
 - `src/safeStorage.ts` 带异常保护的 `localStorage` 封装；`src/startupError.ts` 启动失败时渲染错误页。
 - `src/styles.css` 为三个窗口共用的全局样式表（设计令牌、主窗口、提醒弹窗、便签）；组件私有样式放在 `.vue` 文件内。
 - `src/update.ts` 自动更新逻辑模块（检查更新、安装更新、偏好管理）。
 - `src/weekdays.ts` 每周位掩码工具（与后端一致：周一 = bit0 … 周日 = bit6）；`src/shortcut.ts` 全局快捷键录制与展示。
 - `src-tauri/` 存放 Tauri 应用的 Rust 后端。
-  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（命令注册、窗口管理、便签窗口）、`db.rs`（SQLite 读写）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync.rs`（WebDAV 同步）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（本地时间格式化与解析）、`holidays.rs`（中国法定节假日与调休）、`quick_add.rs`（快速添加窗口与全局快捷键）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
+  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（插件、命令注册与启动流程）、`commands/`（前端 `invoke` 的命令，按业务分为 `tasks`、`recurring`、`notification`、`trash`、`settings`、`sticky`、`system`、`data`，公共的 `ApiResult` / `into_api` 在 `commands/mod.rs`）、`windows/`（窗口事件；`windows/sticky.rs` 为便签窗口的标签编码、创建显示、层级与 UI 状态注入）、`db.rs`（SQLite 读写）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync.rs`（WebDAV 同步）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（本地时间格式化与解析）、`holidays.rs`（中国法定节假日与调休）、`quick_add.rs`（快速添加窗口）、`shortcuts.rs`（全局快捷键统一注册：快速添加、显示/隐藏全部便签）、`quiet_hours.rs`（勿扰时段判断）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单与提示：下一条提醒、完成/推迟、显示/隐藏全部便签）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
   - `src-tauri/migrations/` 存放数据库迁移文件；新增迁移后需在 `db.rs` 的 `migration_scripts()` 中登记，并同步 `sync.rs` 的列清单与 `ensure_sync_columns`。
   - `src-tauri/data/holidays-cn.json` 为内置法定节假日数据（`off` 放假日、`work` 调休上班日，支持 `[开始, 结束]` 区间），每年国务院发布次年安排后追加，并补充 `holidays.rs` 中的测试。
   - `src-tauri/icons/` 存放应用图标；源文件在 `src-tauri/icons/source/`（`icon.svg` 为主图标，`icon-small.svg` 为 16–32px 简化版），修改后执行 `python3 src-tauri/icons/source/render.py` 重新生成 PNG 与 `icon.ico`（需 `pip install cairosvg pillow`）。
   - `src-tauri/capabilities/default.json` 定义各窗口的权限。
   - `src-tauri/tauri.conf.json` 定义窗口、打包、更新器与应用元数据；`src-tauri/tauri.updater.conf.json` 为签名构建时的覆盖配置。
 - `docs/ROADMAP.md` 为功能扩展与重构路线图，完成条目后同步勾选并补充变更记录。
-- `.github/workflows/ci.yml` 为 CI（Ubuntu + Windows：`pnpm build`、`pnpm test`、`cargo fmt --check`、`cargo clippy`、`cargo test`）。
+- `.github/workflows/release.yml` 推送 `v*` tag 时签名构建 MSI 并上传到草稿 Release（发布说明取 `docs/release-notes/v{version}.md`）。
+- `.github/workflows/ci.yml` 为 CI（Ubuntu + Windows：`pnpm build`、`pnpm test`、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`）。
 - `scripts/` 存放构建与发布脚本。
   - `scripts/build-updater.ps1` 签名构建 MSI + 生成更新清单。
   - `scripts/write-updater-manifest.mjs` 生成 `latest.json` 更新清单。
+  - `scripts/check-release-version.mjs` 检查三处版本号一致且与发布 tag 相符（`release.yml` 使用）。
   - `scripts/tauri.mjs` Tauri CLI 包装器（处理 VS Dev Shell 环境）。
 
 ## 构建、测试与开发命令
@@ -62,6 +65,8 @@
 3. 生成清单：`pnpm release:updater` 会自动生成；若手动构建，则执行 `node scripts/write-updater-manifest.mjs`
 4. 发布：`gh release create v{version}` 上传 MSI + .sig + latest.json
 5. 签名私钥位于 `~/.tauri/taskReminder-updater.key`
+
+也可以交给 CI（`.github/workflows/release.yml`）：改好三处版本号、写好 `docs/release-notes/v{version}.md` 后推送 `v{version}` tag，工作流会检查版本号（`scripts/check-release-version.mjs`）、签名构建 MSI、生成 `latest.json` 并上传到**草稿** Release，检查无误后在 GitHub 上点“Publish release”。需要先在仓库 Secrets 中配置 `TAURI_SIGNING_PRIVATE_KEY`（私钥文件内容）与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。
 
 ## 编码风格与命名约定
 - 缩进：`.vue`、`.ts`、`.css` 使用 2 个空格（保持现有格式）。
@@ -104,7 +109,7 @@
 
 ### Linux 下便签窗口必须使用 App URL
 - **问题**：开发模式下便签窗口曾使用 `WebviewUrl::External(localhost)`，Linux WebKitGTK 会将其视为远程源并拒绝 `invoke`，导致便签无法保存。
-- **解决**：`sticky_note_item_url()` 在所有平台都返回 `WebviewUrl::App("sticky-note-item.html")`，`tauri dev` 会自动改写为 `build.devUrl`，与主窗口同源；`main.rs` 中有对应单元测试守护。
+- **解决**：`sticky_note_item_url()` 在所有平台都返回 `WebviewUrl::App("sticky-note-item.html")`，`tauri dev` 会自动改写为 `build.devUrl`，与主窗口同源；`windows/sticky.rs` 中有对应单元测试守护。
 - **规则**：新增的 Tauri 窗口一律使用 `WebviewUrl::App(...)`，不要为开发模式单独改用 External URL。
 
 ### Linux 下透明便签窗口不重绘
@@ -135,6 +140,20 @@
 - 导入、备份恢复都按“较新的 `updated_at` 胜出”合并（导入走 `DbManager::import_rows`，恢复复用 `sync::merge_databases`），之后调用 `schedule_existing` 并 `notify_local_change`。
 - 备份文件名固定为 `taskreminder-YYYYMMDD-HHMMSS.db`，`backup::resolve_backup` 只接受这种名字，防止路径穿越。
 
+### 同步状态码
+- `settings.webdav_last_sync_status` 存状态码（`sync::SyncState`：`never` / `syncing` / `success` / `first_sync` / `lock_busy` / `failed`），`get_status` 与 `sync-status` 事件也返回状态码；文案只在前端 `src/syncStatus.ts` 映射。
+- **规则**：不要再按中文文案判断同步状态；新增状态时同时更新 `SyncState::parse` 与 `syncStatus.ts`。读取时兼容 2.0.1 之前存的中文文案。
+
+### Cron 表达式
+- `recurrence::cron_schedule_expr` 把 5 段表达式转换为 `cron` crate 的 6 段格式：周字段按标准 Unix 含义（0/7 = 周日），数字周几会换成英文缩写，因为 `cron` crate 的数字周几是 1 = 周日。6、7 段原样透传。
+- 库里保存用户输入的原始表达式，转换只在计算时进行。
+
+### 密码存放（凭据库）
+- WebDAV 密码与同步密码在 Windows 上存凭据管理器（`secrets.rs`，服务名 `TaskReminderApp`，开发构建为 `TaskReminderApp-dev`，条目名 `{设备 ID}:{字段}`），数据库中留空，`settings.secret_storage` 记为 `keyring`；其他平台或写入失败时存数据库（`db`）。
+- 读写都经 `DbManager::load_settings` / `save_settings`，调用方拿到的 `AppSettings` 里总是明文密码。密码不变时 `save_settings` 不会写凭据库；凭据库读取失败时不会用空值覆盖。
+- 测试中的 `DbManager::new` 不访问系统凭据库；需要时用 `DbManager::with_secret_store` 注入 `secrets::MemoryStore`。
+- 新增敏感设置时同样经 `resolve_secret_storage` 处理，并在 `export_local_snapshot_bytes` 中清空。
+
 ### 同步端到端加密
 - 远端文件：明文为 `taskreminder.db`；开启加密后为 `taskreminder.db.enc`，同时把 `taskreminder.db` 换成以 `TaskReminder-Encrypted-Placeholder` 开头的占位说明（旧版本把它当数据库合并会失败，从而不会上传明文）。
 - `sync_with_remote` 的顺序不能随意调整：先判断远端是否加密（未开启加密却遇到加密文件、或解密失败都直接报错，**绝不上传**），合并后先传 `.enc` 再替换明文文件。
@@ -144,7 +163,14 @@
 - 开发构建对 `argon2`/`blake2` 单独开启优化（`Cargo.toml` 的 `profile.dev.package`），否则每次同步派生密钥要数秒。
 
 ### 全局快捷键
-- 快捷键由 `quick_add::apply_shortcut` 统一注册（先 `unregister_all` 再注册），启动时与保存设置后调用；失败（格式无效、被其他程序占用、Wayland 不支持等）不能阻止应用启动，原因通过 `apply_quick_add_shortcut` 命令返回给设置界面。
+- 快捷键由 `shortcuts::apply_shortcuts` 统一注册（先 `unregister_all` 再逐个注册：快速添加、显示/隐藏全部便签），启动时与保存设置后调用；某个失败不影响其他，原因合并后通过 `apply_quick_add_shortcut` 命令返回给设置界面。失败（格式无效、被其他程序占用、Wayland 不支持等）不能阻止应用启动。
+- 新增全局快捷键时加到 `apply_shortcuts` 中，不要在别处单独注册，否则会被 `unregister_all` 清掉。
+
+### 勿扰时段、系统通知与托盘
+- 提醒入队后一律经 `ReminderScheduler::present` 展示：勿扰时段内只更新已打开的弹窗、不主动弹出，并记下 `quiet_held`；巡检中的 `release_quiet_hold` 在勿扰结束后弹出积压的提醒。系统原生通知（`tauri-plugin-notification`）也在这里按设置发送，勿扰期间不发。
+- 勿扰、系统通知、便签快捷键都是本机设置（`settings` 表，迁移 `V2.0.2`），不参与同步。
+- 托盘通过 `listen_any("data-updated")` 与每 30 秒的定时器刷新，刷新在后台线程执行（`tray::request_refresh`），不要在持有锁时同步调用菜单 API。托盘中的“完成 / 推迟”复用 `commands::tasks::complete_task_by_id` / `reschedule_task_reminder`。
+- “隐藏全部便签”只隐藏窗口，不写 `sticky_is_open`，避免产生同步改动。
 
 ### onMounted 中异步操作的异常隔离
 - **问题**：多个异步操作放在同一个 `try` 块中，前面的操作抛异常会导致后面的操作被跳过（如自动更新检查被数据初始化异常阻断）。
@@ -155,7 +181,7 @@
 - 前端使用 Vitest：测试与被测模块同目录，命名为 `*.spec.ts`，运行 `pnpm test`。前端改动至少执行 `pnpm build`（含 `vue-tsc` 类型检查）与 `pnpm test`。
 - 视图里的计算逻辑（如时间线、统计）优先抽成 `src/` 下的纯函数再写测试，组件只做展示。
 - Rust 测试位于 `src-tauri/src/` 各模块的 `#[cfg(test)]` 中（便签窗口标签/URL、提醒队列、墓碑清理、同步合并、时间解析、节假日、循环规则），通过 `cargo test` 运行；需要数据库的测试用临时目录创建 `DbManager`，会自动执行迁移。
-- 提交前运行 `cargo fmt`，CI 会执行 `cargo fmt --check`。
+- 提交前运行 `cargo fmt` 与 `cargo clippy --all-targets -- -D warnings`，CI 会执行 `cargo fmt --check` 并在 clippy 有告警时失败。只在 Windows 编译的代码（`#[cfg(target_os = "windows")]`）在 Linux 上检查不到，可用 `rustup target add x86_64-pc-windows-gnu`（需 `mingw-w64`）后执行 `cargo clippy --target x86_64-pc-windows-gnu --all-targets` 预检。
 - 在 Linux 上构建会改写 `src-tauri/gen/schemas/`，这些生成文件的无关变动不要提交。
 - 仅调整前端 UI 时，可用 `pnpm dev` 在浏览器中预览；浏览器中没有 Tauri 运行时，需要在页面加载前注入 `window.__TAURI_INTERNALS__`（模拟 `invoke`、`transformCallback`、`metadata.currentWindow`）并返回示例数据，否则列表为空。
 

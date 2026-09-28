@@ -105,6 +105,16 @@ export interface AppSettings {
   syncEncryptionEnabled: boolean;
   /** 同步密码，只保存在本机。 */
   syncPassphrase: string;
+  /** 勿扰时段（HH:mm，支持跨午夜）：期间提醒只记录不弹窗，结束后一次性弹出。 */
+  quietHoursEnabled: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  /** 弹出提醒时同时发送系统原生通知。 */
+  nativeNotificationEnabled: boolean;
+  /** 显示/隐藏全部便签的全局快捷键，为空表示不启用。 */
+  stickyToggleShortcut: string;
+  /** 密码存放位置（只读）：keyring 为 Windows 凭据管理器，db 为本机数据库。 */
+  secretStorage?: "db" | "keyring" | string;
 }
 
 export interface UiStatePayload {
@@ -114,6 +124,7 @@ export interface UiStatePayload {
 }
 
 export interface SyncStatus {
+  /** 状态码（`SyncStateCode`），文案用 `syncStateLabel` 映射。 */
   status: string;
   error?: string | null;
   time?: string | null;

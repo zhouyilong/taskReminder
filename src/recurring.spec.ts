@@ -4,7 +4,10 @@ import {
   createRecurringDraft,
   draftFromRecurringTask,
   formatRecurringRule,
-  validateRecurringDraft
+  validateRecurringDraft,
+  firstUncoveredHolidayYear,
+  workdayDraftWarning,
+  workdayHolidayWarning
 } from "./recurring";
 import type { RecurringTask } from "./types";
 
@@ -51,5 +54,44 @@ describe("recurring drafts", () => {
   it("only sends the fields of the chosen mode", () => {
     const payload = buildRecurringPayload({ ...createRecurringDraft(), mode: "WORKDAY", scheduleTime: "08:30" });
     expect(payload).toMatchObject({ repeatMode: "WORKDAY", scheduleTime: "08:30", startTime: null, endTime: null });
+  });
+});
+
+describe("节假日数据覆盖提示", () => {
+  const years = [2025, 2026];
+
+  it("30 天内都已覆盖时不提示", () => {
+    expect(firstUncoveredHolidayYear(new Date(2026, 8, 27), years)).toBeNull();
+    expect(firstUncoveredHolidayYear(new Date(2026, 11, 1), years)).toBeNull();
+  });
+
+  it("30 天内跨入未覆盖的年份时返回该年份", () => {
+    expect(firstUncoveredHolidayYear(new Date(2026, 11, 5), years)).toBe(2027);
+    expect(firstUncoveredHolidayYear(new Date(2027, 5, 1), years)).toBe(2027);
+    expect(firstUncoveredHolidayYear(new Date(2024, 5, 1), years)).toBe(2024);
+  });
+
+  it("数据未加载时不提示", () => {
+    expect(firstUncoveredHolidayYear(new Date(2030, 0, 1), [])).toBeNull();
+  });
+
+  it("只提示运行中的法定工作日提醒，从下次触发起算", () => {
+    const now = new Date(2026, 8, 27, 10, 0);
+    const task = { repeatMode: "WORKDAY" as const, isPaused: false, nextTrigger: "2026-12-10T09:00:00" };
+    expect(workdayHolidayWarning(task, years, now)).toBe("2027 年节假日安排尚未内置，暂按周一至周五计算");
+    expect(workdayHolidayWarning({ ...task, nextTrigger: "2026-09-28T09:00:00" }, years, now)).toBeNull();
+    expect(workdayHolidayWarning({ ...task, isPaused: true }, years, now)).toBeNull();
+    expect(workdayHolidayWarning({ ...task, repeatMode: "DAILY" }, years, now)).toBeNull();
+  });
+
+  it("下次触发已过期时从现在起算", () => {
+    const now = new Date(2026, 11, 20, 10, 0);
+    const task = { repeatMode: "WORKDAY" as const, isPaused: false, nextTrigger: "2026-09-01T09:00:00" };
+    expect(workdayHolidayWarning(task, years, now)).toContain("2027");
+  });
+
+  it("新建表单按当前时间判断", () => {
+    expect(workdayDraftWarning(years, new Date(2026, 8, 27))).toBeNull();
+    expect(workdayDraftWarning(years, new Date(2026, 11, 20))).toContain("2027");
   });
 });

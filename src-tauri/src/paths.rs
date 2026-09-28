@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, Manager};
 
@@ -56,10 +56,10 @@ pub fn resolve_data_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
     Ok(path)
 }
 
-pub fn db_path(data_dir: &PathBuf) -> PathBuf {
+pub fn db_path(data_dir: &Path) -> PathBuf {
     data_dir.join("taskreminder.db")
 }
 
-pub fn lock_path(data_dir: &PathBuf) -> PathBuf {
+pub fn lock_path(data_dir: &Path) -> PathBuf {
     data_dir.join(".taskreminder.lock")
 }

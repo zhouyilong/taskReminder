@@ -402,15 +402,81 @@ fn sanitize_cron_expression(value: &str) -> Result<String, AppError> {
     Ok(trimmed.to_string())
 }
 
+/// 转成 `cron` crate 的表达式（秒 分 时 日 月 周 [年]）。
+///
+/// 5 段按标准 Unix Cron 理解：周字段 0 和 7 都是周日、1 是周一。`cron` crate 的数字周几是
+/// 1 = 周日 … 7 = 周六，直接透传会让 `1-5` 变成周日到周四，所以把数字周几换成英文缩写。
+/// 6、7 段沿用 `cron` crate 的写法，原样透传。
 fn cron_schedule_expr(value: &str) -> Result<String, AppError> {
     let parts = value.split_whitespace().collect::<Vec<_>>();
     match parts.len() {
-        5 => Ok(format!("0 {}", value)),
-        6 | 7 => Ok(value.to_string()),
+        5 => {
+            let weekday = unix_weekday_field(parts[4])?;
+            Ok(format!(
+                "0 {} {} {} {} {}",
+                parts[0], parts[1], parts[2], parts[3], weekday
+            ))
+        }
+        6 | 7 => Ok(parts.join(" ")),
         _ => Err(AppError::Invalid(
             "Cron 表达式需为 5、6 或 7 段".to_string(),
         )),
     }
+}
+
+const CRON_WEEKDAY_NAMES: [&str; 7] = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+
+/// 把 Unix Cron 的周字段（0/7 = 周日）中的数字换成英文缩写；`*`、`?` 与英文缩写原样保留。
+fn unix_weekday_field(field: &str) -> Result<String, AppError> {
+    let invalid = || AppError::Invalid(format!("Cron 表达式的周字段无效: {}", field));
+    let mut items = Vec::new();
+    for item in field.split(',') {
+        if item.is_empty() {
+            return Err(invalid());
+        }
+        let (base, step) = match item.split_once('/') {
+            Some((base, step)) => (
+                base,
+                Some(
+                    step.parse::<u32>()
+                        .ok()
+                        .filter(|v| *v > 0)
+                        .ok_or_else(invalid)?,
+                ),
+            ),
+            None => (item, None),
+        };
+        let numeric = base
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == '-' || c == '*');
+        if !numeric || (base == "*" && step.is_none()) || base == "?" {
+            items.push(item.to_string());
+            continue;
+        }
+        let parse_day = |raw: &str| {
+            raw.parse::<u32>()
+                .ok()
+                .filter(|v| *v <= 7)
+                .ok_or_else(invalid)
+        };
+        let (start, end) = if base == "*" {
+            (0, 6)
+        } else if let Some((a, b)) = base.split_once('-') {
+            (parse_day(a)?, parse_day(b)?)
+        } else {
+            let day = parse_day(base)?;
+            // 单个数字带步长（如 1/2）表示从该天起到周六。
+            (day, if step.is_some() { 6 } else { day })
+        };
+        if start > end {
+            return Err(invalid());
+        }
+        let step = step.unwrap_or(1) as usize;
+        for day in (start..=end).step_by(step) {
+            items.push(CRON_WEEKDAY_NAMES[(day % 7) as usize].to_string());
+        }
+    }
+    Ok(items.join(","))
 }
 
 fn normalize_time_field(value: Option<&str>, field: &str) -> Result<Option<String>, AppError> {
@@ -628,5 +694,158 @@ mod tests {
         t.schedule_day = Some(31);
         assert_eq!(next(&t, "2026-02-10T10:00"), "2026-02-28T09:00:00");
         assert_eq!(next(&t, "2026-02-28T10:00"), "2026-03-31T09:00:00");
+    }
+
+    fn cron(expr: &str) -> RecurringTask {
+        let mut t = task(REPEAT_MODE_CRON);
+        t.schedule_time = None;
+        t.cron_expression = Some(expr.to_string());
+        t
+    }
+
+    #[test]
+    fn cron_five_fields_use_unix_weekdays() {
+        // 2026-10-01 为周四。
+        assert_eq!(
+            next(&cron("0 9 * * 1-5"), "2026-10-01T10:00"),
+            "2026-10-02T09:00:00"
+        );
+        assert_eq!(
+            next(&cron("0 9 * * 1-5"), "2026-10-02T10:00"),
+            "2026-10-05T09:00:00"
+        );
+        assert_eq!(
+            next(&cron("0 9 * * 5"), "2026-10-01T10:00"),
+            "2026-10-02T09:00:00"
+        );
+        // 0 与 7 都是周日。
+        assert_eq!(
+            next(&cron("0 9 * * 0"), "2026-10-01T10:00"),
+            "2026-10-04T09:00:00"
+        );
+        assert_eq!(
+            next(&cron("0 9 * * 7"), "2026-10-01T10:00"),
+            "2026-10-04T09:00:00"
+        );
+        // 跨到周日的区间、列表与步长（*/3 为周日、周三、周六）。
+        assert_eq!(
+            next(&cron("0 9 * * 6-7"), "2026-10-01T10:00"),
+            "2026-10-03T09:00:00"
+        );
+        assert_eq!(
+            next(&cron("0 9 * * 1,3,5"), "2026-10-01T10:00"),
+            "2026-10-02T09:00:00"
+        );
+        assert_eq!(
+            next(&cron("0 9 * * 1-5/2"), "2026-10-02T10:00"),
+            "2026-10-05T09:00:00"
+        );
+        assert_eq!(
+            next(&cron("0 9 * * */3"), "2026-10-01T10:00"),
+            "2026-10-03T09:00:00"
+        );
+        // 英文缩写不受影响。
+        assert_eq!(
+            next(&cron("0 9 * * MON-FRI"), "2026-10-01T10:00"),
+            "2026-10-02T09:00:00"
+        );
+        assert_eq!(
+            next(&cron("0 9 * * SUN"), "2026-10-01T10:00"),
+            "2026-10-04T09:00:00"
+        );
+    }
+
+    #[test]
+    fn cron_weekday_field_translation() {
+        assert_eq!(unix_weekday_field("*").unwrap(), "*");
+        assert_eq!(unix_weekday_field("?").unwrap(), "?");
+        assert_eq!(unix_weekday_field("1-5").unwrap(), "MON,TUE,WED,THU,FRI");
+        assert_eq!(unix_weekday_field("0,7").unwrap(), "SUN,SUN");
+        assert_eq!(unix_weekday_field("*/2").unwrap(), "SUN,TUE,THU,SAT");
+        assert_eq!(unix_weekday_field("MON-FRI").unwrap(), "MON-FRI");
+        assert!(unix_weekday_field("8").is_err());
+        assert!(unix_weekday_field("5-1").is_err());
+        assert!(unix_weekday_field("1/0").is_err());
+        assert!(unix_weekday_field("1,,2").is_err());
+    }
+
+    #[test]
+    fn cron_six_and_seven_fields_pass_through() {
+        // 6 段带秒，沿用 cron crate 写法。
+        assert_eq!(
+            next(&cron("30 0 9 * * *"), "2026-10-01T10:00"),
+            "2026-10-02T09:00:30"
+        );
+        // 7 段带年份（cron crate 对跨到未来年份的计算不可靠，这里只验证包含当年的范围）。
+        assert_eq!(
+            next(&cron("0 0 9 * * * 2026-2030"), "2026-10-01T10:00"),
+            "2026-10-02T09:00:00"
+        );
+    }
+
+    #[test]
+    fn cron_calendar_edges() {
+        // 每月 31 日跳过小月。
+        assert_eq!(
+            next(&cron("0 9 31 * *"), "2026-09-01T10:00"),
+            "2026-10-31T09:00:00"
+        );
+        // 2 月 29 日只在闰年触发。
+        assert_eq!(
+            next(&cron("0 9 29 2 *"), "2026-10-01T10:00"),
+            "2028-02-29T09:00:00"
+        );
+        // 跨年。
+        assert_eq!(
+            next(&cron("0 0 1 1 *"), "2026-12-31T23:30"),
+            "2027-01-01T00:00:00"
+        );
+        // 分钟步长；恰好在触发时刻时取下一次。
+        assert_eq!(
+            next(&cron("*/15 * * * *"), "2026-10-01T10:00"),
+            "2026-10-01T10:15:00"
+        );
+        assert_eq!(
+            next(&cron("*/15 * * * *"), "2026-10-01T10:07"),
+            "2026-10-01T10:15:00"
+        );
+    }
+
+    #[test]
+    fn cron_sanitize_rejects_invalid_expressions() {
+        for expr in [
+            "",
+            "   ",
+            "0 9 * *",
+            "0 9 * * * * * *",
+            "61 9 * * *",
+            "0 25 * * *",
+            "0 9 * * 8",
+            "abc def ghi jkl mno",
+        ] {
+            let mut t = cron(expr);
+            assert!(sanitize_recurring_task(&mut t).is_err(), "{expr:?}");
+        }
+        // 缺少表达式。
+        let mut t = task(REPEAT_MODE_CRON);
+        t.cron_expression = None;
+        assert!(sanitize_recurring_task(&mut t).is_err());
+        // 没有未来触发时间。
+        assert!(
+            compute_next_trigger(&cron("0 0 9 1 1 * 2020"), Some(dt("2026-10-01T10:00"))).is_err()
+        );
+    }
+
+    #[test]
+    fn cron_sanitize_trims_and_clears_other_fields() {
+        let mut t = cron("  0 9 * * 1-5  ");
+        t.schedule_time = Some("08:00".to_string());
+        t.schedule_day = Some(3);
+        t.start_time = Some("08:00".to_string());
+        sanitize_recurring_task(&mut t).unwrap();
+        assert_eq!(t.cron_expression.as_deref(), Some("0 9 * * 1-5"));
+        assert_eq!(t.schedule_time, None);
+        assert_eq!(t.schedule_day, None);
+        assert_eq!(t.start_time, None);
     }
 }
