@@ -17,9 +17,20 @@ export const recurringModeOptions: { value: RecurringMode; label: string }[] = [
   { value: "CRON", label: "Cron 表达式" },
 ];
 
+/**
+ * 本版本是否认识这个循环模式。不认识的模式来自更新版本的设备：后端不触发也不改写，
+ * 界面上标为“需升级”，也不允许编辑（编辑表单会把它改成某个已知模式，覆盖新版本的规则）。
+ */
+export const isSupportedRecurringMode = (mode?: string | null) =>
+  recurringModeOptions.some(item => item.value === mode);
+
 export const formatRecurringMode = (mode?: RecurringMode | string | null) => {
+  // 空值按区间间隔（旧数据的默认值）；其他不认识的模式不能冒充区间间隔。
+  if (!mode) {
+    return "区间间隔";
+  }
   const resolved = recurringModeOptions.find(item => item.value === mode);
-  return resolved ? resolved.label : "区间间隔";
+  return resolved ? resolved.label : "不支持的模式";
 };
 
 export const formatRecurringRule = (task: RecurringTask) => {
@@ -34,12 +45,13 @@ export const formatRecurringRule = (task: RecurringTask) => {
       return `每月 ${task.scheduleDay || "-"} 日 ${task.scheduleTime || "-"}`;
     case "CRON":
       return task.cronExpression || "-";
-    case "INTERVAL_RANGE":
-    default: {
+    case "INTERVAL_RANGE": {
       const start = task.startTime || "00:00";
       const end = task.endTime || "23:59";
       return `每 ${task.intervalMinutes} 分钟（${start} - ${end}）`;
     }
+    default:
+      return `不支持的循环模式（${task.repeatMode}），请升级应用`;
   }
 };
 

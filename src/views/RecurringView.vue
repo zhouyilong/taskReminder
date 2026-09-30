@@ -48,7 +48,12 @@
               </td>
               <td class="col-datetime col-next-trigger cell-time" :title="formatDateTime(task.nextTrigger)">{{ formatDateTime(task.nextTrigger) }}</td>
               <td class="col-status" :title="task.isPaused ? '已暂停' : '运行中'">
-                <span class="status-pill" :class="task.isPaused ? 'is-paused' : 'is-running'">{{ task.isPaused ? "已暂停" : "运行中" }}</span>
+                <span
+                  v-if="!isSupportedRecurringMode(task.repeatMode)"
+                  class="status-pill is-unsupported"
+                  title="来自更新版本的循环模式，本机不会提醒；升级应用后恢复"
+                >需升级</span>
+                <span v-else class="status-pill" :class="task.isPaused ? 'is-paused' : 'is-running'">{{ task.isPaused ? "已暂停" : "运行中" }}</span>
               </td>
             </tr>
             <tr v-if="!recurringPage.length" class="table-empty-row">
@@ -78,6 +83,7 @@ import {
   createRecurringDraft,
   formatRecurringMode,
   formatRecurringRule,
+  isSupportedRecurringMode,
   recurringModeOptions,
   validateRecurringDraft,
   workdayHolidayWarning

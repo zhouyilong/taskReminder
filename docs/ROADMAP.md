@@ -43,7 +43,7 @@
 | 4 | P1 | ✅ **在界面中更换同步密码** | 二·E | 云同步设置中“更换同步密码…”（当前密码 + 新密码两次；云同步设置有未保存的修改时要求先保存）。新命令 `change_sync_passphrase` → `CloudSyncService::change_passphrase`：与普通同步共用进行中标记与远端锁，用当前密码下载、解密并合并，再用新密码加密上传 `.enc`（`sync_with_remote_as`），**上传成功后才**把新密码保存到本机（凭据库 / 数据库）；当前密码不对、解密失败、上传失败都保留旧密码。成功后前端只刷新同步相关字段，避免随后“保存”把旧密码写回。解密认证失败归为 `AppError::SyncPassphrase` → 新状态码 `passphrase_mismatch`（“同步密码不匹配”，`SyncState::parse` 与 `syncStatus.ts` 同步更新），设置中提示“同步密码已在其他设备更换，请填写新密码”；此状态下**暂停自动同步**（手动同步不受影响），保存新密码后立即同步一次。`CryptoError::InvalidFormat`（文件损坏）仍为普通的同步失败。**顺带修复**：`request_sync` 在异步任务里执行阻塞的 `perform_sync`，占住运行时工作线程，debug 构建中 reqwest 直接 panic（开发模式下同步从未执行），改为 `spawn_blocking` | `sync.rs` 内存远端测试：更换成功并由另一设备填新密码恢复、当前密码无法解密时一切不变、上传失败保留旧密码、空远端首次上传、输入校验、暂停与恢复的判断；`syncStatus.spec.ts`、`syncPassphrase.spec.ts`。本地 WebDAV（wsgidav）+ Xvfb 两台“设备”实跑：A 在界面中更换 → B 得到 `passphrase_mismatch` 且远端不变 → B 填新密码保存后立即同步成功 → A 收到 B 的新数据；A 更换后点“确认”不会写回旧密码 |
 | 5 | P1 | ✅ **便签管理列表** | 二·D | 新增“便签”Tab（`StickiesView`，登记到 `src/navigation.ts`，排在“循环提醒”之后）：列出已打开或有内容的便签，显示状态（显示中 / 已隐藏 / 已关闭）、标题、内容预览（去掉 Markdown 标记）、提醒与修改时间；支持按标题或内容搜索、“全部 / 已打开 / 已关闭”筛选，显示中的排在前面。操作：点标题或“置前 / 显示 / 打开”、关闭、新建便签；右键另有编辑待办、清空内容（只对已关闭的便签开放，避免与窗口中未保存的编辑冲突）、删除（先关闭窗口再删除待办）。后端新增 `list_sticky_note_summaries`（窗口可见性读自窗口句柄）与 `show_sticky_note`（显示并置前，**不写库**，点“置前”不产生同步改动；已关闭的便签仍走 `open_sticky_note`）；“隐藏 / 显示全部便签”发出 `sticky-note-changed`，列表随之刷新。**顺带修复**：`open_sticky_note` 也把负坐标截成 0（第 3 项漏掉的路径），重新打开副屏上的便签会跑回主屏 | `stickies.spec.ts`（状态、排序、筛选、Markdown 纯文本搜索、计数）；Rust 测试列表过滤、序列化、重新打开保留负坐标；深浅主题、侧边栏收起、窄窗口与空状态截图；Xvfb 实跑列表与打开/关闭 |
 | 6 | P1 | ✅ **便签贴边吸附** | 二·D | 松开鼠标后，便签边缘距显示器工作区边缘小于 12 px 就贴边；与其他可见便签并排或上下相接时保留 8 px 间距，并与相邻便签的边缘对齐（`placement::snap_position`，横纵分别取最近的候选，结果稳定）。吸附后的位置照常经 `Moved` 保存。**判断拖动结束**：Tauri 没有“拖动结束”事件，拖动中只有连续的 `Moved`，所以用 `GetAsyncKeyState` 读鼠标键：移动时有鼠标键按下才算用户拖动，松开且 150 ms 内没有新的移动后吸附。这样打开便签、越界校正与吸附本身造成的移动不会触发，拖动途中停顿也不会被吸走；松开时按住 `Alt` 不吸附。设置“便签贴边吸附”（默认开，本机设置，迁移 V2.0.4）。**与计划的差异**：只在 Windows 上启用，其他平台读不到鼠标键状态，交给窗口管理器 | `placement.rs` 吸附测试（屏幕边、并排间距、上下对齐、远处便签不参与、取最近、结果稳定）；`db.rs` 设置默认开与读写；Linux 与 `x86_64-pc-windows-gnu` 两个目标 clippy 通过。拖动手感需 Windows 真机确认 |
-| 7 | P2 | **状态字段强类型化** | 三·后端 | `status`、`task_type`、`repeat_mode`、`action` 从 `String` 改为枚举，库中存的字符串与 `invoke` 返回的 JSON 保持不变（`serde(rename_all)`）。**未知值必须原样保留**（`Unknown(String)` 变体），不能像旧版 `normalize_repeat_mode` 那样回退后同步回去——为 v2.1 新增循环模式时的多版本混用打基础 | 现有 `cargo test` 全绿；新增用例：未知 `repeat_mode` 读入再写出不变、JSON 序列化与旧版一致 |
+| 7 | P2 | ✅ **状态字段强类型化** | 三·后端 | 新增 `kinds.rs`：`TaskStatus`、`TaskType`、`ReminderKind`（提醒记录与弹窗的来源）、`ReminderAction`、`RepeatMode`，由同一个宏生成 serde 与 rusqlite 的读写，库中文本与 `invoke` 返回的 JSON 与以前完全一致（前端类型不变）。**未知值原样保留**（`Unknown(String)`）。`RepeatMode` 兼容旧写法（不区分大小写、`INTERVAL`、空值 → 区间间隔），去掉 `normalize_repeat_mode` 与 `REPEAT_MODE_*` 字符串常量。**与计划的差异（行为变化）**：以前遇到不认识的循环模式会按区间间隔每 N 分钟触发，并把模式改成区间间隔、清掉其他规则字段后写回、经同步改坏新版本设备的数据；现在不认识的模式**本机不调度、不触发、不改写**（`sanitize_recurring_task` 报“此版本不支持的循环模式，请升级应用”，调度器、巡检、托盘、预估都跳过），列表显示“不支持的模式 / 需升级”，不能编辑（编辑表单会把它改成已知模式） | `kinds.rs` 测试（已知值往返、未知值保留、旧写法、JSON 与 SQLite 读写）；`recurrence.rs` 未知模式报错且任务不变；`db.rs` 未知模式读写后模式与规则字段不变、IPC JSON 与旧版一致；`tray.rs` 跳过未知模式；前端 `recurring.spec.ts`；Xvfb 实跑：已到点的 `BIWEEKLY` 提醒经过 30 秒巡检后没有提醒记录，行（含 `updated_at`）完全不变 |
 | 8 | P2 | **统一时间处理（其余模块）** | 三·后端 | `tray.rs`、`backup.rs`、`recurrence.rs`、`quiet_hours.rs`、`maintenance.rs`、`commands/*` 中直接调用 `Local::now()` / `parse_from_str` 的地方改用 `time.rs`，并让“当前时间”可注入，方便测试勿扰、托盘等与时刻相关的逻辑。**不改**存储格式，UTC 存储仍在 2.x 规划 | 行为不变，`cargo test` 全绿；`time.rs` 之外不再出现 `parse_from_str`（`grep` 检查） |
 
 ### 建议顺序
@@ -72,6 +72,7 @@
 - 更换同步密码：两台 2.0.2 设备走一遍“A 更换 → B 提示并输入新密码 → 恢复同步”。已在本地 WebDAV 上实跑通过，发布前在坚果云等真实服务上再走一遍。发布说明写明：**2.0.1 及更早的设备在密码更换后只会显示“同步失败”**，需要先升级再输入新密码。
 - 便签：Windows 真机检查多显示器越界校正、贴边吸附与管理列表中的打开/关闭；确认越界校正不产生同步改动。
 - 发布说明写明新设置（节假日自动更新、便签吸附）只在本机生效。
+- 发布说明写明：2.0.2 起不认识的循环模式不再被改写（为 v2.1 新增模式做准备）；2.0.1 及更早的版本仍会改写，v2.1 发布时需提示多设备一起升级。
 - 完成的条目在下文对应位置勾选，并在变更记录中补充。
 
 ---
@@ -211,7 +212,7 @@
 
 ### 后端
 - [x] **拆分 `main.rs`**（v2.0.1，约 1800 行 → 约 200 行）：命令拆到 `commands/{tasks,recurring,notification,trash,settings,sticky,system,data}.rs`，便签窗口管理与窗口事件拆到 `windows/sticky.rs`。
-- [ ] **状态字段强类型化**（计划 v2.0.2）：`status`、`task_type`、`repeat_mode`、`action` 从 `String` 改为带 serde 的枚举。
+- [x] **状态字段强类型化**（v2.0.2，`kinds.rs`，未知值原样保留）：`status`、`task_type`、`repeat_mode`、`action` 从 `String` 改为带 serde 的枚举。
 - [~] **统一时间处理**（其余模块计划 v2.0.2）：已新增 `time.rs`（`parse_datetime_any` / `now_string` / `format_datetime`），`db.rs`、`sync.rs`、`scheduler.rs` 已改用；其余模块待迁移。长期考虑存 UTC 并附带时区偏移，解决跨时区设备同步比较。
 - [ ] **同步合并更稳**：目前整行按 `updated_at` 取较新的一方，依赖设备时钟。可引入版本号或“设备 ID + 逻辑时钟”，冲突时记日志或提示用户。
 - [ ] **依赖升级**：`reqwest 0.11 blocking` → 0.12，`rusqlite 0.31` 同步升级。
@@ -242,3 +243,4 @@
 | 2026-09-30 | v2.0.2 | 便签管理列表（新增“便签”Tab；“置前”不写库；顺带修复重新打开便签时负坐标被截断） |
 | 2026-09-30 | v2.0.2 | 界面中更换同步密码、`passphrase_mismatch` 状态与自动同步暂停；修复 `request_sync` 在异步任务中阻塞（debug 构建同步 panic） |
 | 2026-09-30 | v2.0.2 | 节假日数据在线更新（迁移 V2.0.5）；删除或完成待办时收起便签窗口；打开便签不再因编辑器重新排版而自动保存 |
+| 2026-09-30 | v2.0.2 | 状态字段强类型化（`kinds.rs`）；不认识的循环模式原样保留，本机不触发、不改写 |

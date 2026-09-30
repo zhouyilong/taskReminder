@@ -9,12 +9,12 @@ use uuid::Uuid;
 
 use crate::backup::ImportSummary;
 use crate::errors::AppError;
+use crate::kinds::{ReminderAction, ReminderKind, RepeatMode, TaskStatus, TaskType};
 use crate::models::{
     default_quick_add_shortcut, normalize_priority, tags_from_db, tags_to_db, AppSettings,
     RecurringTask, ReminderRecord, StickyNote, Task,
 };
 use crate::quiet_hours;
-use crate::recurrence::REPEAT_MODE_INTERVAL_RANGE;
 use crate::secrets::{self, SecretStore, Secrets};
 use crate::time::{format_datetime, now_string, parse_datetime_any};
 
@@ -473,8 +473,8 @@ impl DbManager {
             id,
             description: description.to_string(),
             sticky_content: if note.is_empty() { None } else { Some(note) },
-            task_type: "ONE_TIME".to_string(),
-            status: "PENDING".to_string(),
+            task_type: TaskType::OneTime,
+            status: TaskStatus::Pending,
             created_at: now.clone(),
             completed_at: None,
             reminder_time: None,
@@ -609,8 +609,8 @@ impl DbManager {
         Ok(RecurringTask {
             id,
             description: task.description.clone(),
-            task_type: "RECURRING".to_string(),
-            status: "PENDING".to_string(),
+            task_type: TaskType::Recurring,
+            status: TaskStatus::Pending,
             created_at: now.clone(),
             completed_at: None,
             reminder_time: None,
@@ -736,7 +736,7 @@ impl DbManager {
         &self,
         reminder_id: &str,
         description: &str,
-        reminder_type: &str,
+        reminder_type: ReminderKind,
     ) -> Result<ReminderRecord, AppError> {
         let conn = self.get_conn()?;
         let id = Uuid::new_v4().to_string();
@@ -744,16 +744,16 @@ impl DbManager {
         conn.execute(
             "INSERT INTO reminder_records (id, reminder_id, description, type, trigger_time, close_time, action, updated_at, deleted_at)
              VALUES (?, ?, ?, ?, ?, NULL, 'PENDING', ?, NULL)",
-            params![id, reminder_id, description, reminder_type, now, now],
+            params![id, reminder_id, description, &reminder_type, now, now],
         )?;
         Ok(ReminderRecord {
             id,
             reminder_id: reminder_id.to_string(),
             description: description.to_string(),
-            reminder_type: reminder_type.to_string(),
+            reminder_type,
             trigger_time: now.clone(),
             close_time: None,
-            action: "PENDING".to_string(),
+            action: ReminderAction::Pending,
             updated_at: Some(now),
             deleted_at: None,
         })
@@ -762,13 +762,13 @@ impl DbManager {
     pub fn update_reminder_record_action(
         &self,
         record_id: &str,
-        action: &str,
+        action: ReminderAction,
     ) -> Result<(), AppError> {
         let conn = self.get_conn()?;
         let now = now_string();
         conn.execute(
             "UPDATE reminder_records SET action = ?, close_time = ?, updated_at = ? WHERE id = ?",
-            params![action, now, now, record_id],
+            params![&action, now, now, record_id],
         )?;
         Ok(())
     }
@@ -1342,7 +1342,7 @@ impl DbManager {
         for task in tasks {
             let valid = !task.id.trim().is_empty()
                 && !task.description.trim().is_empty()
-                && matches!(task.status.as_str(), "PENDING" | "COMPLETED");
+                && task.status.is_known();
             let outcome = if valid {
                 import_outcome(&tx, "tasks", &task.id, &task.updated_at, &task.created_at)?
             } else {
@@ -1566,10 +1566,10 @@ fn recurring_from_row(row: &rusqlite::Row<'_>) -> Result<RecurringTask, rusqlite
         is_paused: row.get::<_, i64>(9)? == 1,
         start_time: row.get(10)?,
         end_time: row.get(11)?,
+        // 空值按区间间隔（V1.4.1 迁移的默认值），不认识的模式原样保留。
         repeat_mode: row
-            .get::<_, Option<String>>(12)?
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| REPEAT_MODE_INTERVAL_RANGE.to_string()),
+            .get::<_, Option<RepeatMode>>(12)?
+            .unwrap_or(RepeatMode::IntervalRange),
         schedule_time: row.get(13)?,
         schedule_weekday: row.get(14)?,
         schedule_weekdays: row.get(19)?,
@@ -1774,6 +1774,7 @@ fn execute_sql_script(conn: &Connection, sql: &str) -> Result<(), AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kinds::RepeatMode;
 
     fn temp_db() -> (DbManager, PathBuf) {
         let dir = std::env::temp_dir().join(format!("taskreminder-test-{}", Uuid::new_v4()));
@@ -1801,8 +1802,8 @@ mod tests {
         RecurringTask {
             id: String::new(),
             description: "weekly".to_string(),
-            task_type: "RECURRING".to_string(),
-            status: "PENDING".to_string(),
+            task_type: TaskType::Recurring,
+            status: TaskStatus::Pending,
             created_at: String::new(),
             completed_at: None,
             reminder_time: None,
@@ -1814,7 +1815,7 @@ mod tests {
             is_paused: false,
             start_time: None,
             end_time: None,
-            repeat_mode: "DAILY".to_string(),
+            repeat_mode: RepeatMode::Daily,
             schedule_time: Some("09:00".to_string()),
             schedule_weekday: None,
             schedule_weekdays: None,
@@ -1974,7 +1975,9 @@ mod tests {
     #[test]
     fn purge_also_clears_deleted_reminder_records() {
         let (db, dir) = temp_db();
-        let record = db.create_reminder_record("task-1", "desc", "TASK").unwrap();
+        let record = db
+            .create_reminder_record("task-1", "desc", ReminderKind::Task)
+            .unwrap();
         {
             let conn = db.get_conn().unwrap();
             conn.execute(
@@ -1993,7 +1996,7 @@ mod tests {
         let (db, dir) = temp_db();
         let mut draft = sample_recurring();
         draft.next_trigger = "2026-09-28T09:00:00".to_string();
-        draft.repeat_mode = "WEEKLY".to_string();
+        draft.repeat_mode = RepeatMode::Weekly;
         draft.schedule_weekday = Some(1);
         draft.schedule_weekdays = Some(0b10101);
         let created = db.create_recurring_task(&draft).unwrap();
@@ -2067,7 +2070,9 @@ mod tests {
     #[test]
     fn has_reminder_record_since_compares_trigger_time() {
         let (db, dir) = temp_db();
-        let record = db.create_reminder_record("task-1", "desc", "TASK").unwrap();
+        let record = db
+            .create_reminder_record("task-1", "desc", ReminderKind::Task)
+            .unwrap();
         let trigger = parse_datetime_any(&record.trigger_time).unwrap();
 
         assert!(db
@@ -2144,6 +2149,71 @@ mod tests {
         backdate_task(&db, &id);
         db.move_sticky_note(&id, 200.0, -100.0).unwrap();
         assert!(db.get_sticky_note(&id).unwrap().unwrap().is_open);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn unknown_repeat_mode_survives_read_and_write() {
+        // 模拟 v2.1 新增的模式经同步写入本机数据库。
+        let (db, dir) = temp_db();
+        let created = db.create_recurring_task(&sample_recurring()).unwrap();
+        {
+            let conn = db.get_conn().unwrap();
+            conn.execute(
+                "UPDATE recurring_tasks SET repeat_mode = 'BIWEEKLY', schedule_time = '09:00', cron_expression = 'custom' WHERE id = ?",
+                [&created.id],
+            )
+            .unwrap();
+        }
+        let mut task = db.get_recurring_task(&created.id).unwrap().unwrap();
+        assert_eq!(
+            task.repeat_mode,
+            RepeatMode::Unknown("BIWEEKLY".to_string())
+        );
+        // 暂停等只改其他字段的写入不会改动模式与规则字段。
+        task.is_paused = true;
+        db.update_recurring_task(&task).unwrap();
+        let conn = db.get_conn().unwrap();
+        let (mode, time, cron): (String, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT repeat_mode, schedule_time, cron_expression FROM recurring_tasks WHERE id = ?",
+                [&created.id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(mode, "BIWEEKLY");
+        assert_eq!(time.as_deref(), Some("09:00"));
+        assert_eq!(cron.as_deref(), Some("custom"));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ipc_json_is_unchanged_by_typed_fields() {
+        let (db, dir) = temp_db();
+        let task = db.create_task("待办", None).unwrap();
+        let json = serde_json::to_value(&task).unwrap();
+        assert_eq!(json["type"], "ONE_TIME");
+        assert_eq!(json["status"], "PENDING");
+        db.complete_task(&task.id).unwrap();
+        let done = serde_json::to_value(db.get_task(&task.id).unwrap().unwrap()).unwrap();
+        assert_eq!(done["status"], "COMPLETED");
+
+        let recurring = db.create_recurring_task(&sample_recurring()).unwrap();
+        let json = serde_json::to_value(&recurring).unwrap();
+        assert_eq!(json["type"], "RECURRING");
+        assert_eq!(json["repeatMode"], recurring.repeat_mode.as_str());
+
+        let record = db
+            .create_reminder_record("task-1", "desc", ReminderKind::Task)
+            .unwrap();
+        let json = serde_json::to_value(&record).unwrap();
+        assert_eq!(json["type"], "TASK");
+        assert_eq!(json["action"], "PENDING");
+
+        // 前端发来的字符串照常解析。
+        let parsed: ReminderRecord = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.action, ReminderAction::Pending);
         let _ = std::fs::remove_dir_all(dir);
     }
 

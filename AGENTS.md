@@ -29,7 +29,7 @@
 - `src/update.ts` 自动更新逻辑模块（检查更新、安装更新、偏好管理）。
 - `src/weekdays.ts` 每周位掩码工具（与后端一致：周一 = bit0 … 周日 = bit6）；`src/shortcut.ts` 全局快捷键录制与展示。
 - `src-tauri/` 存放 Tauri 应用的 Rust 后端。
-  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（插件、命令注册与启动流程）、`commands/`（前端 `invoke` 的命令，按业务分为 `tasks`、`recurring`、`notification`、`trash`、`settings`、`sticky`、`system`、`data`，公共的 `ApiResult` / `into_api` 在 `commands/mod.rs`）、`windows/`（窗口事件；`windows/sticky.rs` 为便签窗口的标签编码、创建显示、层级与 UI 状态注入，以及 Windows 上的贴边吸附；`windows/placement.rs` 为便签位置的纯几何计算：越界校正、吸附）、`db.rs`（SQLite 读写）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync.rs`（WebDAV 同步）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（本地时间格式化与解析）、`holidays.rs`（中国法定节假日与调休：内置数据、在线更新缓存与用户覆盖文件的合并与校验）、`holiday_update.rs`（每天从仓库拉取节假日数据）、`quick_add.rs`（快速添加窗口）、`shortcuts.rs`（全局快捷键统一注册：快速添加、显示/隐藏全部便签）、`quiet_hours.rs`（勿扰时段判断）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单与提示：下一条提醒、完成/推迟、显示/隐藏全部便签）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
+  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（插件、命令注册与启动流程）、`commands/`（前端 `invoke` 的命令，按业务分为 `tasks`、`recurring`、`notification`、`trash`、`settings`、`sticky`、`system`、`data`，公共的 `ApiResult` / `into_api` 在 `commands/mod.rs`）、`windows/`（窗口事件；`windows/sticky.rs` 为便签窗口的标签编码、创建显示、层级与 UI 状态注入，以及 Windows 上的贴边吸附；`windows/placement.rs` 为便签位置的纯几何计算：越界校正、吸附）、`db.rs`（SQLite 读写）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync.rs`（WebDAV 同步）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（本地时间格式化与解析）、`holidays.rs`（中国法定节假日与调休：内置数据、在线更新缓存与用户覆盖文件的合并与校验）、`holiday_update.rs`（每天从仓库拉取节假日数据）、`quick_add.rs`（快速添加窗口）、`shortcuts.rs`（全局快捷键统一注册：快速添加、显示/隐藏全部便签）、`quiet_hours.rs`（勿扰时段判断）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单与提示：下一条提醒、完成/推迟、显示/隐藏全部便签）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`kinds.rs`（状态、类型、处理结果、循环模式的强类型枚举，未知值原样保留）、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
   - `src-tauri/migrations/` 存放数据库迁移文件；新增迁移后需在 `db.rs` 的 `migration_scripts()` 中登记，并同步 `sync.rs` 的列清单与 `ensure_sync_columns`。
   - `src-tauri/data/holidays-cn.json` 为内置法定节假日数据（`off` 放假日、`work` 调休上班日，支持 `[开始, 结束]` 区间），每年国务院发布次年安排后追加，并补充 `holidays.rs` 中的测试。
   - **该文件同时是在线更新的数据源**：客户端每天从 `main` 分支拉取（jsDelivr / GitHub raw），推送到 `main` 后已发布的应用即可获得新年份。客户端只采用内置数据没有的年份，且拒绝删减已下载年份的文件，因此**只能追加年份**；已发布年份的更正需随应用版本发布（内置数据优先）。
@@ -130,7 +130,8 @@
 
 ### 循环模式的兼容性
 - 每周多天存于 `schedule_weekdays` 位掩码，`schedule_weekday` 始终写入掩码中最早的一天，供旧版本读取；读取时掩码为空则回退到 `schedule_weekday`。
-- 新增循环模式时，旧版本的 `normalize_repeat_mode` 会把未知模式回退为区间间隔并可能同步回来，需在发布说明中提示多设备同时升级。
+- 状态与模式字段用 `kinds.rs` 的枚举（`TaskStatus`、`TaskType`、`ReminderKind`、`ReminderAction`、`RepeatMode`）；库中文本与 JSON 不变，**不认识的值原样保留**（`Unknown`），不要回退成已知值再写回。
+- 2.0.2 起不认识的循环模式本机不调度、不触发、不改写（`sanitize_recurring_task` 报错，调度器、巡检、托盘、预估都跳过），界面显示“需升级”且不能编辑。2.0.1 及更早的版本仍会把未知模式改成区间间隔并同步回来，新增循环模式时需在发布说明中提示多设备同时升级。
 
 ### 标签与优先级
 - 标签存于 `tasks.tags`（逗号分隔），读写统一经过 `models::normalize_tags`（去掉 `#`、逗号，不区分大小写去重，最多 10 个、每个 24 字）；前端 `src/tasks.ts` 的 `normalizeTags` 与之保持一致。

@@ -1338,6 +1338,7 @@ label:has(> input[type="checkbox"]) {
   color: var(--success-text);
 }
 
+.status-pill.is-unsupported,
 .status-pill.action-snoozed {
   background: var(--warning-soft);
   color: var(--warning-text);

@@ -1,6 +1,7 @@
 // 主窗口共享的弹窗状态（模块级单例）：确认框、详情、编辑待办、编辑循环提醒。
 // 弹窗组件统一挂在 App.vue，各视图只调用这里的打开方法。
 import { reactive } from "vue";
+import { isSupportedRecurringMode } from "../recurring";
 import type { RecurringTask, Task } from "../types";
 
 export type DetailItem = { label: string; value: string };
@@ -63,6 +64,10 @@ const openTaskEditor = (task: Task) => {
 };
 
 const openRecurringEditor = (task: RecurringTask) => {
+  if (!isSupportedRecurringMode(task.repeatMode)) {
+    alert(`这条循环提醒使用了本版本不支持的模式（${task.repeatMode}），请升级应用后再编辑。`);
+    return;
+  }
   recurringEditor.task = task;
   recurringEditor.open = true;
 };

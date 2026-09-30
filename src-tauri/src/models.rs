@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::kinds::{ReminderAction, ReminderKind, RepeatMode, TaskStatus, TaskType};
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Task {
@@ -7,8 +9,8 @@ pub struct Task {
     pub description: String,
     pub sticky_content: Option<String>,
     #[serde(rename = "type")]
-    pub task_type: String,
-    pub status: String,
+    pub task_type: TaskType,
+    pub status: TaskStatus,
     pub created_at: String,
     pub completed_at: Option<String>,
     pub reminder_time: Option<String>,
@@ -80,8 +82,8 @@ pub struct RecurringTask {
     pub id: String,
     pub description: String,
     #[serde(rename = "type")]
-    pub task_type: String,
-    pub status: String,
+    pub task_type: TaskType,
+    pub status: TaskStatus,
     pub created_at: String,
     pub completed_at: Option<String>,
     pub reminder_time: Option<String>,
@@ -93,7 +95,7 @@ pub struct RecurringTask {
     pub is_paused: bool,
     pub start_time: Option<String>,
     pub end_time: Option<String>,
-    pub repeat_mode: String,
+    pub repeat_mode: RepeatMode,
     pub schedule_time: Option<String>,
     pub schedule_weekday: Option<i64>,
     /// 每周多天位掩码（周一 = bit0 … 周日 = bit6）；`schedule_weekday` 保留为其中最早的一天以兼容旧版本。
@@ -110,10 +112,10 @@ pub struct ReminderRecord {
     pub reminder_id: String,
     pub description: String,
     #[serde(rename = "type")]
-    pub reminder_type: String,
+    pub reminder_type: ReminderKind,
     pub trigger_time: String,
     pub close_time: Option<String>,
-    pub action: String,
+    pub action: ReminderAction,
     pub updated_at: Option<String>,
     pub deleted_at: Option<String>,
 }
@@ -217,7 +219,7 @@ pub fn default_quick_add_shortcut() -> String {
 pub struct NotificationPayload {
     pub record_id: String,
     pub reminder_id: String,
-    pub reminder_type: String,
+    pub reminder_type: ReminderKind,
     pub description: String,
     pub snooze_minutes: i64,
     /// 本次提醒原定的触发时间；用于在弹窗中标识“错过的提醒”。

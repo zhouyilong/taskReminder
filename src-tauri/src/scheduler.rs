@@ -8,6 +8,7 @@ use tokio::time::sleep;
 
 use crate::db::DbManager;
 use crate::errors::AppError;
+use crate::kinds::{ReminderAction, ReminderKind, TaskStatus};
 use crate::models::{AppSettings, NotificationPayload, RecurringTask, Task};
 use crate::notification_queue::NotificationQueue;
 use crate::quiet_hours;
@@ -164,14 +165,18 @@ impl ReminderScheduler {
 
     /// 从弹窗队列中撤下某个任务的提醒（例如在主窗口中完成或删除了该任务），
     /// 并把对应的提醒记录标记为 `action`。
-    pub fn withdraw_notifications(&self, reminder_id: &str, action: &str) -> Result<(), AppError> {
+    pub fn withdraw_notifications(
+        &self,
+        reminder_id: &str,
+        action: ReminderAction,
+    ) -> Result<(), AppError> {
         let removed = self.queue.remove_reminder(reminder_id);
         if removed.is_empty() {
             return Ok(());
         }
         for item in &removed {
             self.db
-                .update_reminder_record_action(&item.record_id, action)?;
+                .update_reminder_record_action(&item.record_id, action.clone())?;
         }
         publish_queue(&self.app, &self.queue.snapshot());
         Ok(())
@@ -218,7 +223,8 @@ impl ReminderScheduler {
 
     pub fn schedule_recurring(&self, task: RecurringTask) -> Result<(), AppError> {
         self.cancel_recurring(&task.id);
-        if task.is_paused {
+        // 不认识的循环模式（来自更新版本的设备）本机不触发，交给认识它的设备。
+        if task.is_paused || !task.repeat_mode.is_known() {
             return Ok(());
         }
         let delay = seconds_until(&task.next_trigger)?;
@@ -265,7 +271,7 @@ impl ReminderScheduler {
         let Some(mut task) = self.db.get_recurring_task(&task_id)? else {
             return Ok(());
         };
-        if task.deleted_at.is_some() || task.is_paused {
+        if task.deleted_at.is_some() || task.is_paused || !task.repeat_mode.is_known() {
             return Ok(());
         }
         let now = Local::now().naive_local();
@@ -290,15 +296,15 @@ impl ReminderScheduler {
         task.next_trigger = compute_next_trigger(&task, Some(now))?;
         self.db.update_recurring_task(&task)?;
 
-        let record = self
-            .db
-            .create_reminder_record(&task.id, &task.description, "RECURRING")?;
+        let record =
+            self.db
+                .create_reminder_record(&task.id, &task.description, ReminderKind::Recurring)?;
         self.sync.notify_local_change()?;
         let settings = self.db.load_settings()?;
         let payload = NotificationPayload {
             record_id: record.id.clone(),
             reminder_id: task.id.clone(),
-            reminder_type: "RECURRING".to_string(),
+            reminder_type: ReminderKind::Recurring,
             description: task.description.clone(),
             snooze_minutes: settings.snooze_minutes,
             scheduled_time: Some(scheduled_time),
@@ -314,7 +320,7 @@ impl ReminderScheduler {
         let Some(task) = self.db.get_task(&task_id)? else {
             return Ok(());
         };
-        if task.deleted_at.is_some() || task.status == "COMPLETED" {
+        if task.deleted_at.is_some() || task.status == TaskStatus::Completed {
             return Ok(());
         }
         let Some(reminder_time) = task.reminder_time.clone() else {
@@ -333,15 +339,15 @@ impl ReminderScheduler {
             return Ok(());
         }
 
-        let record = self
-            .db
-            .create_reminder_record(&task.id, &task.description, "TASK")?;
+        let record =
+            self.db
+                .create_reminder_record(&task.id, &task.description, ReminderKind::Task)?;
         self.sync.notify_local_change()?;
         let settings = self.db.load_settings()?;
         let payload = NotificationPayload {
             record_id: record.id.clone(),
             reminder_id: task.id.clone(),
-            reminder_type: "TASK".to_string(),
+            reminder_type: ReminderKind::Task,
             description: task.description.clone(),
             snooze_minutes: settings.snooze_minutes,
             scheduled_time: Some(reminder_time),
@@ -462,7 +468,7 @@ mod tests {
         NotificationPayload {
             record_id: "r".to_string(),
             reminder_id: "t".to_string(),
-            reminder_type: "TASK".to_string(),
+            reminder_type: ReminderKind::Task,
             description: "开会".to_string(),
             snooze_minutes: 5,
             scheduled_time: scheduled.map(str::to_string),

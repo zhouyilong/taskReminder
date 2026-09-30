@@ -6,6 +6,7 @@ use tauri::{Emitter, State};
 use crate::commands::{into_api, ApiResult};
 use crate::db::TaskMeta;
 use crate::errors::AppError;
+use crate::kinds::ReminderAction;
 use crate::models::Task;
 use crate::scheduler;
 use crate::state::AppState;
@@ -196,7 +197,9 @@ pub(crate) fn complete_task_by_id(
     state.db.complete_task(id)?;
     hide_sticky_note_window(app, id);
     state.scheduler.cancel_task(id);
-    state.scheduler.withdraw_notifications(id, "COMPLETED")?;
+    state
+        .scheduler
+        .withdraw_notifications(id, ReminderAction::Completed)?;
     state.sync.notify_local_change()
 }
 
@@ -235,7 +238,11 @@ pub fn delete_task(app: tauri::AppHandle, state: State<AppState>, id: String) ->
     into_api(state.db.delete_task(&id))?;
     hide_sticky_note_window(&app, &id);
     state.scheduler.cancel_task(&id);
-    into_api(state.scheduler.withdraw_notifications(&id, "DISMISSED"))?;
+    into_api(
+        state
+            .scheduler
+            .withdraw_notifications(&id, ReminderAction::Dismissed),
+    )?;
     into_api(state.sync.notify_local_change())?;
     Ok(())
 }

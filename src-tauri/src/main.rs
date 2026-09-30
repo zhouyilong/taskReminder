@@ -7,6 +7,7 @@ mod db;
 mod errors;
 mod holiday_update;
 mod holidays;
+mod kinds;
 mod maintenance;
 mod models;
 mod notification_queue;

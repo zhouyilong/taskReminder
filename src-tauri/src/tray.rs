@@ -9,6 +9,7 @@ use tauri::{
 
 use crate::commands::sticky::{create_custom_sticky_note_via_app, CreateStickyNotePayload};
 use crate::commands::tasks::{complete_task_by_id, reschedule_task_reminder};
+use crate::kinds::TaskStatus;
 use crate::models::{RecurringTask, Task};
 use crate::paths;
 use crate::quiet_hours;
@@ -43,7 +44,7 @@ pub fn find_next_reminder(
     now: NaiveDateTime,
 ) -> Option<NextReminder> {
     let task_items = tasks.iter().filter_map(|task| {
-        if task.deleted_at.is_some() || task.status == "COMPLETED" {
+        if task.deleted_at.is_some() || task.status == TaskStatus::Completed {
             return None;
         }
         let time = task.reminder_time.as_deref().and_then(parse_datetime_any)?;
@@ -55,7 +56,8 @@ pub fn find_next_reminder(
         })
     });
     let recurring_items = recurring.iter().filter_map(|task| {
-        if task.deleted_at.is_some() || task.is_paused {
+        // 不认识的循环模式本机不会触发，不作为“下一条提醒”。
+        if task.deleted_at.is_some() || task.is_paused || !task.repeat_mode.is_known() {
             return None;
         }
         let time = parse_datetime_any(&task.next_trigger)?;
@@ -366,6 +368,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kinds::{RepeatMode, TaskType};
 
     fn dt(value: &str) -> NaiveDateTime {
         parse_datetime_any(value).unwrap()
@@ -375,8 +378,8 @@ mod tests {
         Task {
             id: id.to_string(),
             description: format!("待办 {}", id),
-            task_type: "TASK".to_string(),
-            status: "PENDING".to_string(),
+            task_type: TaskType::OneTime,
+            status: TaskStatus::Pending,
             created_at: "2026-09-01T00:00:00".to_string(),
             completed_at: None,
             reminder_time: reminder.map(str::to_string),
@@ -392,8 +395,8 @@ mod tests {
         RecurringTask {
             id: id.to_string(),
             description: format!("循环 {}", id),
-            task_type: "RECURRING".to_string(),
-            status: "PENDING".to_string(),
+            task_type: TaskType::Recurring,
+            status: TaskStatus::Pending,
             created_at: "2026-09-01T00:00:00".to_string(),
             completed_at: None,
             reminder_time: None,
@@ -405,7 +408,7 @@ mod tests {
             is_paused: paused,
             start_time: None,
             end_time: None,
-            repeat_mode: "DAILY".to_string(),
+            repeat_mode: RepeatMode::Daily,
             schedule_time: Some("09:00".to_string()),
             schedule_weekday: None,
             schedule_weekdays: None,
@@ -428,6 +431,13 @@ mod tests {
         ];
         let next = find_next_reminder(&tasks, &recurring_items, now).unwrap();
         assert_eq!(next.id, "soon");
+
+        // 更早的、本版本不认识的循环模式：本机不会触发，不作为下一条。
+        let mut unknown = recurring("unknown", "2026-09-27T10:15:00", false);
+        unknown.repeat_mode = RepeatMode::Unknown("BIWEEKLY".to_string());
+        let with_unknown = vec![unknown, recurring("soon", "2026-09-27T11:00:00", false)];
+        let next = find_next_reminder(&tasks, &with_unknown, now).unwrap();
+        assert_eq!(next.id, "soon");
         assert!(!next.is_task);
 
         let next = find_next_reminder(&tasks, &[], now).unwrap();
@@ -435,7 +445,7 @@ mod tests {
         assert!(next.is_task);
 
         let mut done = task("done", Some("2026-09-27T10:10:00"));
-        done.status = "COMPLETED".to_string();
+        done.status = TaskStatus::Completed;
         assert_eq!(
             find_next_reminder(&[done], &[], now).map(|item| item.id),
             None

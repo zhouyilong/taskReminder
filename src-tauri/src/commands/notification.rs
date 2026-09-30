@@ -5,6 +5,7 @@ use serde::Deserialize;
 use tauri::{Emitter, State};
 
 use crate::commands::{into_api, ApiResult};
+use crate::kinds::{ReminderAction, ReminderKind, TaskStatus};
 use crate::models::{NotificationPayload, ReminderRecord};
 use crate::state::AppState;
 use crate::windows::sticky::{emit_sticky_note_reminder, hide_sticky_note_window};
@@ -14,7 +15,7 @@ use crate::{scheduler, time};
 #[serde(rename_all = "camelCase")]
 pub struct AckPayload {
     record_id: String,
-    action: String,
+    action: ReminderAction,
 }
 
 #[derive(Deserialize)]
@@ -22,7 +23,7 @@ pub struct AckPayload {
 pub struct SnoozePayload {
     record_id: String,
     reminder_id: String,
-    reminder_type: String,
+    reminder_type: ReminderKind,
     minutes: i64,
     /// 推迟到指定时间（如“明早 9 点”），优先于 `minutes`。
     #[serde(default)]
@@ -76,7 +77,7 @@ pub fn ack_notification(
         into_api(
             state
                 .db
-                .update_reminder_record_action(&payload.record_id, &payload.action),
+                .update_reminder_record_action(&payload.record_id, payload.action.clone()),
         )?;
         into_api(state.sync.notify_local_change())?;
     }
@@ -91,7 +92,7 @@ pub fn ack_all_notifications(app: tauri::AppHandle, state: State<AppState>) -> A
         into_api(
             state
                 .db
-                .update_reminder_record_action(&item.record_id, "DISMISSED"),
+                .update_reminder_record_action(&item.record_id, ReminderAction::Dismissed),
         )?;
     }
     if !drained.is_empty() {
@@ -111,10 +112,10 @@ pub fn complete_notification(
     into_api(
         state
             .db
-            .update_reminder_record_action(&payload.record_id, "COMPLETED"),
+            .update_reminder_record_action(&payload.record_id, ReminderAction::Completed),
     )?;
     if let Some(task) = into_api(state.db.get_task(&payload.reminder_id))? {
-        if task.status != "COMPLETED" && task.deleted_at.is_none() {
+        if task.status != TaskStatus::Completed && task.deleted_at.is_none() {
             into_api(state.db.complete_task(&task.id))?;
         }
         state.scheduler.cancel_task(&task.id);
@@ -149,10 +150,10 @@ pub fn snooze_notification(
     into_api(
         state
             .db
-            .update_reminder_record_action(&payload.record_id, "SNOOZED"),
+            .update_reminder_record_action(&payload.record_id, ReminderAction::Snoozed),
     )?;
-    match payload.reminder_type.as_str() {
-        "TASK" => {
+    match payload.reminder_type {
+        ReminderKind::Task => {
             if let Some(mut task) = into_api(state.db.get_task(&payload.reminder_id))? {
                 let reminder_time = snooze_until.clone();
                 into_api(state.db.update_task(
@@ -168,7 +169,7 @@ pub fn snooze_notification(
                 into_api(state.scheduler.schedule_task(task))?;
             }
         }
-        "RECURRING" => {
+        ReminderKind::Recurring => {
             if let Some(mut task) = into_api(state.db.get_recurring_task(&payload.reminder_id))? {
                 task.next_trigger = snooze_until.clone();
                 task.is_paused = false;
@@ -176,7 +177,7 @@ pub fn snooze_notification(
                 into_api(state.scheduler.schedule_recurring(task))?;
             }
         }
-        _ => {}
+        ReminderKind::Unknown(_) => {}
     }
     into_api(state.sync.notify_local_change())?;
     Ok(finish_notification(&app, &state, &payload.record_id))
