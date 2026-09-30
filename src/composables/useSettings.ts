@@ -35,7 +35,8 @@ const settingsDraft = reactive<AppSettings>({
   quietHoursStart: "22:00",
   quietHoursEnd: "08:00",
   nativeNotificationEnabled: false,
-  stickyToggleShortcut: ""
+  stickyToggleShortcut: "",
+  stickySnapEnabled: true
 });
 const syncStatus = ref<SyncStatus | null>(null);
 const quickAddShortcutError = ref("");

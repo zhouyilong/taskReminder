@@ -404,6 +404,8 @@ pub fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
                     return;
                 }
                 let _ = state.db.move_sticky_note(&note_id, logical.x, logical.y);
+                #[cfg(target_os = "windows")]
+                snap::on_moved(window, &note_id);
             }
         }
         WindowEvent::Resized(size) => {
@@ -418,6 +420,139 @@ pub fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
             }
         }
         _ => {}
+    }
+}
+
+/// 贴边吸附（仅 Windows）。
+///
+/// 拖动标题栏时系统进入模态移动循环，Tauri 只给出一连串 `Moved`，没有“拖动结束”事件，
+/// 所以按鼠标键状态判断：移动时有鼠标键按下才算用户拖动；松开鼠标且 150 ms 内没有新的
+/// 移动后吸附。打开便签、越界校正、吸附本身造成的移动发生时鼠标没有按下，不会触发；
+/// 拖动途中停顿也不会被“吸走”。松开时按住 Alt 不吸附。
+#[cfg(target_os = "windows")]
+mod snap {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
+    use tauri::{LogicalPosition, Manager};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, VIRTUAL_KEY, VK_LBUTTON, VK_MENU, VK_RBUTTON,
+    };
+
+    use super::{monitor_work_areas, STICKY_NOTE_ITEM_PREFIX};
+    use crate::state::AppState;
+    use crate::windows::placement::{self, Rect};
+
+    const SETTLE: Duration = Duration::from_millis(150);
+    const POLL: Duration = Duration::from_millis(50);
+    /// 防止异常情况下（如按键状态读不到松开）监视线程一直不退出。
+    const MAX_WAIT: Duration = Duration::from_secs(120);
+
+    fn key_down(key: VIRTUAL_KEY) -> bool {
+        // 最高位为 1 表示按下。
+        unsafe { GetAsyncKeyState(i32::from(key.0)) < 0 }
+    }
+
+    /// 左右键都算：交换了主次键的用户按的是物理右键。
+    fn mouse_down() -> bool {
+        key_down(VK_LBUTTON) || key_down(VK_RBUTTON)
+    }
+
+    /// 正在拖动的便签 → 最近一次移动的时间。有记录说明监视线程在运行。
+    fn drags() -> &'static Mutex<HashMap<String, Instant>> {
+        static DRAGS: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+        DRAGS.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    pub fn on_moved(window: &tauri::Window, note_id: &str) {
+        let Ok(mut drags) = drags().lock() else {
+            return;
+        };
+        if let Some(last_moved) = drags.get_mut(note_id) {
+            *last_moved = Instant::now();
+            return;
+        }
+        if !mouse_down() {
+            return;
+        }
+        drags.insert(note_id.to_string(), Instant::now());
+        // 从左边或上边缩放也会移动窗口；结束时尺寸变了就不吸附，避免把缩放后的便签整体挪动。
+        let start_size = window.outer_size().ok();
+        let app = window.app_handle().clone();
+        let label = window.label().to_string();
+        let note_id = note_id.to_string();
+        std::thread::spawn(move || watch_drag(app, label, note_id, start_size));
+    }
+
+    fn watch_drag(
+        app: tauri::AppHandle,
+        label: String,
+        note_id: String,
+        start_size: Option<tauri::PhysicalSize<u32>>,
+    ) {
+        let started = Instant::now();
+        loop {
+            std::thread::sleep(POLL);
+            let Ok(mut drags) = drags().lock() else {
+                return;
+            };
+            let last_moved = drags.get(&note_id).copied().unwrap_or(started);
+            let settled = last_moved.elapsed() >= SETTLE && !mouse_down();
+            if settled || started.elapsed() >= MAX_WAIT {
+                drags.remove(&note_id);
+                break;
+            }
+        }
+        if key_down(VK_MENU) {
+            return;
+        }
+        let enabled = app
+            .try_state::<AppState>()
+            .and_then(|state| state.db.sticky_snap_enabled().ok())
+            .unwrap_or(false);
+        if !enabled {
+            return;
+        }
+        let Some(window) = app.get_webview_window(&label) else {
+            return;
+        };
+        if start_size.is_none() || window.outer_size().ok() != start_size {
+            return;
+        }
+        snap_window(&app, &window);
+    }
+
+    fn logical_rect(window: &tauri::WebviewWindow, scale_factor: f64) -> Option<Rect> {
+        let position = window
+            .outer_position()
+            .ok()?
+            .to_logical::<f64>(scale_factor);
+        let size = window.outer_size().ok()?.to_logical::<f64>(scale_factor);
+        Some(Rect::new(position.x, position.y, size.width, size.height))
+    }
+
+    /// 按当前位置计算吸附位置并移动窗口；随后的 `Moved` 事件会照常保存新位置。
+    fn snap_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
+        // 所有窗口统一按本窗口的缩放换算，与工作区、`set_position` 的换算一致。
+        let scale_factor = window.scale_factor().unwrap_or(1.0);
+        let Some(note) = logical_rect(window, scale_factor) else {
+            return;
+        };
+        let peers: Vec<Rect> = app
+            .webview_windows()
+            .into_iter()
+            .filter(|(label, peer)| {
+                label.starts_with(STICKY_NOTE_ITEM_PREFIX)
+                    && label.as_str() != window.label()
+                    && peer.is_visible().unwrap_or(false)
+            })
+            .filter_map(|(_, peer)| logical_rect(&peer, scale_factor))
+            .collect();
+        let (x, y) = placement::snap_position(note, &monitor_work_areas(window), &peers);
+        if (x - note.x).abs() >= 0.5 || (y - note.y).abs() >= 0.5 {
+            let _ = window.set_position(LogicalPosition::new(x, y));
+        }
     }
 }
 

@@ -185,6 +185,9 @@ pub struct AppSettings {
     /// 显示/隐藏全部便签的全局快捷键，为空表示不启用。
     #[serde(default)]
     pub sticky_toggle_shortcut: String,
+    /// 拖动便签后贴边吸附（屏幕边缘与其他便签）。
+    #[serde(default = "default_true")]
+    pub sticky_snap_enabled: bool,
     /// 密码存放位置（`secrets::STORAGE_*`），只读：保存时由后端决定。
     #[serde(default)]
     pub secret_storage: String,

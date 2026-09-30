@@ -83,6 +83,12 @@
         </button>
         <span class="field-hint">托盘菜单也可以显示或隐藏全部便签</span>
       </div>
+      <div class="form-row compact">
+        <label>
+          <input type="checkbox" v-model="settingsDraft.stickySnapEnabled" /> 便签贴边吸附
+        </label>
+        <span class="field-hint">{{ stickySnapHint }}</span>
+      </div>
       <div v-if="quickAddShortcutError" class="form-row compact">
         <span class="field-hint is-error">{{ quickAddShortcutError }}</span>
       </div>
@@ -250,6 +256,11 @@ type ShortcutField = "quickAdd" | "stickyToggle";
 const shortcutRecording = ref<ShortcutField | null>(null);
 const uiScalePercent = computed(() => Math.round(uiScale.value * 100));
 const windowOpacityPercent = computed(() => Math.round(windowOpacity.value * 100));
+// 吸附靠 Windows 的鼠标按键状态判断拖动结束，其他平台交给窗口管理器。
+const isWindows = typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
+const stickySnapHint = isWindows
+  ? "拖到屏幕边缘或其他便签旁时自动对齐，松开时按住 Alt 不吸附"
+  : "仅在 Windows 上生效";
 const quietHoursHint = computed(() =>
   formatQuietHoursHint(settingsDraft.quietHoursStart, settingsDraft.quietHoursEnd)
 );

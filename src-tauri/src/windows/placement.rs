@@ -81,6 +81,78 @@ pub fn clamp_to_work_areas(note: Rect, areas: &[Rect]) -> Option<(f64, f64)> {
     ))
 }
 
+/// 贴边吸附：便签边缘离屏幕工作区边缘或其他便签边缘小于这个距离时对齐。
+// 吸附只在 Windows 上启用（见 `sticky::snap`），其他平台只在测试中使用。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub const SNAP_THRESHOLD: f64 = 12.0;
+/// 与其他便签并排或上下相接时保留的间距。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub const SNAP_GAP: f64 = 8.0;
+
+/// 两段区间之间的距离（重叠为 0）。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn range_gap(a_start: f64, a_end: f64, b_start: f64, b_end: f64) -> f64 {
+    (b_start - a_end).max(a_start - b_end).max(0.0)
+}
+
+/// 在候选位置中挑离 `current` 最近且不超过阈值的一个。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn nearest_candidate(current: f64, candidates: &[f64]) -> Option<f64> {
+    candidates
+        .iter()
+        .copied()
+        .filter(|candidate| (candidate - current).abs() <= SNAP_THRESHOLD)
+        .min_by(|a, b| {
+            (a - current)
+                .abs()
+                .partial_cmp(&(b - current).abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+}
+
+/// 拖动结束后的吸附位置。横、纵两个方向分别处理：
+/// - 工作区的四条边（便签贴在屏幕边缘，不含任务栏）；
+/// - 与其他便签并排（相隔 `SNAP_GAP`，要求另一方向有重叠）；
+/// - 与相邻的便签边缘对齐（左对左、右对右、上对上、下对下，要求另一方向相距不远）。
+///
+/// 没有候选时返回原位置；对吸附后的位置再次调用结果不变。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn snap_position(note: Rect, areas: &[Rect], peers: &[Rect]) -> (f64, f64) {
+    let mut xs = Vec::new();
+    let mut ys = Vec::new();
+    for area in areas {
+        xs.push(area.x);
+        xs.push(area.right() - note.width);
+        ys.push(area.y);
+        ys.push(area.bottom() - note.height);
+    }
+    let near = SNAP_GAP + SNAP_THRESHOLD;
+    for peer in peers {
+        let vertical_gap = range_gap(note.y, note.bottom(), peer.y, peer.bottom());
+        let horizontal_gap = range_gap(note.x, note.right(), peer.x, peer.right());
+        if vertical_gap == 0.0 {
+            xs.push(peer.right() + SNAP_GAP);
+            xs.push(peer.x - SNAP_GAP - note.width);
+        }
+        if vertical_gap <= near {
+            xs.push(peer.x);
+            xs.push(peer.right() - note.width);
+        }
+        if horizontal_gap == 0.0 {
+            ys.push(peer.bottom() + SNAP_GAP);
+            ys.push(peer.y - SNAP_GAP - note.height);
+        }
+        if horizontal_gap <= near {
+            ys.push(peer.y);
+            ys.push(peer.bottom() - note.height);
+        }
+    }
+    (
+        nearest_candidate(note.x, &xs).unwrap_or(note.x),
+        nearest_candidate(note.y, &ys).unwrap_or(note.y),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,5 +271,67 @@ mod tests {
             clamp_to_work_areas(note_at(5000.0, 5000.0), &[Rect::new(0.0, 0.0, 0.0, 0.0)]),
             None
         );
+    }
+
+    fn snap(x: f64, y: f64, peers: &[Rect]) -> (f64, f64) {
+        snap_position(note_at(x, y), &[primary()], peers)
+    }
+
+    #[test]
+    fn snaps_to_screen_edges() {
+        assert_eq!(snap(9.0, 300.0, &[]), (0.0, 300.0));
+        assert_eq!(snap(300.0, 6.0, &[]), (300.0, 0.0));
+        // 右下角：底边贴工作区（任务栏之上）。
+        assert_eq!(
+            snap(1920.0 - 284.0 - 10.0, 1040.0 - 280.0 + 11.0, &[]),
+            (1636.0, 760.0)
+        );
+    }
+
+    #[test]
+    fn leaves_note_outside_threshold() {
+        assert_eq!(snap(13.0, 300.0, &[]), (13.0, 300.0));
+        assert_eq!(snap(500.0, 500.0, &[]), (500.0, 500.0));
+    }
+
+    #[test]
+    fn snaps_beside_peer_with_gap() {
+        let peer = note_at(400.0, 300.0);
+        // 放在右侧：左边缘距 peer 右边缘 + 间距 5 px。
+        assert_eq!(snap(400.0 + 284.0 + 8.0 + 5.0, 320.0, &[peer]).0, 692.0);
+        // 放在左侧。
+        assert_eq!(snap(400.0 - 8.0 - 284.0 - 7.0, 320.0, &[peer]).0, 108.0);
+    }
+
+    #[test]
+    fn stacks_below_peer_and_aligns_left_edge() {
+        let peer = note_at(400.0, 100.0);
+        assert_eq!(
+            snap(406.0, 100.0 + 280.0 + 8.0 + 4.0, &[peer]),
+            (400.0, 388.0)
+        );
+    }
+
+    #[test]
+    fn ignores_far_away_peers() {
+        // 竖直方向离得很远，不按它的左边缘对齐，也不并排。
+        let peer = note_at(400.0, 700.0);
+        assert_eq!(snap(405.0, 100.0, &[peer]), (405.0, 100.0));
+    }
+
+    #[test]
+    fn picks_nearest_candidate() {
+        // 左边缘离屏幕 10 px，离 peer 的左边缘 3 px（上下相邻），取 3 px 那个。
+        let peer = note_at(13.0, 100.0);
+        assert_eq!(snap(10.0, 392.0, &[peer]).0, 13.0);
+    }
+
+    #[test]
+    fn snapping_is_stable() {
+        let peers = [note_at(400.0, 100.0), note_at(700.0, 100.0)];
+        for (x, y) in [(9.0, 7.0), (410.0, 395.0), (690.0, 105.0), (1000.0, 1000.0)] {
+            let first = snap(x, y, &peers);
+            assert_eq!(snap(first.0, first.1, &peers), first);
+        }
     }
 }

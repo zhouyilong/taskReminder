@@ -1038,6 +1038,20 @@ impl DbManager {
         Ok(())
     }
 
+    /// 是否开启便签贴边吸附。只读一列，拖动结束时调用，避免 `load_settings` 访问凭据库。
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn sticky_snap_enabled(&self) -> Result<bool, AppError> {
+        let conn = self.get_conn()?;
+        let value: Option<i64> = conn
+            .query_row(
+                "SELECT sticky_snap_enabled FROM settings WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(value.unwrap_or(1) == 1)
+    }
+
     pub fn set_sticky_note_pinned(&self, task_id: &str, pinned: bool) -> Result<(), AppError> {
         let conn = self.get_conn()?;
         let now = now_string();
@@ -1085,7 +1099,8 @@ impl DbManager {
                    webdav_device_id, notification_theme, quick_add_enabled, quick_add_shortcut,
                    sync_encryption_enabled, sync_passphrase,
                    quiet_hours_enabled, quiet_hours_start, quiet_hours_end,
-                   native_notification_enabled, sticky_toggle_shortcut, secret_storage
+                   native_notification_enabled, sticky_toggle_shortcut, secret_storage,
+                   sticky_snap_enabled
                    FROM settings WHERE id = 1";
         let mut stmt = conn.prepare(sql)?;
         let row = stmt.query_row([], |row| {
@@ -1154,6 +1169,7 @@ impl DbManager {
                 secret_storage: row
                     .get::<_, Option<String>>(32)?
                     .unwrap_or_else(|| secrets::STORAGE_DB.to_string()),
+                sticky_snap_enabled: row.get::<_, Option<i64>>(33)?.unwrap_or(1) == 1,
             })
         })?;
         let mut settings = row;
@@ -1182,7 +1198,8 @@ impl DbManager {
                  quick_add_enabled = ?, quick_add_shortcut = ?,
                  sync_encryption_enabled = ?, sync_passphrase = ?,
                  quiet_hours_enabled = ?, quiet_hours_start = ?, quiet_hours_end = ?,
-                 native_notification_enabled = ?, sticky_toggle_shortcut = ?, secret_storage = ?
+                 native_notification_enabled = ?, sticky_toggle_shortcut = ?, secret_storage = ?,
+                 sticky_snap_enabled = ?
              WHERE id = 1",
             params![
                 if settings.auto_start_enabled { 1 } else { 0 },
@@ -1218,6 +1235,7 @@ impl DbManager {
                 if settings.native_notification_enabled { 1 } else { 0 },
                 settings.sticky_toggle_shortcut.trim(),
                 secret_storage,
+                if settings.sticky_snap_enabled { 1 } else { 0 },
             ],
         )?;
         Ok(())
@@ -1685,6 +1703,11 @@ fn migration_scripts() -> Vec<MigrationScript> {
             description: "add secret storage".to_string(),
             sql: include_str!("../migrations/V2.0.3__add_secret_storage.sql"),
         },
+        MigrationScript {
+            version: "2.0.4".to_string(),
+            description: "add sticky snap".to_string(),
+            sql: include_str!("../migrations/V2.0.4__add_sticky_snap.sql"),
+        },
     ]
 }
 
@@ -2100,6 +2123,19 @@ mod tests {
         backdate_task(&db, &id);
         db.move_sticky_note(&id, 200.0, -100.0).unwrap();
         assert!(db.get_sticky_note(&id).unwrap().unwrap().is_open);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sticky_snap_setting_defaults_on_and_roundtrips() {
+        let (db, dir) = temp_db();
+        assert!(db.sticky_snap_enabled().unwrap());
+        let mut settings = db.load_settings().unwrap();
+        assert!(settings.sticky_snap_enabled);
+        settings.sticky_snap_enabled = false;
+        db.save_settings(&settings).unwrap();
+        assert!(!db.load_settings().unwrap().sticky_snap_enabled);
+        assert!(!db.sticky_snap_enabled().unwrap());
         let _ = std::fs::remove_dir_all(dir);
     }
 }
