@@ -39,6 +39,7 @@ import CalendarView from "./views/CalendarView.vue";
 import TasksView from "./views/TasksView.vue";
 import CompletedView from "./views/CompletedView.vue";
 import RecurringView from "./views/RecurringView.vue";
+import StickiesView from "./views/StickiesView.vue";
 import RecordsView from "./views/RecordsView.vue";
 import StatsView from "./views/StatsView.vue";
 import TrashView from "./views/TrashView.vue";
@@ -58,6 +59,7 @@ const VIEWS: Record<TabKey, Component> = {
   tasks: TasksView,
   completed: CompletedView,
   recurring: RecurringView,
+  stickies: StickiesView,
   records: RecordsView,
   stats: StatsView,
   trash: TrashView,
@@ -148,6 +150,8 @@ onMounted(async () => {
     await refreshSyncStatus();
   });
   await listenSafely("open-sync-settings", () => openWebdav());
+  // 节假日数据在线更新后，刷新“节假日待更新”等覆盖范围提示。
+  await listenSafely("holidays-updated", () => loadHolidayYears());
   await listenSafely("tray-create-sticky-note", () => handleCreateStickyNote());
   await listenSafely("tray-check-update", async () => {
     await openSettings();

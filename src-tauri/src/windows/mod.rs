@@ -1,5 +1,6 @@
 //! 窗口管理与窗口事件。
 
+pub mod placement;
 pub mod sticky;
 
 use tauri::{Window, WindowEvent};

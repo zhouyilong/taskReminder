@@ -71,6 +71,67 @@
             "所有设备需开启加密并填写相同的密码。密码只保存在本机，忘记后无法解密云端数据（本机数据不受影响）。旧版本无法再同步此目录，请一起升级。"
           }}
         </div>
+        <div v-if="passphraseMismatch" class="field-hint is-error passphrase-mismatch">
+          云端数据无法用本机的同步密码解密，自动同步已暂停。如果在其他设备上更换过同步密码，请在上方填写新密码并保存。
+        </div>
+        <div v-if="canChangePassphrase" class="form-row compact">
+          <button
+            class="button secondary"
+            type="button"
+            :disabled="changeBusy"
+            @click="changeFormOpen = !changeFormOpen"
+          >
+            {{ changeFormOpen ? "收起" : "更换同步密码…" }}
+          </button>
+          <span v-if="changeResult" class="field-hint" :class="{ 'is-error': !changeResult.ok }">
+            {{ changeResult.message }}
+          </span>
+        </div>
+        <div v-if="canChangePassphrase && changeFormOpen" class="passphrase-change">
+          <input
+            class="input"
+            :type="changeVisible ? 'text' : 'password'"
+            v-model="changeCurrent"
+            placeholder="当前同步密码"
+            autocomplete="current-password"
+          />
+          <input
+            class="input"
+            :type="changeVisible ? 'text' : 'password'"
+            v-model="changeNext"
+            placeholder="新同步密码（至少 8 个字符）"
+            autocomplete="new-password"
+          />
+          <input
+            class="input"
+            :type="changeVisible ? 'text' : 'password'"
+            v-model="changeConfirm"
+            placeholder="再次输入新密码"
+            autocomplete="new-password"
+            @keydown.enter.prevent="submitPassphraseChange"
+          />
+          <div class="form-row compact">
+            <button
+              class="button"
+              type="button"
+              :disabled="changeBusy || changeValidation.incomplete || !!changeValidation.message || hasUnsavedSyncChanges"
+              @click="submitPassphraseChange"
+            >
+              {{ changeBusy ? "正在更换…" : "确认更换" }}
+            </button>
+            <button class="button secondary" type="button" @click="changeVisible = !changeVisible">
+              {{ changeVisible ? "隐藏" : "显示" }}
+            </button>
+          </div>
+          <div class="field-hint" :class="{ 'is-error': changeValidation.message || hasUnsavedSyncChanges }">
+            {{
+              changeValidation.message ||
+              (hasUnsavedSyncChanges
+                ? "云同步设置有未保存的修改，请先保存再更换密码"
+                : "会先用当前密码合并云端数据，再用新密码重新加密上传。其他设备下次同步时会提示密码不匹配，填入新密码即可恢复。")
+            }}
+          </div>
+        </div>
       </template>
     </div>
     <div class="modal-section">
@@ -106,8 +167,10 @@
 import { computed, ref, watch } from "vue";
 import Modal from "./Modal.vue";
 import { api } from "../api";
-import { formatDateTime } from "../format";
-import { syncStateLabel } from "../syncStatus";
+import { errorMessage, formatDateTime } from "../format";
+import { parseSyncState, syncStateLabel } from "../syncStatus";
+import { MIN_PASSPHRASE_CHARS, passphraseChangeError, passphraseLength } from "../syncPassphrase";
+import type { AppSettings } from "../types";
 import {
   WEBDAV_PRESETS,
   applyWebdavPreset,
@@ -134,25 +197,117 @@ const handlePresetChange = () => {
   Object.assign(settingsDraft, applyWebdavPreset(presetId.value, settingsDraft));
 };
 
-const MIN_PASSPHRASE_CHARS = 8;
 const passphraseError = computed(() => {
   if (!settingsDraft.syncEncryptionEnabled) {
     return "";
   }
-  const length = [...settingsDraft.syncPassphrase].length;
+  const length = passphraseLength(settingsDraft.syncPassphrase);
   return length > 0 && length < MIN_PASSPHRASE_CHARS ? `同步密码至少需要 ${MIN_PASSPHRASE_CHARS} 个字符` : "";
 });
+
+const passphraseMismatch = computed(
+  () => parseSyncState(settingsDraft.webdavLastSyncStatus) === "passphrase_mismatch"
+);
+
+// 更换同步密码用的是已保存的设置：记下打开弹窗时（或保存后）的同步相关字段，草稿改动过就先要求保存。
+const SYNC_FIELDS = [
+  "webdavEnabled",
+  "webdavUrl",
+  "webdavUsername",
+  "webdavPassword",
+  "webdavRootPath",
+  "syncEncryptionEnabled",
+  "syncPassphrase"
+] as const satisfies ReadonlyArray<keyof AppSettings>;
+const savedSyncFields = ref<Partial<AppSettings>>({});
+const rememberSavedSyncFields = () => {
+  savedSyncFields.value = Object.fromEntries(SYNC_FIELDS.map(key => [key, settingsDraft[key]]));
+};
+const hasUnsavedSyncChanges = computed(() =>
+  SYNC_FIELDS.some(key => savedSyncFields.value[key] !== settingsDraft[key])
+);
+const canChangePassphrase = computed(
+  () =>
+    !passphraseMismatch.value &&
+    savedSyncFields.value.webdavEnabled === true &&
+    savedSyncFields.value.syncEncryptionEnabled === true &&
+    passphraseLength(String(savedSyncFields.value.syncPassphrase ?? "")) >= MIN_PASSPHRASE_CHARS
+);
+
+const changeFormOpen = ref(false);
+const changeVisible = ref(false);
+const changeCurrent = ref("");
+const changeNext = ref("");
+const changeConfirm = ref("");
+const changeBusy = ref(false);
+const changeResult = ref<{ ok: boolean; message: string } | null>(null);
+const changeValidation = computed(() =>
+  passphraseChangeError(changeCurrent.value, changeNext.value, changeConfirm.value)
+);
+
+const resetChangeForm = () => {
+  changeFormOpen.value = false;
+  changeVisible.value = false;
+  changeCurrent.value = "";
+  changeNext.value = "";
+  changeConfirm.value = "";
+  changeResult.value = null;
+};
+
+// 只刷新同步相关字段，保留弹窗中其他未保存的修改。
+const refreshSyncFieldsFromBackend = async () => {
+  const latest = await api.getSettings();
+  settingsDraft.syncPassphrase = latest.syncPassphrase;
+  settingsDraft.webdavLastSyncTime = latest.webdavLastSyncTime;
+  settingsDraft.webdavLastLocalChangeTime = latest.webdavLastLocalChangeTime;
+  settingsDraft.webdavLastSyncStatus = latest.webdavLastSyncStatus;
+  settingsDraft.webdavLastSyncError = latest.webdavLastSyncError;
+  savedSyncFields.value = { ...savedSyncFields.value, syncPassphrase: latest.syncPassphrase };
+  await refreshSyncStatus();
+};
+
+const submitPassphraseChange = async () => {
+  if (changeBusy.value || changeValidation.value.incomplete || changeValidation.value.message || hasUnsavedSyncChanges.value) {
+    return;
+  }
+  changeBusy.value = true;
+  changeResult.value = null;
+  try {
+    await api.changeSyncPassphrase(changeCurrent.value, changeNext.value);
+    changeFormOpen.value = false;
+    changeCurrent.value = "";
+    changeNext.value = "";
+    changeConfirm.value = "";
+    changeResult.value = { ok: true, message: "已更换同步密码。请在其他设备的云同步设置中填写新密码。" };
+  } catch (error) {
+    changeResult.value = { ok: false, message: `更换失败：${errorMessage(error)}` };
+  } finally {
+    changeBusy.value = false;
+    try {
+      // 无论成功与否都以后端为准：成功时草稿换成新密码，避免之后“保存”把旧密码写回。
+      await refreshSyncFieldsFromBackend();
+    } catch (error) {
+      console.error("[webdav] 刷新同步设置失败", error);
+    }
+  }
+};
 
 watch(webdavOpen, open => {
   if (open) {
     webdavPasswordVisible.value = false;
     passphraseVisible.value = false;
     presetId.value = detectWebdavPreset(settingsDraft.webdavUrl);
+    rememberSavedSyncFields();
+    resetChangeForm();
   }
 });
 
 const saveWebdavSettings = async () => {
-  if (settingsDraft.syncEncryptionEnabled && [...settingsDraft.syncPassphrase].length < MIN_PASSPHRASE_CHARS) {
+  if (changeBusy.value) {
+    alert("正在更换同步密码，请稍候");
+    return;
+  }
+  if (settingsDraft.syncEncryptionEnabled && passphraseLength(settingsDraft.syncPassphrase) < MIN_PASSPHRASE_CHARS) {
     alert(`开启端到端加密需要设置至少 ${MIN_PASSPHRASE_CHARS} 个字符的同步密码`);
     return;
   }
@@ -174,3 +329,24 @@ const handleSyncNow = async () => {
   await api.syncNow("manual");
 };
 </script>
+
+<style scoped>
+.passphrase-change {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+}
+
+.passphrase-change .form-row {
+  margin-bottom: 0;
+}
+
+.passphrase-mismatch {
+  margin-top: 6px;
+}
+</style>

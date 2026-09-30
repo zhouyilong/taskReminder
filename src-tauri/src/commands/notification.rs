@@ -1,20 +1,20 @@
 //! 提醒弹窗与提醒记录：知道了、完成、稍后提醒、队列读取与记录删除。
 
-use chrono::Local;
 use serde::Deserialize;
-use tauri::{Emitter, Manager, State};
+use tauri::{Emitter, State};
 
 use crate::commands::{into_api, ApiResult};
+use crate::kinds::{ReminderAction, ReminderKind, TaskStatus};
 use crate::models::{NotificationPayload, ReminderRecord};
 use crate::state::AppState;
-use crate::windows::sticky::{emit_sticky_note_reminder, sticky_note_item_label};
+use crate::windows::sticky::{emit_sticky_note_reminder, hide_sticky_note_window};
 use crate::{scheduler, time};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AckPayload {
     record_id: String,
-    action: String,
+    action: ReminderAction,
 }
 
 #[derive(Deserialize)]
@@ -22,7 +22,7 @@ pub struct AckPayload {
 pub struct SnoozePayload {
     record_id: String,
     reminder_id: String,
-    reminder_type: String,
+    reminder_type: ReminderKind,
     minutes: i64,
     /// 推迟到指定时间（如“明早 9 点”），优先于 `minutes`。
     #[serde(default)]
@@ -76,7 +76,7 @@ pub fn ack_notification(
         into_api(
             state
                 .db
-                .update_reminder_record_action(&payload.record_id, &payload.action),
+                .update_reminder_record_action(&payload.record_id, payload.action.clone()),
         )?;
         into_api(state.sync.notify_local_change())?;
     }
@@ -91,7 +91,7 @@ pub fn ack_all_notifications(app: tauri::AppHandle, state: State<AppState>) -> A
         into_api(
             state
                 .db
-                .update_reminder_record_action(&item.record_id, "DISMISSED"),
+                .update_reminder_record_action(&item.record_id, ReminderAction::Dismissed),
         )?;
     }
     if !drained.is_empty() {
@@ -111,18 +111,15 @@ pub fn complete_notification(
     into_api(
         state
             .db
-            .update_reminder_record_action(&payload.record_id, "COMPLETED"),
+            .update_reminder_record_action(&payload.record_id, ReminderAction::Completed),
     )?;
     if let Some(task) = into_api(state.db.get_task(&payload.reminder_id))? {
-        if task.status != "COMPLETED" && task.deleted_at.is_none() {
+        if task.status != TaskStatus::Completed && task.deleted_at.is_none() {
             into_api(state.db.complete_task(&task.id))?;
         }
         state.scheduler.cancel_task(&task.id);
-        if let Some(window) = app.get_webview_window(&sticky_note_item_label(&task.id)) {
-            let _ = window.hide();
-            into_api(state.db.close_sticky_note(&task.id))?;
-            let _ = app.emit("sticky-note-changed", task.id.clone());
-        }
+        // `complete_task` 已在同一次更新中清掉 `sticky_is_open`，这里只收起窗口。
+        hide_sticky_note_window(&app, &task.id);
     }
     // 同一任务可能还有其他排队中的提醒，一并撤下。
     let _ = state
@@ -141,21 +138,14 @@ pub fn snooze_notification(
     state: State<AppState>,
     payload: SnoozePayload,
 ) -> ApiResult<Vec<NotificationPayload>> {
-    let minutes = payload.minutes.max(1);
-    let snooze_until = payload
-        .until
-        .as_deref()
-        .and_then(time::parse_datetime_any)
-        .filter(|value| *value > Local::now().naive_local())
-        .map(|value| time::format_datetime(&value))
-        .unwrap_or_else(|| add_minutes(minutes));
+    let snooze_until = snooze_target(payload.until.as_deref(), payload.minutes);
     into_api(
         state
             .db
-            .update_reminder_record_action(&payload.record_id, "SNOOZED"),
+            .update_reminder_record_action(&payload.record_id, ReminderAction::Snoozed),
     )?;
-    match payload.reminder_type.as_str() {
-        "TASK" => {
+    match payload.reminder_type {
+        ReminderKind::Task => {
             if let Some(mut task) = into_api(state.db.get_task(&payload.reminder_id))? {
                 let reminder_time = snooze_until.clone();
                 into_api(state.db.update_task(
@@ -171,7 +161,7 @@ pub fn snooze_notification(
                 into_api(state.scheduler.schedule_task(task))?;
             }
         }
-        "RECURRING" => {
+        ReminderKind::Recurring => {
             if let Some(mut task) = into_api(state.db.get_recurring_task(&payload.reminder_id))? {
                 task.next_trigger = snooze_until.clone();
                 task.is_paused = false;
@@ -179,7 +169,7 @@ pub fn snooze_notification(
                 into_api(state.scheduler.schedule_recurring(task))?;
             }
         }
-        _ => {}
+        ReminderKind::Unknown(_) => {}
     }
     into_api(state.sync.notify_local_change())?;
     Ok(finish_notification(&app, &state, &payload.record_id))
@@ -190,7 +180,34 @@ pub fn get_notification_queue(state: State<AppState>) -> ApiResult<Vec<Notificat
     Ok(state.scheduler.queue().snapshot())
 }
 
-fn add_minutes(minutes: i64) -> String {
-    let dt = Local::now().naive_local() + chrono::Duration::minutes(minutes);
-    dt.format("%Y-%m-%dT%H:%M:%S").to_string()
+/// 稍后提醒的目标时间：指定了未来的时间（如“明早 9 点”）就用它，否则从现在起推迟
+/// `minutes` 分钟（至少 1 分钟）。
+fn snooze_target(until: Option<&str>, minutes: i64) -> String {
+    let now = time::now();
+    let target = until
+        .and_then(time::parse_datetime_any)
+        .filter(|value| *value > now)
+        .unwrap_or_else(|| now + chrono::Duration::minutes(minutes.max(1)));
+    time::format_datetime(&target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snooze_target_uses_future_until_or_minutes() {
+        let _now = time::fix_now("2026-09-30T21:50");
+        assert_eq!(
+            snooze_target(Some("2026-10-01T09:00"), 15),
+            "2026-10-01T09:00:00"
+        );
+        // 指定的时间已过或无法解析：按分钟推迟。
+        assert_eq!(
+            snooze_target(Some("2026-09-30T21:00"), 15),
+            "2026-09-30T22:05:00"
+        );
+        assert_eq!(snooze_target(Some("明早"), 15), "2026-09-30T22:05:00");
+        assert_eq!(snooze_target(None, 0), "2026-09-30T21:51:00");
+    }
 }

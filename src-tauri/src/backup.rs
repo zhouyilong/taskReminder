@@ -7,15 +7,16 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::{Duration, Local, NaiveDateTime};
+use chrono::{Duration, NaiveDateTime};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::db::DbManager;
 use crate::errors::AppError;
+use crate::kinds::{RepeatMode, TaskStatus};
 use crate::models::{RecurringTask, ReminderRecord, Task, PRIORITY_MAX};
 use crate::recurrence::{self, weekday_mask};
-use crate::time::{format_datetime, parse_datetime_any};
+use crate::time::{self, format_datetime, parse_datetime_any};
 
 pub const BACKUP_APP_ID: &str = "TaskReminder";
 pub const BACKUP_FORMAT_VERSION: u32 = 1;
@@ -79,7 +80,12 @@ impl ExportFormat {
             Self::Markdown => "任务提醒待办",
             Self::Ics => "任务提醒日历",
         };
-        format!("{}-{}.{}", stem, now.format("%Y%m%d"), self.extension())
+        format!(
+            "{}-{}.{}",
+            stem,
+            time::format_compact_date(now),
+            self.extension()
+        )
     }
 }
 
@@ -91,7 +97,7 @@ pub fn build_backup(db: &DbManager, app_version: &str) -> Result<BackupFile, App
         app: BACKUP_APP_ID.to_string(),
         format_version: BACKUP_FORMAT_VERSION,
         app_version: app_version.to_string(),
-        exported_at: format_datetime(&Local::now().naive_local()),
+        exported_at: format_datetime(&time::now()),
         tasks,
         recurring_tasks: db.list_recurring_tasks()?,
         reminder_records: db.list_reminder_records()?,
@@ -127,7 +133,7 @@ pub struct ImportSummary {
 
 /// 按 id 合并备份，返回统计。循环提醒的下次触发时间若已过去，按当前时间重新计算。
 pub fn import_backup(db: &DbManager, backup: &BackupFile) -> Result<ImportSummary, AppError> {
-    let now = Local::now().naive_local();
+    let now = time::now();
     let recurring: Vec<RecurringTask> = backup
         .recurring_tasks
         .iter()
@@ -176,22 +182,23 @@ fn weekday_text(mask: i64) -> String {
 /// 循环规则的中文描述，与前端 `formatRecurringRule` 一致。
 pub fn describe_rule(task: &RecurringTask) -> String {
     let time = task.schedule_time.as_deref().unwrap_or("-");
-    match task.repeat_mode.as_str() {
-        recurrence::REPEAT_MODE_DAILY => format!("每天 {}", time),
-        recurrence::REPEAT_MODE_WORKDAY => format!("法定工作日 {}", time),
-        recurrence::REPEAT_MODE_WEEKLY => {
+    match &task.repeat_mode {
+        RepeatMode::Daily => format!("每天 {}", time),
+        RepeatMode::Workday => format!("法定工作日 {}", time),
+        RepeatMode::Weekly => {
             format!("{} {}", weekday_text(weekday_mask(task).unwrap_or(0)), time)
         }
-        recurrence::REPEAT_MODE_MONTHLY => format!(
+        RepeatMode::Monthly => format!(
             "每月 {} 日 {}",
             task.schedule_day
                 .map_or_else(|| "-".to_string(), |d| d.to_string()),
             time
         ),
-        recurrence::REPEAT_MODE_CRON => {
+        RepeatMode::Cron => {
             format!("Cron {}", task.cron_expression.as_deref().unwrap_or("-"))
         }
-        _ => format!(
+        RepeatMode::Unknown(mode) => format!("不支持的循环模式（{}）", mode),
+        RepeatMode::IntervalRange => format!(
             "每 {} 分钟（{} - {}）",
             task.interval_minutes,
             task.start_time.as_deref().unwrap_or("00:00"),
@@ -223,7 +230,7 @@ fn markdown_note(content: Option<&str>) -> String {
 }
 
 fn markdown_task_line(task: &Task) -> String {
-    let done = task.status == "COMPLETED";
+    let done = task.status == TaskStatus::Completed;
     let mut parts = vec![format!(
         "- [{}] {}",
         if done { "x" } else { " " },
@@ -261,7 +268,7 @@ pub fn render_markdown(backup: &BackupFile) -> String {
     let mut pending: Vec<&Task> = backup
         .tasks
         .iter()
-        .filter(|task| task.status != "COMPLETED")
+        .filter(|task| task.status != TaskStatus::Completed)
         .collect();
     pending.sort_by(|a, b| {
         b.priority.cmp(&a.priority).then_with(|| {
@@ -273,7 +280,7 @@ pub fn render_markdown(backup: &BackupFile) -> String {
     let mut completed: Vec<&Task> = backup
         .tasks
         .iter()
-        .filter(|task| task.status == "COMPLETED")
+        .filter(|task| task.status == TaskStatus::Completed)
         .collect();
     completed.sort_by(|a, b| b.completed_at.cmp(&a.completed_at));
 
@@ -356,17 +363,17 @@ fn ics_fold(line: &str) -> String {
 }
 
 fn ics_datetime(value: &NaiveDateTime) -> String {
-    value.format("%Y%m%dT%H%M%S").to_string()
+    time::format_ics_local(value)
 }
 
 const ICS_WEEKDAYS: [&str; 7] = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
 
 fn ics_rrule(task: &RecurringTask) -> Option<String> {
-    match task.repeat_mode.as_str() {
-        recurrence::REPEAT_MODE_DAILY => Some("FREQ=DAILY".to_string()),
+    match &task.repeat_mode {
+        RepeatMode::Daily => Some("FREQ=DAILY".to_string()),
         // 日历不认识调休，按周一至周五近似。
-        recurrence::REPEAT_MODE_WORKDAY => Some("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR".to_string()),
-        recurrence::REPEAT_MODE_WEEKLY => {
+        RepeatMode::Workday => Some("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR".to_string()),
+        RepeatMode::Weekly => {
             let mask = weekday_mask(task)?;
             let days: Vec<&str> = (0..7)
                 .filter(|index| mask & (1 << index) != 0)
@@ -374,7 +381,7 @@ fn ics_rrule(task: &RecurringTask) -> Option<String> {
                 .collect();
             Some(format!("FREQ=WEEKLY;BYDAY={}", days.join(",")))
         }
-        recurrence::REPEAT_MODE_MONTHLY => {
+        RepeatMode::Monthly => {
             let day = task.schedule_day?.clamp(1, 31);
             if day <= 28 {
                 Some(format!("FREQ=MONTHLY;BYMONTHDAY={}", day))
@@ -462,7 +469,7 @@ pub fn render_ics(backup: &BackupFile, dtstamp: &str) -> (String, usize) {
     }
 
     for task in &backup.tasks {
-        if task.status == "COMPLETED" {
+        if task.status == TaskStatus::Completed {
             continue;
         }
         let Some(start) = task.reminder_time.as_deref().and_then(parse_datetime_any) else {
@@ -533,7 +540,7 @@ pub fn backup_dir(db_path: &Path) -> PathBuf {
 }
 
 fn backup_file_name(now: &NaiveDateTime) -> String {
-    format!("{}{}.db", AUTO_BACKUP_PREFIX, now.format("%Y%m%d-%H%M%S"))
+    format!("{}{}.db", AUTO_BACKUP_PREFIX, time::format_stamp(now))
 }
 
 /// 解析备份文件名中的时间；不是本应用生成的备份返回 None（也用来防止路径穿越）。
@@ -542,7 +549,7 @@ fn parse_backup_name(name: &str) -> Option<NaiveDateTime> {
     if stamp.len() != 15 || !stamp.chars().all(|c| c.is_ascii_digit() || c == '-') {
         return None;
     }
-    NaiveDateTime::parse_from_str(stamp, "%Y%m%d-%H%M%S").ok()
+    time::parse_stamp(stamp)
 }
 
 pub fn list_backups(dir: &Path) -> Vec<BackupInfo> {
@@ -630,6 +637,7 @@ pub fn resolve_backup(db_path: &Path, name: &str) -> Result<PathBuf, AppError> {
 mod tests {
     use super::*;
     use crate::db::TaskMeta;
+    use crate::kinds::{ReminderKind, TaskType};
 
     fn temp_db() -> (DbManager, PathBuf) {
         let dir =
@@ -643,8 +651,8 @@ mod tests {
         RecurringTask {
             id: String::new(),
             description: "周报".to_string(),
-            task_type: "RECURRING".to_string(),
-            status: "PENDING".to_string(),
+            task_type: TaskType::Recurring,
+            status: TaskStatus::Pending,
             created_at: String::new(),
             completed_at: None,
             reminder_time: None,
@@ -656,7 +664,7 @@ mod tests {
             is_paused: false,
             start_time: None,
             end_time: None,
-            repeat_mode: mode.to_string(),
+            repeat_mode: RepeatMode::parse(mode),
             schedule_time: Some("17:30".to_string()),
             schedule_weekday: Some(5),
             schedule_weekdays: Some(0b001_0101),
@@ -682,7 +690,7 @@ mod tests {
         recurring.next_trigger = "2000-01-07T17:30:00".to_string();
         source.create_recurring_task(&recurring).unwrap();
         source
-            .create_reminder_record(&task.id, "交周报", "TASK")
+            .create_reminder_record(&task.id, "交周报", ReminderKind::Task)
             .unwrap();
 
         let backup = build_backup(&source, "2.0.0").unwrap();
@@ -797,8 +805,8 @@ mod tests {
                 id: "t1".to_string(),
                 description: "开会; 带上电脑, 还有\\资料".to_string(),
                 sticky_content: Some("议程：\n1. 周报".to_string()),
-                task_type: "ONE_TIME".to_string(),
-                status: "PENDING".to_string(),
+                task_type: TaskType::OneTime,
+                status: TaskStatus::Pending,
                 created_at: "2026-09-27T09:00:00".to_string(),
                 completed_at: None,
                 reminder_time: Some("2026-09-28T15:00:00".to_string()),

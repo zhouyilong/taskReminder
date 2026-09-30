@@ -10,6 +10,9 @@ pub enum AppError {
     Invalid(String),
     #[error("同步错误: {0}")]
     Sync(String),
+    /// 远端加密数据无法用本机的同步密码解密（密码错误、在其他设备上更换过，或数据损坏）。
+    #[error("同步错误: {0}")]
+    SyncPassphrase(String),
     #[error("系统错误: {0}")]
     System(String),
 }

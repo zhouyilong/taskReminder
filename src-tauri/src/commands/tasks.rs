@@ -6,10 +6,11 @@ use tauri::{Emitter, State};
 use crate::commands::{into_api, ApiResult};
 use crate::db::TaskMeta;
 use crate::errors::AppError;
+use crate::kinds::ReminderAction;
 use crate::models::Task;
 use crate::scheduler;
 use crate::state::AppState;
-use crate::windows::sticky::emit_sticky_note_reminder;
+use crate::windows::sticky::{emit_sticky_note_reminder, hide_sticky_note_window};
 
 pub fn normalize_reminder_time(value: Option<String>) -> Option<String> {
     value.and_then(|raw| {
@@ -183,15 +184,22 @@ pub fn update_task(
 }
 
 #[tauri::command]
-pub fn complete_task(state: State<AppState>, id: String) -> ApiResult<()> {
-    into_api(complete_task_by_id(&state, &id))
+pub fn complete_task(app: tauri::AppHandle, state: State<AppState>, id: String) -> ApiResult<()> {
+    into_api(complete_task_by_id(&app, &state, &id))
 }
 
-/// 完成待办：取消计时器并撤下弹窗中该待办的提醒。托盘菜单也会调用。
-pub(crate) fn complete_task_by_id(state: &AppState, id: &str) -> Result<(), AppError> {
+/// 完成待办：取消计时器、撤下弹窗中该待办的提醒并收起它的便签。托盘菜单也会调用。
+pub(crate) fn complete_task_by_id(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    id: &str,
+) -> Result<(), AppError> {
     state.db.complete_task(id)?;
+    hide_sticky_note_window(app, id);
     state.scheduler.cancel_task(id);
-    state.scheduler.withdraw_notifications(id, "COMPLETED")?;
+    state
+        .scheduler
+        .withdraw_notifications(id, ReminderAction::Completed)?;
     state.sync.notify_local_change()
 }
 
@@ -226,10 +234,15 @@ pub fn uncomplete_task(state: State<AppState>, id: String) -> ApiResult<()> {
 }
 
 #[tauri::command]
-pub fn delete_task(state: State<AppState>, id: String) -> ApiResult<()> {
+pub fn delete_task(app: tauri::AppHandle, state: State<AppState>, id: String) -> ApiResult<()> {
     into_api(state.db.delete_task(&id))?;
+    hide_sticky_note_window(&app, &id);
     state.scheduler.cancel_task(&id);
-    into_api(state.scheduler.withdraw_notifications(&id, "DISMISSED"))?;
+    into_api(
+        state
+            .scheduler
+            .withdraw_notifications(&id, ReminderAction::Dismissed),
+    )?;
     into_api(state.sync.notify_local_change())?;
     Ok(())
 }

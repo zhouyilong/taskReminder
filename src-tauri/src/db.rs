@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use chrono::{Local, NaiveDateTime};
+use chrono::NaiveDateTime;
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -9,14 +9,14 @@ use uuid::Uuid;
 
 use crate::backup::ImportSummary;
 use crate::errors::AppError;
+use crate::kinds::{ReminderAction, ReminderKind, RepeatMode, TaskStatus, TaskType};
 use crate::models::{
     default_quick_add_shortcut, normalize_priority, tags_from_db, tags_to_db, AppSettings,
     RecurringTask, ReminderRecord, StickyNote, Task,
 };
 use crate::quiet_hours;
-use crate::recurrence::REPEAT_MODE_INTERVAL_RANGE;
 use crate::secrets::{self, SecretStore, Secrets};
-use crate::time::{format_datetime, now_string, parse_datetime_any};
+use crate::time::{self, format_datetime, now_string, parse_datetime_any};
 
 /// 墓碑（软删除行）的保留天数。开启云同步时保留更久，
 /// 让较长时间未同步的设备也能收到删除，而不是把旧数据重新上传“复活”。
@@ -51,7 +51,7 @@ impl TrashTable {
 }
 
 fn tombstone_cutoff(retention_days: i64) -> String {
-    format_datetime(&(Local::now().naive_local() - chrono::Duration::days(retention_days.max(1))))
+    format_datetime(&(time::now() - chrono::Duration::days(retention_days.max(1))))
 }
 
 #[derive(Clone)]
@@ -473,8 +473,8 @@ impl DbManager {
             id,
             description: description.to_string(),
             sticky_content: if note.is_empty() { None } else { Some(note) },
-            task_type: "ONE_TIME".to_string(),
-            status: "PENDING".to_string(),
+            task_type: TaskType::OneTime,
+            status: TaskStatus::Pending,
             created_at: now.clone(),
             completed_at: None,
             reminder_time: None,
@@ -523,7 +523,8 @@ impl DbManager {
         let conn = self.get_conn()?;
         let now = now_string();
         conn.execute(
-            "UPDATE tasks SET status = 'COMPLETED', completed_at = ?, updated_at = ? WHERE id = ?",
+            // 完成后便签随之关闭：已完成的待办不再恢复便签窗口，取消完成也不会自动重新打开。
+            "UPDATE tasks SET status = 'COMPLETED', completed_at = ?, sticky_is_open = 0, updated_at = ? WHERE id = ?",
             params![now, now, task_id],
         )?;
         Ok(())
@@ -543,7 +544,8 @@ impl DbManager {
         let conn = self.get_conn()?;
         let now = now_string();
         conn.execute(
-            "UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE id = ?",
+            // 同时关闭便签，从回收站恢复时不会突然弹出便签窗口。
+            "UPDATE tasks SET deleted_at = ?, sticky_is_open = 0, updated_at = ? WHERE id = ?",
             params![now, now, task_id],
         )?;
         Ok(())
@@ -607,8 +609,8 @@ impl DbManager {
         Ok(RecurringTask {
             id,
             description: task.description.clone(),
-            task_type: "RECURRING".to_string(),
-            status: "PENDING".to_string(),
+            task_type: TaskType::Recurring,
+            status: TaskStatus::Pending,
             created_at: now.clone(),
             completed_at: None,
             reminder_time: None,
@@ -734,7 +736,7 @@ impl DbManager {
         &self,
         reminder_id: &str,
         description: &str,
-        reminder_type: &str,
+        reminder_type: ReminderKind,
     ) -> Result<ReminderRecord, AppError> {
         let conn = self.get_conn()?;
         let id = Uuid::new_v4().to_string();
@@ -742,16 +744,16 @@ impl DbManager {
         conn.execute(
             "INSERT INTO reminder_records (id, reminder_id, description, type, trigger_time, close_time, action, updated_at, deleted_at)
              VALUES (?, ?, ?, ?, ?, NULL, 'PENDING', ?, NULL)",
-            params![id, reminder_id, description, reminder_type, now, now],
+            params![id, reminder_id, description, &reminder_type, now, now],
         )?;
         Ok(ReminderRecord {
             id,
             reminder_id: reminder_id.to_string(),
             description: description.to_string(),
-            reminder_type: reminder_type.to_string(),
+            reminder_type,
             trigger_time: now.clone(),
             close_time: None,
-            action: "PENDING".to_string(),
+            action: ReminderAction::Pending,
             updated_at: Some(now),
             deleted_at: None,
         })
@@ -760,13 +762,13 @@ impl DbManager {
     pub fn update_reminder_record_action(
         &self,
         record_id: &str,
-        action: &str,
+        action: ReminderAction,
     ) -> Result<(), AppError> {
         let conn = self.get_conn()?;
         let now = now_string();
         conn.execute(
             "UPDATE reminder_records SET action = ?, close_time = ?, updated_at = ? WHERE id = ?",
-            params![action, now, now, record_id],
+            params![&action, now, now, record_id],
         )?;
         Ok(())
     }
@@ -847,8 +849,8 @@ impl DbManager {
                 .filter(|value| value.is_finite())
                 .or_else(|| existing.as_ref().map(|note| note.pos_x))
                 .unwrap_or(STICKY_NOTE_DEFAULT_POS_X)
-        }
-        .max(0.0);
+        };
+        // 负坐标（主屏左侧 / 上方的副屏）原样保留；屏幕外的位置在显示窗口时校正。
         let y = if keep_existing_position {
             existing
                 .as_ref()
@@ -859,8 +861,7 @@ impl DbManager {
                 .filter(|value| value.is_finite())
                 .or_else(|| existing.as_ref().map(|note| note.pos_y))
                 .unwrap_or(STICKY_NOTE_DEFAULT_POS_Y)
-        }
-        .max(0.0);
+        };
         let width = existing
             .as_ref()
             .map(|note| normalize_sticky_item_width(Some(note.width)))
@@ -1007,9 +1008,10 @@ impl DbManager {
         let now = now_string();
         conn.execute(
             "UPDATE tasks
-             SET sticky_pos_x = ?, sticky_pos_y = ?, sticky_is_open = 1, updated_at = ?
-             WHERE id = ?",
-            params![x.max(0.0), y.max(0.0), now, task_id],
+             SET sticky_pos_x = ?1, sticky_pos_y = ?2, sticky_is_open = 1, updated_at = ?3
+             WHERE id = ?4
+               AND (ABS(sticky_pos_x - ?1) >= 0.5 OR ABS(sticky_pos_y - ?2) >= 0.5 OR sticky_is_open != 1)",
+            params![x, y, now, task_id],
         )?;
         Ok(())
     }
@@ -1024,8 +1026,9 @@ impl DbManager {
         let now = now_string();
         conn.execute(
             "UPDATE tasks
-             SET sticky_width = ?, sticky_height = ?, sticky_is_open = 1, updated_at = ?
-             WHERE id = ?",
+             SET sticky_width = ?1, sticky_height = ?2, sticky_is_open = 1, updated_at = ?3
+             WHERE id = ?4
+               AND (ABS(sticky_width - ?1) >= 0.5 OR ABS(sticky_height - ?2) >= 0.5 OR sticky_is_open != 1)",
             params![
                 normalize_sticky_item_width(Some(width)),
                 normalize_sticky_item_height(Some(height)),
@@ -1034,6 +1037,33 @@ impl DbManager {
             ],
         )?;
         Ok(())
+    }
+
+    /// 是否开启便签贴边吸附。只读一列，拖动结束时调用，避免 `load_settings` 访问凭据库。
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn sticky_snap_enabled(&self) -> Result<bool, AppError> {
+        let conn = self.get_conn()?;
+        let value: Option<i64> = conn
+            .query_row(
+                "SELECT sticky_snap_enabled FROM settings WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(value.unwrap_or(1) == 1)
+    }
+
+    /// 是否开启节假日数据在线更新。只读一列，后台检查时调用，避免 `load_settings` 访问凭据库。
+    pub fn holiday_auto_update_enabled(&self) -> Result<bool, AppError> {
+        let conn = self.get_conn()?;
+        let value: Option<i64> = conn
+            .query_row(
+                "SELECT holiday_auto_update FROM settings WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(value.unwrap_or(1) == 1)
     }
 
     pub fn set_sticky_note_pinned(&self, task_id: &str, pinned: bool) -> Result<(), AppError> {
@@ -1083,7 +1113,8 @@ impl DbManager {
                    webdav_device_id, notification_theme, quick_add_enabled, quick_add_shortcut,
                    sync_encryption_enabled, sync_passphrase,
                    quiet_hours_enabled, quiet_hours_start, quiet_hours_end,
-                   native_notification_enabled, sticky_toggle_shortcut, secret_storage
+                   native_notification_enabled, sticky_toggle_shortcut, secret_storage,
+                   sticky_snap_enabled, holiday_auto_update
                    FROM settings WHERE id = 1";
         let mut stmt = conn.prepare(sql)?;
         let row = stmt.query_row([], |row| {
@@ -1152,6 +1183,8 @@ impl DbManager {
                 secret_storage: row
                     .get::<_, Option<String>>(32)?
                     .unwrap_or_else(|| secrets::STORAGE_DB.to_string()),
+                sticky_snap_enabled: row.get::<_, Option<i64>>(33)?.unwrap_or(1) == 1,
+                holiday_auto_update: row.get::<_, Option<i64>>(34)?.unwrap_or(1) == 1,
             })
         })?;
         let mut settings = row;
@@ -1180,7 +1213,8 @@ impl DbManager {
                  quick_add_enabled = ?, quick_add_shortcut = ?,
                  sync_encryption_enabled = ?, sync_passphrase = ?,
                  quiet_hours_enabled = ?, quiet_hours_start = ?, quiet_hours_end = ?,
-                 native_notification_enabled = ?, sticky_toggle_shortcut = ?, secret_storage = ?
+                 native_notification_enabled = ?, sticky_toggle_shortcut = ?, secret_storage = ?,
+                 sticky_snap_enabled = ?, holiday_auto_update = ?
              WHERE id = 1",
             params![
                 if settings.auto_start_enabled { 1 } else { 0 },
@@ -1216,6 +1250,8 @@ impl DbManager {
                 if settings.native_notification_enabled { 1 } else { 0 },
                 settings.sticky_toggle_shortcut.trim(),
                 secret_storage,
+                if settings.sticky_snap_enabled { 1 } else { 0 },
+                if settings.holiday_auto_update { 1 } else { 0 },
             ],
         )?;
         Ok(())
@@ -1248,7 +1284,7 @@ impl DbManager {
     /// 2. 物理删除超过保留期的墓碑。
     pub fn cleanup_data(&self, tombstone_retention_days: i64) -> Result<(), AppError> {
         let conn = self.get_conn()?;
-        let now = Local::now().naive_local();
+        let now = time::now();
         let now_text = format_datetime(&now);
         let completed_cutoff = format_datetime(&(now - chrono::Duration::days(30)));
 
@@ -1306,7 +1342,7 @@ impl DbManager {
         for task in tasks {
             let valid = !task.id.trim().is_empty()
                 && !task.description.trim().is_empty()
-                && matches!(task.status.as_str(), "PENDING" | "COMPLETED");
+                && task.status.is_known();
             let outcome = if valid {
                 import_outcome(&tx, "tasks", &task.id, &task.updated_at, &task.created_at)?
             } else {
@@ -1530,10 +1566,10 @@ fn recurring_from_row(row: &rusqlite::Row<'_>) -> Result<RecurringTask, rusqlite
         is_paused: row.get::<_, i64>(9)? == 1,
         start_time: row.get(10)?,
         end_time: row.get(11)?,
+        // 空值按区间间隔（V1.4.1 迁移的默认值），不认识的模式原样保留。
         repeat_mode: row
-            .get::<_, Option<String>>(12)?
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| REPEAT_MODE_INTERVAL_RANGE.to_string()),
+            .get::<_, Option<RepeatMode>>(12)?
+            .unwrap_or(RepeatMode::IntervalRange),
         schedule_time: row.get(13)?,
         schedule_weekday: row.get(14)?,
         schedule_weekdays: row.get(19)?,
@@ -1683,6 +1719,16 @@ fn migration_scripts() -> Vec<MigrationScript> {
             description: "add secret storage".to_string(),
             sql: include_str!("../migrations/V2.0.3__add_secret_storage.sql"),
         },
+        MigrationScript {
+            version: "2.0.4".to_string(),
+            description: "add sticky snap".to_string(),
+            sql: include_str!("../migrations/V2.0.4__add_sticky_snap.sql"),
+        },
+        MigrationScript {
+            version: "2.0.5".to_string(),
+            description: "add holiday auto update".to_string(),
+            sql: include_str!("../migrations/V2.0.5__add_holiday_auto_update.sql"),
+        },
     ]
 }
 
@@ -1728,6 +1774,7 @@ fn execute_sql_script(conn: &Connection, sql: &str) -> Result<(), AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kinds::RepeatMode;
 
     fn temp_db() -> (DbManager, PathBuf) {
         let dir = std::env::temp_dir().join(format!("taskreminder-test-{}", Uuid::new_v4()));
@@ -1737,7 +1784,7 @@ mod tests {
     }
 
     fn days_ago(days: i64) -> String {
-        format_datetime(&(Local::now().naive_local() - chrono::Duration::days(days)))
+        format_datetime(&(time::now() - chrono::Duration::days(days)))
     }
 
     fn task_row(db: &DbManager, id: &str) -> Option<(String, Option<String>)> {
@@ -1755,8 +1802,8 @@ mod tests {
         RecurringTask {
             id: String::new(),
             description: "weekly".to_string(),
-            task_type: "RECURRING".to_string(),
-            status: "PENDING".to_string(),
+            task_type: TaskType::Recurring,
+            status: TaskStatus::Pending,
             created_at: String::new(),
             completed_at: None,
             reminder_time: None,
@@ -1768,7 +1815,7 @@ mod tests {
             is_paused: false,
             start_time: None,
             end_time: None,
-            repeat_mode: "DAILY".to_string(),
+            repeat_mode: RepeatMode::Daily,
             schedule_time: Some("09:00".to_string()),
             schedule_weekday: None,
             schedule_weekdays: None,
@@ -1928,7 +1975,9 @@ mod tests {
     #[test]
     fn purge_also_clears_deleted_reminder_records() {
         let (db, dir) = temp_db();
-        let record = db.create_reminder_record("task-1", "desc", "TASK").unwrap();
+        let record = db
+            .create_reminder_record("task-1", "desc", ReminderKind::Task)
+            .unwrap();
         {
             let conn = db.get_conn().unwrap();
             conn.execute(
@@ -1947,7 +1996,7 @@ mod tests {
         let (db, dir) = temp_db();
         let mut draft = sample_recurring();
         draft.next_trigger = "2026-09-28T09:00:00".to_string();
-        draft.repeat_mode = "WEEKLY".to_string();
+        draft.repeat_mode = RepeatMode::Weekly;
         draft.schedule_weekday = Some(1);
         draft.schedule_weekdays = Some(0b10101);
         let created = db.create_recurring_task(&draft).unwrap();
@@ -2021,7 +2070,9 @@ mod tests {
     #[test]
     fn has_reminder_record_since_compares_trigger_time() {
         let (db, dir) = temp_db();
-        let record = db.create_reminder_record("task-1", "desc", "TASK").unwrap();
+        let record = db
+            .create_reminder_record("task-1", "desc", ReminderKind::Task)
+            .unwrap();
         let trigger = parse_datetime_any(&record.trigger_time).unwrap();
 
         assert!(db
@@ -2038,6 +2089,241 @@ mod tests {
         // 已软删除的记录也算触发过，删除记录不应导致重复弹出。
         db.delete_reminder_record(&record.id).unwrap();
         assert!(db.has_reminder_record_since("task-1", &trigger).unwrap());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn sticky_row(db: &DbManager, id: &str) -> (f64, f64, f64, f64, String) {
+        let conn = db.get_conn().unwrap();
+        conn.query_row(
+            "SELECT sticky_pos_x, sticky_pos_y, sticky_width, sticky_height, updated_at FROM tasks WHERE id = ?",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        )
+        .unwrap()
+    }
+
+    fn backdate_task(db: &DbManager, id: &str) {
+        let conn = db.get_conn().unwrap();
+        conn.execute(
+            "UPDATE tasks SET updated_at = '2020-01-01 00:00:00' WHERE id = ?",
+            [id],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn sticky_move_keeps_negative_coordinates_and_skips_unchanged() {
+        let (db, dir) = temp_db();
+        let note = db
+            .create_custom_sticky_note("note", None, Some(48.0), Some(76.0), None, None)
+            .unwrap();
+        let id = note.task_id.clone();
+
+        // 主屏左侧副屏的负坐标原样保存。
+        db.move_sticky_note(&id, -1500.0, -100.0).unwrap();
+        let (x, y, _, _, _) = sticky_row(&db, &id);
+        assert_eq!((x, y), (-1500.0, -100.0));
+
+        // 位置不变（打开窗口时 set_position 触发的 Moved）不改 updated_at，避免产生同步改动。
+        backdate_task(&db, &id);
+        db.move_sticky_note(&id, -1500.2, -100.0).unwrap();
+        let (_, _, _, _, updated_at) = sticky_row(&db, &id);
+        assert_eq!(updated_at, "2020-01-01 00:00:00");
+
+        db.move_sticky_note(&id, 200.0, -100.0).unwrap();
+        let (x, _, _, _, updated_at) = sticky_row(&db, &id);
+        assert_eq!(x, 200.0);
+        assert_ne!(updated_at, "2020-01-01 00:00:00");
+
+        // 尺寸同理。
+        let (_, _, width, height, _) = sticky_row(&db, &id);
+        backdate_task(&db, &id);
+        db.resize_sticky_note(&id, width, height).unwrap();
+        assert_eq!(sticky_row(&db, &id).4, "2020-01-01 00:00:00");
+        db.resize_sticky_note(&id, width + 40.0, height).unwrap();
+        assert_eq!(sticky_row(&db, &id).2, width + 40.0);
+        assert_ne!(sticky_row(&db, &id).4, "2020-01-01 00:00:00");
+
+        // 已关闭的便签被移动时重新记为打开。
+        db.close_sticky_note(&id).unwrap();
+        backdate_task(&db, &id);
+        db.move_sticky_note(&id, 200.0, -100.0).unwrap();
+        assert!(db.get_sticky_note(&id).unwrap().unwrap().is_open);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn unknown_repeat_mode_survives_read_and_write() {
+        // 模拟 v2.1 新增的模式经同步写入本机数据库。
+        let (db, dir) = temp_db();
+        let created = db.create_recurring_task(&sample_recurring()).unwrap();
+        {
+            let conn = db.get_conn().unwrap();
+            conn.execute(
+                "UPDATE recurring_tasks SET repeat_mode = 'BIWEEKLY', schedule_time = '09:00', cron_expression = 'custom' WHERE id = ?",
+                [&created.id],
+            )
+            .unwrap();
+        }
+        let mut task = db.get_recurring_task(&created.id).unwrap().unwrap();
+        assert_eq!(
+            task.repeat_mode,
+            RepeatMode::Unknown("BIWEEKLY".to_string())
+        );
+        // 暂停等只改其他字段的写入不会改动模式与规则字段。
+        task.is_paused = true;
+        db.update_recurring_task(&task).unwrap();
+        let conn = db.get_conn().unwrap();
+        let (mode, time, cron): (String, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT repeat_mode, schedule_time, cron_expression FROM recurring_tasks WHERE id = ?",
+                [&created.id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(mode, "BIWEEKLY");
+        assert_eq!(time.as_deref(), Some("09:00"));
+        assert_eq!(cron.as_deref(), Some("custom"));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ipc_json_is_unchanged_by_typed_fields() {
+        let (db, dir) = temp_db();
+        let task = db.create_task("待办", None).unwrap();
+        let json = serde_json::to_value(&task).unwrap();
+        assert_eq!(json["type"], "ONE_TIME");
+        assert_eq!(json["status"], "PENDING");
+        db.complete_task(&task.id).unwrap();
+        let done = serde_json::to_value(db.get_task(&task.id).unwrap().unwrap()).unwrap();
+        assert_eq!(done["status"], "COMPLETED");
+
+        let recurring = db.create_recurring_task(&sample_recurring()).unwrap();
+        let json = serde_json::to_value(&recurring).unwrap();
+        assert_eq!(json["type"], "RECURRING");
+        assert_eq!(json["repeatMode"], recurring.repeat_mode.as_str());
+
+        let record = db
+            .create_reminder_record("task-1", "desc", ReminderKind::Task)
+            .unwrap();
+        let json = serde_json::to_value(&record).unwrap();
+        assert_eq!(json["type"], "TASK");
+        assert_eq!(json["action"], "PENDING");
+
+        // 前端发来的字符串照常解析。
+        let parsed: ReminderRecord = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.action, ReminderAction::Pending);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn tombstone_cutoff_counts_back_from_now() {
+        let _now = time::fix_now("2026-09-30T12:00:00");
+        assert_eq!(tombstone_cutoff(7), "2026-09-23T12:00:00");
+        assert_eq!(tombstone_cutoff(60), "2026-08-01T12:00:00");
+        // 至少保留 1 天。
+        assert_eq!(tombstone_cutoff(0), "2026-09-29T12:00:00");
+    }
+
+    #[test]
+    fn deleting_or_completing_task_closes_its_sticky_note() {
+        let (db, dir) = temp_db();
+        let deleted = db
+            .create_custom_sticky_note("删除", Some("内容"), None, None, None, None)
+            .unwrap();
+        let completed = db
+            .create_custom_sticky_note("完成", Some("内容"), None, None, None, None)
+            .unwrap();
+        assert!(
+            db.get_sticky_note(&deleted.task_id)
+                .unwrap()
+                .unwrap()
+                .is_open
+        );
+
+        db.delete_task(&deleted.task_id).unwrap();
+        assert!(
+            !db.get_sticky_note(&deleted.task_id)
+                .unwrap()
+                .unwrap()
+                .is_open
+        );
+        // 从回收站恢复时不会重新弹出便签。
+        db.restore_task(&deleted.task_id).unwrap();
+        assert!(
+            !db.get_sticky_note(&deleted.task_id)
+                .unwrap()
+                .unwrap()
+                .is_open
+        );
+
+        db.complete_task(&completed.task_id).unwrap();
+        assert!(
+            !db.get_sticky_note(&completed.task_id)
+                .unwrap()
+                .unwrap()
+                .is_open
+        );
+        db.uncomplete_task(&completed.task_id).unwrap();
+        assert!(
+            !db.get_sticky_note(&completed.task_id)
+                .unwrap()
+                .unwrap()
+                .is_open
+        );
+        // 便签内容保留，可以手动重新打开。
+        assert_eq!(
+            db.get_sticky_note(&completed.task_id)
+                .unwrap()
+                .unwrap()
+                .content,
+            "内容"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn reopening_sticky_note_keeps_negative_coordinates() {
+        let (db, dir) = temp_db();
+        let note = db
+            .create_custom_sticky_note("note", None, Some(48.0), Some(76.0), None, None)
+            .unwrap();
+        db.move_sticky_note(&note.task_id, -1500.0, -100.0).unwrap();
+        db.close_sticky_note(&note.task_id).unwrap();
+        let reopened = db
+            .open_sticky_note(&note.task_id, None, Some(48.0), Some(76.0))
+            .unwrap();
+        assert_eq!((reopened.pos_x, reopened.pos_y), (-1500.0, -100.0));
+        let stored = db.get_sticky_note(&note.task_id).unwrap().unwrap();
+        assert_eq!((stored.pos_x, stored.pos_y), (-1500.0, -100.0));
+        assert!(stored.is_open);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sticky_snap_setting_defaults_on_and_roundtrips() {
+        let (db, dir) = temp_db();
+        assert!(db.sticky_snap_enabled().unwrap());
+        let mut settings = db.load_settings().unwrap();
+        assert!(settings.sticky_snap_enabled);
+        settings.sticky_snap_enabled = false;
+        db.save_settings(&settings).unwrap();
+        assert!(!db.load_settings().unwrap().sticky_snap_enabled);
+        assert!(!db.sticky_snap_enabled().unwrap());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn holiday_auto_update_defaults_on_and_roundtrips() {
+        let (db, dir) = temp_db();
+        assert!(db.holiday_auto_update_enabled().unwrap());
+        let mut settings = db.load_settings().unwrap();
+        assert!(settings.holiday_auto_update);
+        settings.holiday_auto_update = false;
+        db.save_settings(&settings).unwrap();
+        assert!(!db.load_settings().unwrap().holiday_auto_update);
+        assert!(!db.holiday_auto_update_enabled().unwrap());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

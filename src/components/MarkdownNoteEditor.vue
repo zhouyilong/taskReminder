@@ -12,6 +12,7 @@
 import { Crepe } from "@milkdown/crepe";
 import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import "@milkdown/crepe/theme/common/style.css";
+import { isUserMarkdownChange, type MarkdownBaselineState } from "../markdownBaseline";
 
 const props = withDefaults(defineProps<{
   modelValue: string;
@@ -75,9 +76,15 @@ const buildEditor = async (markdown: string) => {
     }
   });
 
+  // 载入内容的重新序列化不算修改（见 markdownBaseline.ts），否则打开便签就会自动保存一次。
+  const baselineState: MarkdownBaselineState = { ready: false, baseline: null, userEdited: false };
   instance.on(listener => {
     listener.markdownUpdated((_ctx, nextMarkdown) => {
       currentMarkdown.value = nextMarkdown;
+      if (!isUserMarkdownChange(baselineState, nextMarkdown)) {
+        return;
+      }
+      baselineState.userEdited = true;
       lastEmittedMarkdown = nextMarkdown;
       emit("update:modelValue", nextMarkdown);
     });
@@ -93,6 +100,8 @@ const buildEditor = async (markdown: string) => {
   crepe.value = instance;
   currentMarkdown.value = instance.getMarkdown();
   lastEmittedMarkdown = currentMarkdown.value;
+  baselineState.baseline = currentMarkdown.value;
+  baselineState.ready = true;
 };
 
 onMounted(() => {
@@ -233,7 +242,7 @@ watch(() => props.placeholder, () => {
 }
 
 .markdown-note-editor.variant-ghost :deep(.milkdown .ProseMirror) {
-  padding: 14px 20px 18px;
+  padding: var(--md-ghost-padding, 14px 20px 18px);
 }
 
 .markdown-note-editor :deep(.milkdown .ProseMirror h1),

@@ -36,7 +36,7 @@ tauri-plugin-global-shortcut = "2"
 winreg = "0.10"
 # WebDAV 密码与同步密码存 Windows 凭据管理器（其他平台仍存本地数据库）。
 keyring = { version = "3", features = ["windows-native"] }
-windows = { version = "0.52", features = ["UI_ViewManagement", "Win32_Graphics_Gdi"] }
+windows = { version = "0.52", features = ["UI_ViewManagement", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse"] }
 
 [features]
 # 开发时 `tauri dev` 会关掉 default features，便签等额外窗口才会走 Vite。

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::commands::{into_api, ApiResult};
+use crate::kinds::{ReminderAction, RepeatMode, TaskStatus, TaskType};
 use crate::models::RecurringTask;
 use crate::state::AppState;
 use crate::{holidays, recurrence, time};
@@ -44,8 +45,8 @@ pub fn create_recurring_task(
     let mut draft = RecurringTask {
         id: String::new(),
         description: payload.description.trim().to_string(),
-        task_type: "RECURRING".to_string(),
-        status: "PENDING".to_string(),
+        task_type: TaskType::Recurring,
+        status: TaskStatus::Pending,
         created_at: String::new(),
         completed_at: None,
         reminder_time: None,
@@ -57,9 +58,12 @@ pub fn create_recurring_task(
         is_paused: false,
         start_time: payload.start_time,
         end_time: payload.end_time,
+        // 界面提交不认识的模式时由 `sanitize_recurring_task` 报错，不会存库。
         repeat_mode: payload
             .repeat_mode
-            .unwrap_or_else(|| recurrence::REPEAT_MODE_INTERVAL_RANGE.to_string()),
+            .as_deref()
+            .map(RepeatMode::parse)
+            .unwrap_or(RepeatMode::IntervalRange),
         schedule_time: payload.schedule_time,
         schedule_weekday: payload.schedule_weekday,
         schedule_weekdays: payload.schedule_weekdays,
@@ -117,7 +121,11 @@ pub fn resume_recurring_task(state: State<AppState>, id: String) -> ApiResult<()
 pub fn delete_recurring_task(state: State<AppState>, id: String) -> ApiResult<()> {
     into_api(state.db.delete_recurring_task(&id))?;
     state.scheduler.cancel_recurring(&id);
-    into_api(state.scheduler.withdraw_notifications(&id, "DISMISSED"))?;
+    into_api(
+        state
+            .scheduler
+            .withdraw_notifications(&id, ReminderAction::Dismissed),
+    )?;
     into_api(state.sync.notify_local_change())?;
     Ok(())
 }
@@ -149,4 +157,15 @@ pub fn preview_recurring_triggers(
 #[tauri::command]
 pub fn get_holiday_years() -> Vec<i32> {
     holidays::covered_years()
+}
+
+/// 立即从项目仓库检查节假日数据更新（设置界面“立即检查”），网络请求放在后台线程。
+#[tauri::command]
+pub async fn check_holiday_updates(
+    app: tauri::AppHandle,
+) -> ApiResult<crate::holiday_update::HolidayCheckResult> {
+    let data_dir = crate::paths::resolve_data_dir(&app).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || crate::holiday_update::check_now(&app, &data_dir))
+        .await
+        .map_err(|e| e.to_string())?
 }

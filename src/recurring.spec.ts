@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatWorkdayHint,
+  formatYearRange,
+  isSupportedRecurringMode,
   buildRecurringPayload,
   createRecurringDraft,
   draftFromRecurringTask,
+  formatRecurringMode,
   formatRecurringRule,
   validateRecurringDraft,
   firstUncoveredHolidayYear,
@@ -93,5 +97,39 @@ describe("节假日数据覆盖提示", () => {
   it("新建表单按当前时间判断", () => {
     expect(workdayDraftWarning(years, new Date(2026, 8, 27))).toBeNull();
     expect(workdayDraftWarning(years, new Date(2026, 11, 20))).toContain("2027");
+  });
+});
+
+describe("formatYearRange", () => {
+  it("formats the covered years", () => {
+    expect(formatYearRange([])).toBe("暂无");
+    expect(formatYearRange([2026])).toBe("2026 年");
+    expect(formatYearRange([2027, 2025, 2026])).toBe("2025–2027 年");
+  });
+
+  it("is used by the workday hint", () => {
+    expect(formatWorkdayHint([2025, 2026])).toContain("已有 2025–2026 年安排");
+    expect(formatWorkdayHint([])).toContain("暂无节假日数据");
+  });
+});
+
+describe("unsupported recurring modes", () => {
+  // 来自更新版本设备的模式：后端原样保留，界面标为需升级。
+  const future = { ...base, repeatMode: "BIWEEKLY" } as unknown as RecurringTask;
+
+  it("detects modes this version does not know", () => {
+    expect(isSupportedRecurringMode("WORKDAY")).toBe(true);
+    expect(isSupportedRecurringMode("BIWEEKLY")).toBe(false);
+    expect(isSupportedRecurringMode(undefined)).toBe(false);
+  });
+
+  it("does not describe them as interval reminders", () => {
+    expect(formatRecurringMode("BIWEEKLY")).toBe("不支持的模式");
+    expect(formatRecurringMode("WORKDAY")).toBe("法定工作日");
+    expect(formatRecurringMode(null)).toBe("区间间隔");
+    expect(formatRecurringRule(future)).toBe("不支持的循环模式（BIWEEKLY），请升级应用");
+    expect(formatRecurringRule({ ...base, repeatMode: "INTERVAL_RANGE", startTime: "08:00", endTime: "18:00" })).toBe(
+      "每 45 分钟（08:00 - 18:00）"
+    );
   });
 });

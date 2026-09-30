@@ -5,6 +5,7 @@ import type {
   RecurringMode,
   ReminderRecord,
   StickyNote,
+  StickyNoteSummary,
   AppSettings,
   SyncStatus,
   NotificationPayload,
@@ -130,6 +131,14 @@ export const api = {
   async saveSettings(settings: AppSettings): Promise<void> {
     return invoke("save_settings", { settings });
   },
+  /** 便签管理列表：已打开或有内容的便签，附带窗口是否可见。 */
+  async listStickyNoteSummaries(): Promise<StickyNoteSummary[]> {
+    return invoke("list_sticky_note_summaries");
+  },
+  /** 显示已打开的便签并置前，不写库。 */
+  async showStickyNote(taskId: string): Promise<void> {
+    return invoke("show_sticky_note", { taskId });
+  },
   async getStickyNoteByWindowLabel(label: string): Promise<StickyNote | null> {
     return invoke("get_sticky_note_by_window_label", { label });
   },
@@ -196,6 +205,14 @@ export const api = {
   },
   async syncNow(reason: string): Promise<void> {
     return invoke("sync_now", { reason });
+  },
+  /** 立即检查节假日数据更新，返回是否有变化与已覆盖的年份。 */
+  async checkHolidayUpdates(): Promise<{ changed: boolean; years: number[] }> {
+    return invoke("check_holiday_updates");
+  },
+  /** 更换同步密码：用当前密码合并云端数据后以新密码加密上传，成功后才保存新密码。 */
+  async changeSyncPassphrase(currentPassphrase: string, newPassphrase: string): Promise<void> {
+    return invoke("change_sync_passphrase", { currentPassphrase, newPassphrase });
   },
   async setAutoStart(enabled: boolean): Promise<void> {
     return invoke("set_autostart", { enabled });

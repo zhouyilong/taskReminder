@@ -83,6 +83,21 @@
         </button>
         <span class="field-hint">托盘菜单也可以显示或隐藏全部便签</span>
       </div>
+      <div class="form-row compact">
+        <label>
+          <input type="checkbox" v-model="settingsDraft.holidayAutoUpdate" /> 自动更新节假日数据
+        </label>
+        <button class="button secondary" type="button" :disabled="holidayChecking" @click="handleCheckHolidays">
+          {{ holidayChecking ? "检查中…" : "立即检查" }}
+        </button>
+        <span class="field-hint" :class="{ 'is-error': holidayCheckError }">{{ holidayHint }}</span>
+      </div>
+      <div class="form-row compact">
+        <label>
+          <input type="checkbox" v-model="settingsDraft.stickySnapEnabled" /> 便签贴边吸附
+        </label>
+        <span class="field-hint">{{ stickySnapHint }}</span>
+      </div>
       <div v-if="quickAddShortcutError" class="form-row compact">
         <span class="field-hint is-error">{{ quickAddShortcutError }}</span>
       </div>
@@ -207,10 +222,12 @@
 import { computed, ref } from "vue";
 import Modal from "./Modal.vue";
 import { api } from "../api";
-import { formatDateTime } from "../format";
+import { errorMessage, formatDateTime } from "../format";
+import { formatYearRange } from "../recurring";
 import { formatQuietHoursHint } from "../quietHours";
 import { acceleratorFromEvent, formatAccelerator } from "../shortcut";
 import { formatVersionLabel, normalizeUpdateProxyUrl } from "../update";
+import { useAppData } from "../composables/useAppData";
 import { useSettings } from "../composables/useSettings";
 import { useUiPrefs } from "../composables/useUiPrefs";
 import { useUpdater } from "../composables/useUpdater";
@@ -250,6 +267,46 @@ type ShortcutField = "quickAdd" | "stickyToggle";
 const shortcutRecording = ref<ShortcutField | null>(null);
 const uiScalePercent = computed(() => Math.round(uiScale.value * 100));
 const windowOpacityPercent = computed(() => Math.round(windowOpacity.value * 100));
+// 节假日数据：显示已覆盖的年份与最近一次手动检查的结果。
+const { holidayYears, loadHolidayYears } = useAppData();
+const holidayChecking = ref(false);
+const holidayCheckMessage = ref("");
+const holidayCheckError = ref(false);
+const holidayHint = computed(() => {
+  if (holidayCheckMessage.value) {
+    return holidayCheckMessage.value;
+  }
+  return holidayYears.value.length
+    ? `已有 ${formatYearRange(holidayYears.value)}的法定节假日安排，每天从项目仓库检查一次`
+    : "暂无节假日数据，每天从项目仓库检查一次";
+});
+const handleCheckHolidays = async () => {
+  holidayChecking.value = true;
+  holidayCheckError.value = false;
+  try {
+    const result = await api.checkHolidayUpdates();
+    holidayYears.value = result.years;
+    holidayCheckMessage.value = result.changed
+      ? `已更新，现有 ${formatYearRange(result.years)}的节假日安排`
+      : `已是最新（${formatYearRange(result.years)}）`;
+  } catch (error) {
+    holidayCheckError.value = true;
+    holidayCheckMessage.value = `检查失败：${errorMessage(error)}`;
+    try {
+      await loadHolidayYears();
+    } catch {
+      // 忽略：只影响提示文案。
+    }
+  } finally {
+    holidayChecking.value = false;
+  }
+};
+
+// 吸附靠 Windows 的鼠标按键状态判断拖动结束，其他平台交给窗口管理器。
+const isWindows = typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
+const stickySnapHint = isWindows
+  ? "拖到屏幕边缘或其他便签旁时自动对齐，松开时按住 Alt 不吸附"
+  : "仅在 Windows 上生效";
 const quietHoursHint = computed(() =>
   formatQuietHoursHint(settingsDraft.quietHoursStart, settingsDraft.quietHoursEnd)
 );

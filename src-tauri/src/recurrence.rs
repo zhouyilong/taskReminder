@@ -5,15 +5,9 @@ use cron::Schedule;
 
 use crate::errors::AppError;
 use crate::holidays;
+use crate::kinds::RepeatMode;
 use crate::models::RecurringTask;
-
-pub const REPEAT_MODE_INTERVAL_RANGE: &str = "INTERVAL_RANGE";
-pub const REPEAT_MODE_DAILY: &str = "DAILY";
-pub const REPEAT_MODE_WEEKLY: &str = "WEEKLY";
-pub const REPEAT_MODE_MONTHLY: &str = "MONTHLY";
-pub const REPEAT_MODE_CRON: &str = "CRON";
-/// 中国法定工作日：跳过法定节假日，调休上班日照常提醒。
-pub const REPEAT_MODE_WORKDAY: &str = "WORKDAY";
+use crate::time;
 
 /// 每周多天的位掩码：周一 = bit0 … 周日 = bit6。
 pub const WEEKDAY_MASK_ALL: i64 = 0b111_1111;
@@ -39,23 +33,18 @@ pub fn weekday_mask(task: &RecurringTask) -> Option<i64> {
     }
 }
 
-pub fn normalize_repeat_mode(mode: &str) -> String {
-    match mode.trim().to_uppercase().as_str() {
-        REPEAT_MODE_DAILY => REPEAT_MODE_DAILY.to_string(),
-        REPEAT_MODE_WEEKLY => REPEAT_MODE_WEEKLY.to_string(),
-        REPEAT_MODE_MONTHLY => REPEAT_MODE_MONTHLY.to_string(),
-        REPEAT_MODE_CRON => REPEAT_MODE_CRON.to_string(),
-        REPEAT_MODE_WORKDAY => REPEAT_MODE_WORKDAY.to_string(),
-        "INTERVAL" | "INTERVAL-RANGE" | REPEAT_MODE_INTERVAL_RANGE => {
-            REPEAT_MODE_INTERVAL_RANGE.to_string()
-        }
-        _ => REPEAT_MODE_INTERVAL_RANGE.to_string(),
-    }
+/// 本版本不认识的循环模式（通常来自更新版本的设备）：不计算、不触发，也不改写。
+fn unsupported_mode(mode: &str) -> AppError {
+    AppError::Invalid(format!("此版本不支持的循环模式：{}，请升级应用", mode))
 }
 
 pub fn sanitize_recurring_task(task: &mut RecurringTask) -> Result<(), AppError> {
+    // 不认识的模式原样保留：先报错返回，不清理任何字段（新版本的模式可能用到它们）。
+    // 以前会回退成区间间隔并清掉其他字段，写回后经同步改坏新版本设备上的数据。
+    if let RepeatMode::Unknown(mode) = &task.repeat_mode {
+        return Err(unsupported_mode(mode));
+    }
     task.description = task.description.trim().to_string();
-    task.repeat_mode = normalize_repeat_mode(&task.repeat_mode);
     task.interval_minutes = task.interval_minutes.max(1);
     task.start_time = normalize_time_field(task.start_time.as_deref(), "开始时间")?;
     task.end_time = normalize_time_field(task.end_time.as_deref(), "结束时间")?;
@@ -70,15 +59,15 @@ pub fn sanitize_recurring_task(task: &mut RecurringTask) -> Result<(), AppError>
         }
     }
 
-    match task.repeat_mode.as_str() {
-        REPEAT_MODE_INTERVAL_RANGE => {
+    match &task.repeat_mode {
+        RepeatMode::IntervalRange => {
             task.schedule_time = None;
             task.schedule_weekday = None;
             task.schedule_weekdays = None;
             task.schedule_day = None;
             task.cron_expression = None;
         }
-        REPEAT_MODE_DAILY => {
+        RepeatMode::Daily => {
             if task.schedule_time.is_none() {
                 return Err(AppError::Invalid("每日模式需要设置触发时间".to_string()));
             }
@@ -89,7 +78,7 @@ pub fn sanitize_recurring_task(task: &mut RecurringTask) -> Result<(), AppError>
             task.schedule_day = None;
             task.cron_expression = None;
         }
-        REPEAT_MODE_WEEKLY => {
+        RepeatMode::Weekly => {
             if task.schedule_time.is_none() {
                 return Err(AppError::Invalid("每周模式需要设置触发时间".to_string()));
             }
@@ -114,7 +103,7 @@ pub fn sanitize_recurring_task(task: &mut RecurringTask) -> Result<(), AppError>
             task.schedule_day = None;
             task.cron_expression = None;
         }
-        REPEAT_MODE_MONTHLY => {
+        RepeatMode::Monthly => {
             if task.schedule_time.is_none() {
                 return Err(AppError::Invalid("每月模式需要设置触发时间".to_string()));
             }
@@ -132,7 +121,7 @@ pub fn sanitize_recurring_task(task: &mut RecurringTask) -> Result<(), AppError>
             task.schedule_weekdays = None;
             task.cron_expression = None;
         }
-        REPEAT_MODE_WORKDAY => {
+        RepeatMode::Workday => {
             if task.schedule_time.is_none() {
                 return Err(AppError::Invalid("工作日模式需要设置触发时间".to_string()));
             }
@@ -143,7 +132,7 @@ pub fn sanitize_recurring_task(task: &mut RecurringTask) -> Result<(), AppError>
             task.schedule_day = None;
             task.cron_expression = None;
         }
-        REPEAT_MODE_CRON => {
+        RepeatMode::Cron => {
             let expr = task
                 .cron_expression
                 .as_deref()
@@ -156,7 +145,7 @@ pub fn sanitize_recurring_task(task: &mut RecurringTask) -> Result<(), AppError>
             task.schedule_weekdays = None;
             task.schedule_day = None;
         }
-        _ => {}
+        RepeatMode::Unknown(mode) => return Err(unsupported_mode(mode)),
     }
     Ok(())
 }
@@ -168,17 +157,39 @@ pub fn compute_next_trigger(
     let mut normalized = task.clone();
     sanitize_recurring_task(&mut normalized)?;
 
-    let base = base.unwrap_or_else(|| Local::now().naive_local());
-    let next = match normalized.repeat_mode.as_str() {
-        REPEAT_MODE_INTERVAL_RANGE => compute_interval_next(&normalized, base)?,
-        REPEAT_MODE_DAILY => compute_daily_next(&normalized, base)?,
-        REPEAT_MODE_WEEKLY => compute_weekly_next(&normalized, base)?,
-        REPEAT_MODE_MONTHLY => compute_monthly_next(&normalized, base)?,
-        REPEAT_MODE_CRON => compute_cron_next(&normalized, base)?,
-        REPEAT_MODE_WORKDAY => compute_workday_next(&normalized, base)?,
-        _ => compute_interval_next(&normalized, base)?,
+    let base = base.unwrap_or_else(time::now);
+    let next = match &normalized.repeat_mode {
+        RepeatMode::IntervalRange => compute_interval_next(&normalized, base)?,
+        RepeatMode::Daily => compute_daily_next(&normalized, base)?,
+        RepeatMode::Weekly => compute_weekly_next(&normalized, base)?,
+        RepeatMode::Monthly => compute_monthly_next(&normalized, base)?,
+        RepeatMode::Cron => compute_cron_next(&normalized, base)?,
+        RepeatMode::Workday => compute_workday_next(&normalized, base)?,
+        RepeatMode::Unknown(mode) => return Err(unsupported_mode(mode)),
     };
-    Ok(next.format("%Y-%m-%dT%H:%M:%S").to_string())
+    Ok(time::format_datetime(&next))
+}
+
+/// 节假日数据更新后，“法定工作日”提醒的下次触发可能变化（例如新公布的调休上班日）。
+/// 返回需要改成的时间；不是运行中的法定工作日提醒、已经到点等待触发（交给巡检处理，
+/// 避免跳过一次提醒）或时间不变时返回 None。
+pub fn refreshed_workday_trigger(
+    task: &RecurringTask,
+    now: NaiveDateTime,
+) -> Result<Option<String>, AppError> {
+    if task.is_paused || task.deleted_at.is_some() || task.repeat_mode != RepeatMode::Workday {
+        return Ok(None);
+    }
+    let pending = time::parse_datetime_any(&task.next_trigger);
+    if pending.is_some_and(|scheduled| scheduled <= now) {
+        return Ok(None);
+    }
+    let next = compute_next_trigger(task, Some(now))?;
+    let unchanged = match (pending, time::parse_datetime_any(&next)) {
+        (Some(current), Some(recomputed)) => current == recomputed,
+        _ => next == task.next_trigger,
+    };
+    Ok(if unchanged { None } else { Some(next) })
 }
 
 /// 预估 `until`（含）之前的触发时间，用于“今天”视图展示即将到来的循环提醒。
@@ -191,16 +202,17 @@ pub fn upcoming_triggers(
     limit: usize,
 ) -> Result<Vec<String>, AppError> {
     let mut result = Vec::new();
-    if task.is_paused || limit == 0 {
+    // 不认识的模式本机不会触发，也不预估。
+    if task.is_paused || limit == 0 || !task.repeat_mode.is_known() {
         return Ok(result);
     }
-    let Some(mut current) = crate::time::parse_datetime_any(&task.next_trigger) else {
+    let Some(mut current) = time::parse_datetime_any(&task.next_trigger) else {
         return Ok(result);
     };
     while current <= until && result.len() < limit {
-        result.push(current.format("%Y-%m-%dT%H:%M:%S").to_string());
+        result.push(time::format_datetime(&current));
         let next = compute_next_trigger(task, Some(current))?;
-        match crate::time::parse_datetime_any(&next) {
+        match time::parse_datetime_any(&next) {
             Some(value) if value > current => current = value,
             _ => break,
         }
@@ -211,7 +223,7 @@ pub fn upcoming_triggers(
 pub fn should_trigger_now(task: &RecurringTask, now: NaiveDateTime) -> Result<bool, AppError> {
     let mut normalized = task.clone();
     sanitize_recurring_task(&mut normalized)?;
-    if normalized.repeat_mode != REPEAT_MODE_INTERVAL_RANGE {
+    if normalized.repeat_mode != RepeatMode::IntervalRange {
         return Ok(true);
     }
     let now_time = now.time();
@@ -489,7 +501,7 @@ fn normalize_time_field(value: Option<&str>, field: &str) -> Result<Option<Strin
     }
     let parsed = parse_time(trimmed)
         .map_err(|_| AppError::Invalid(format!("{}格式错误，应为 HH:mm，例如 08:30", field)))?;
-    Ok(Some(parsed.format("%H:%M").to_string()))
+    Ok(Some(time::format_clock(&parsed)))
 }
 
 fn normalize_text(value: Option<&str>) -> Option<String> {
@@ -504,7 +516,7 @@ fn normalize_text(value: Option<&str>) -> Option<String> {
 }
 
 fn parse_time(value: &str) -> Result<NaiveTime, AppError> {
-    NaiveTime::parse_from_str(value, "%H:%M").map_err(|e| AppError::Invalid(e.to_string()))
+    time::parse_clock(value).ok_or_else(|| AppError::Invalid(format!("无法解析时间: {}", value)))
 }
 
 fn month_datetime(
@@ -550,17 +562,18 @@ fn minute_of_day(time: NaiveTime) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kinds::{TaskStatus, TaskType};
 
     fn dt(value: &str) -> NaiveDateTime {
-        NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M").unwrap()
+        time::parse_datetime_any(value).unwrap()
     }
 
-    fn task(mode: &str) -> RecurringTask {
+    fn task(mode: RepeatMode) -> RecurringTask {
         RecurringTask {
             id: "t".to_string(),
             description: "test".to_string(),
-            task_type: "RECURRING".to_string(),
-            status: "PENDING".to_string(),
+            task_type: TaskType::Recurring,
+            status: TaskStatus::Pending,
             created_at: "2026-01-01T00:00:00".to_string(),
             completed_at: None,
             reminder_time: None,
@@ -572,7 +585,7 @@ mod tests {
             is_paused: false,
             start_time: None,
             end_time: None,
-            repeat_mode: mode.to_string(),
+            repeat_mode: mode,
             schedule_time: Some("09:00".to_string()),
             schedule_weekday: None,
             schedule_weekdays: None,
@@ -587,7 +600,7 @@ mod tests {
 
     #[test]
     fn weekly_multiple_days() {
-        let mut t = task(REPEAT_MODE_WEEKLY);
+        let mut t = task(RepeatMode::Weekly);
         // 周一、三、五
         t.schedule_weekdays = Some(weekday_bit(1) | weekday_bit(3) | weekday_bit(5));
         // 2026-09-21 为周一
@@ -598,7 +611,7 @@ mod tests {
 
     #[test]
     fn weekly_legacy_single_weekday_still_works() {
-        let mut t = task(REPEAT_MODE_WEEKLY);
+        let mut t = task(RepeatMode::Weekly);
         t.schedule_weekday = Some(7); // 周日
         assert_eq!(next(&t, "2026-09-21T08:00"), "2026-09-27T09:00:00");
         sanitize_recurring_task(&mut t).unwrap();
@@ -607,7 +620,7 @@ mod tests {
 
     #[test]
     fn weekly_sanitize_keeps_first_day_for_old_clients() {
-        let mut t = task(REPEAT_MODE_WEEKLY);
+        let mut t = task(RepeatMode::Weekly);
         t.schedule_weekday = Some(1);
         t.schedule_weekdays = Some(weekday_bit(3) | weekday_bit(6));
         sanitize_recurring_task(&mut t).unwrap();
@@ -617,7 +630,7 @@ mod tests {
 
     #[test]
     fn weekly_requires_a_day() {
-        let mut t = task(REPEAT_MODE_WEEKLY);
+        let mut t = task(RepeatMode::Weekly);
         t.schedule_weekdays = Some(0);
         assert!(sanitize_recurring_task(&mut t).is_err());
         t.schedule_weekdays = Some(1 << 7);
@@ -626,7 +639,7 @@ mod tests {
 
     #[test]
     fn other_modes_clear_weekday_mask() {
-        let mut t = task(REPEAT_MODE_DAILY);
+        let mut t = task(RepeatMode::Daily);
         t.schedule_weekdays = Some(WEEKDAY_MASK_ALL);
         sanitize_recurring_task(&mut t).unwrap();
         assert_eq!(t.schedule_weekdays, None);
@@ -634,7 +647,7 @@ mod tests {
 
     #[test]
     fn workday_skips_holidays_and_includes_makeup_days() {
-        let t = task(REPEAT_MODE_WORKDAY);
+        let t = task(RepeatMode::Workday);
         // 2026-09-18（周五）之后：19 日周六、20 日周日调休上班。
         assert_eq!(next(&t, "2026-09-18T10:00"), "2026-09-20T09:00:00");
         // 9 月 24 日（周四）之后：25–27 中秋放假，28 日（周一）上班。
@@ -646,16 +659,81 @@ mod tests {
     }
 
     #[test]
+    fn refreshed_workday_trigger_picks_up_new_holiday_data() {
+        let mut t = task(RepeatMode::Workday);
+        // 按没有节假日数据时算出的下次触发：10 月 9 日之后为 10 月 12 日（周一）。
+        // 有了数据后，10 日周六调休上班，应改到 10 日。
+        t.next_trigger = "2026-10-12T09:00:00".to_string();
+        assert_eq!(
+            refreshed_workday_trigger(&t, dt("2026-10-09T10:00")).unwrap(),
+            Some("2026-10-10T09:00:00".to_string())
+        );
+        // 已是正确时间：不改，避免产生同步改动。
+        t.next_trigger = "2026-10-10T09:00:00".to_string();
+        assert_eq!(
+            refreshed_workday_trigger(&t, dt("2026-10-09T10:00")).unwrap(),
+            None
+        );
+        // 已经到点、等待巡检触发：不改，免得跳过这次提醒。
+        t.next_trigger = "2026-10-09T09:00:00".to_string();
+        assert_eq!(
+            refreshed_workday_trigger(&t, dt("2026-10-09T10:00")).unwrap(),
+            None
+        );
+        // 暂停的、其他模式的不处理。
+        t.next_trigger = "2026-10-12T09:00:00".to_string();
+        t.is_paused = true;
+        assert_eq!(
+            refreshed_workday_trigger(&t, dt("2026-10-09T10:00")).unwrap(),
+            None
+        );
+        let mut daily = task(RepeatMode::Daily);
+        daily.next_trigger = "2026-10-12T09:00:00".to_string();
+        assert_eq!(
+            refreshed_workday_trigger(&daily, dt("2026-10-09T10:00")).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn unknown_mode_is_rejected_without_touching_the_task() {
+        // 例如 v2.1 新增的模式经同步来到本机：以前会被改成区间间隔、清掉其他字段并写回。
+        let mut t = task(RepeatMode::Unknown("BIWEEKLY".to_string()));
+        t.schedule_time = Some("09:00".to_string());
+        t.schedule_weekdays = Some(0b1);
+        t.cron_expression = Some("custom".to_string());
+        t.next_trigger = "2026-10-12T09:00:00".to_string();
+        let before = serde_json::to_string(&t).unwrap();
+
+        let mut sanitized = t.clone();
+        let err = sanitize_recurring_task(&mut sanitized)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("BIWEEKLY") && err.contains("升级"), "{}", err);
+        assert_eq!(serde_json::to_string(&sanitized).unwrap(), before);
+
+        assert!(compute_next_trigger(&t, Some(dt("2026-10-09T10:00"))).is_err());
+        assert!(should_trigger_now(&t, dt("2026-10-09T10:00")).is_err());
+        assert!(upcoming_triggers(&t, dt("2026-12-31T00:00"), 10)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            refreshed_workday_trigger(&t, dt("2026-10-09T10:00")).unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn workday_mode_is_normalized_and_requires_time() {
-        assert_eq!(normalize_repeat_mode("workday"), REPEAT_MODE_WORKDAY);
-        let mut t = task(REPEAT_MODE_WORKDAY);
+        assert_eq!(RepeatMode::parse("workday"), RepeatMode::Workday);
+        let mut t = task(RepeatMode::Workday);
         t.schedule_time = None;
         assert!(sanitize_recurring_task(&mut t).is_err());
     }
 
     #[test]
     fn upcoming_triggers_until_end_of_day() {
-        let mut t = task(REPEAT_MODE_INTERVAL_RANGE);
+        let mut t = task(RepeatMode::IntervalRange);
         t.interval_minutes = 120;
         t.start_time = Some("08:00".to_string());
         t.end_time = Some("17:00".to_string());
@@ -676,7 +754,7 @@ mod tests {
             2
         );
 
-        let mut daily = task(REPEAT_MODE_DAILY);
+        let mut daily = task(RepeatMode::Daily);
         daily.next_trigger = "2026-09-22T09:00:00".to_string();
         assert!(upcoming_triggers(&daily, dt("2026-09-21T23:59"), 10)
             .unwrap()
@@ -690,14 +768,14 @@ mod tests {
 
     #[test]
     fn monthly_clamps_to_month_end() {
-        let mut t = task(REPEAT_MODE_MONTHLY);
+        let mut t = task(RepeatMode::Monthly);
         t.schedule_day = Some(31);
         assert_eq!(next(&t, "2026-02-10T10:00"), "2026-02-28T09:00:00");
         assert_eq!(next(&t, "2026-02-28T10:00"), "2026-03-31T09:00:00");
     }
 
     fn cron(expr: &str) -> RecurringTask {
-        let mut t = task(REPEAT_MODE_CRON);
+        let mut t = task(RepeatMode::Cron);
         t.schedule_time = None;
         t.cron_expression = Some(expr.to_string());
         t
@@ -827,7 +905,7 @@ mod tests {
             assert!(sanitize_recurring_task(&mut t).is_err(), "{expr:?}");
         }
         // 缺少表达式。
-        let mut t = task(REPEAT_MODE_CRON);
+        let mut t = task(RepeatMode::Cron);
         t.cron_expression = None;
         assert!(sanitize_recurring_task(&mut t).is_err());
         // 没有未来触发时间。

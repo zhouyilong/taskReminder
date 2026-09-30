@@ -74,6 +74,11 @@ export interface StickyNote {
   reminderTime?: string | null;
 }
 
+/** 便签管理列表的一行：便签加上窗口此刻是否可见。 */
+export interface StickyNoteSummary extends StickyNote {
+  visible: boolean;
+}
+
 export interface AppSettings {
   autoStartEnabled: boolean;
   soundEnabled: boolean;
@@ -113,6 +118,10 @@ export interface AppSettings {
   nativeNotificationEnabled: boolean;
   /** 显示/隐藏全部便签的全局快捷键，为空表示不启用。 */
   stickyToggleShortcut: string;
+  /** 拖动便签后贴边吸附（屏幕边缘与其他便签，仅 Windows）。 */
+  stickySnapEnabled: boolean;
+  /** 每天从项目仓库检查节假日数据更新（本机设置）。 */
+  holidayAutoUpdate: boolean;
   /** 密码存放位置（只读）：keyring 为 Windows 凭据管理器，db 为本机数据库。 */
   secretStorage?: "db" | "keyring" | string;
 }

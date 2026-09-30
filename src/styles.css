@@ -50,6 +50,19 @@
   --radius-sm: 10px;
   --radius-xs: 8px;
   --sticky-note-opacity: 0.95;
+  /* 桌面便签 */
+  --sticky-paper-top: #1b2436;
+  --sticky-paper-bottom: #151d2c;
+  --sticky-border: rgba(148, 170, 214, 0.16);
+  --sticky-highlight: rgba(255, 255, 255, 0.04);
+  --sticky-accent: rgba(245, 165, 36, 0.7);
+  --sticky-divider: rgba(148, 170, 214, 0.08);
+  --sticky-control-hover: rgba(148, 170, 214, 0.12);
+  --sticky-scrollbar: rgba(148, 170, 214, 0.22);
+  --sticky-title: var(--text-title);
+  --sticky-text: var(--text-base);
+  --sticky-text-muted: var(--text-muted);
+  --sticky-text-faint: var(--text-faint);
   --font-sans: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", "Source Han Sans SC", "Noto Sans SC", sans-serif;
   font-family: var(--font-sans);
 }
@@ -111,12 +124,7 @@ body.sticky-note-mode {
 
 html.sticky-note-mode.is-linux,
 body.sticky-note-mode.is-linux {
-  background: #131318 !important;
-}
-
-html.sticky-note-mode.is-linux.light-theme,
-body.sticky-note-mode.is-linux.light-theme {
-  background: #ffffff !important;
+  background: var(--sticky-paper-bottom) !important;
 }
 
 body.sticky-note-mode {
@@ -138,11 +146,7 @@ body.sticky-note-mode {
 }
 
 html.sticky-note-mode.is-linux #sticky-note-item {
-  background: #131318;
-}
-
-html.sticky-note-mode.is-linux.light-theme #sticky-note-item {
-  background: #ffffff;
+  background: var(--sticky-paper-bottom);
 }
 
 .app {
@@ -1334,6 +1338,7 @@ label:has(> input[type="checkbox"]) {
   color: var(--success-text);
 }
 
+.status-pill.is-unsupported,
 .status-pill.action-snoozed {
   background: var(--warning-soft);
   color: var(--warning-text);
@@ -2733,6 +2738,7 @@ input[type="range"].settings-range {
   pointer-events: none;
 }
 
+/* ---- 桌面便签（每张便签一个窗口，窗口大小即便签大小） ---- */
 .paper-note {
   position: relative;
   width: 100%;
@@ -2740,15 +2746,16 @@ input[type="range"].settings-range {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(172deg, #17171b 0%, #131318 54%, #101016 100%);
-  border: 1px solid #2a2a2e;
-  border-radius: 20px;
+  background: linear-gradient(180deg, var(--sticky-paper-top) 0%, var(--sticky-paper-bottom) 100%);
+  border: 1px solid var(--sticky-border);
+  border-radius: 14px;
+  /* 窗口与便签等大，外阴影会被裁掉，只保留顶部的一道高光和便签色的顶边。 */
   box-shadow:
-    0 16px 30px rgba(0, 0, 0, 0.42),
-    11px 12px 0 -7px rgba(10, 10, 14, 0.72),
-    12px 22px 28px -14px rgba(0, 0, 0, 0.56);
+    inset 0 3px 0 var(--sticky-accent),
+    inset 0 4px 0 var(--sticky-highlight);
+  color: var(--sticky-text);
   overflow: hidden;
-  transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+  transition: background-color 0.3s ease, border-color 0.3s ease;
   font-family: var(--font-sans);
 }
 
@@ -2768,7 +2775,7 @@ input[type="range"].settings-range {
 
 html.sticky-note-mode.is-linux .paper-note {
   border-radius: 0;
-  box-shadow: none;
+  border: none;
 }
 
 .sticky-item-loading {
@@ -2777,17 +2784,18 @@ html.sticky-note-mode.is-linux .paper-note {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-muted);
+  color: var(--sticky-text-faint);
   font-size: 13px;
 }
 
 .paper-note-header {
-  height: calc(56px * var(--sticky-ui-scale));
-  padding: 0 calc(14px * var(--sticky-ui-scale)) 0 calc(20px * var(--sticky-ui-scale));
+  position: relative;
+  height: calc(44px * var(--sticky-ui-scale));
+  flex-shrink: 0;
+  padding: calc(3px * var(--sticky-ui-scale)) calc(8px * var(--sticky-ui-scale)) 0 calc(16px * var(--sticky-ui-scale));
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   background: transparent;
   user-select: none;
   -webkit-app-region: drag;
@@ -2808,27 +2816,42 @@ html.sticky-note-mode.is-linux .paper-note {
   min-width: 0;
   border: none;
   background: transparent;
-  color: #fafaf9;
+  color: var(--sticky-title);
   font-family: var(--font-sans);
-  font-size: calc(18px * var(--sticky-ui-scale));
-  font-weight: 700;
-  letter-spacing: 0.3px;
+  font-size: calc(15px * var(--sticky-ui-scale));
+  font-weight: 650;
+  letter-spacing: 0.2px;
   outline: none;
   padding: 0;
-  margin-right: calc(12px * var(--sticky-ui-scale));
+  text-overflow: ellipsis;
   -webkit-app-region: no-drag;
+}
+
+/* 锚定后图钉常驻，标题给按钮组让出位置。 */
+.paper-note-header-pinned .paper-note-title-input {
+  margin-right: calc(116px * var(--sticky-ui-scale));
 }
 
 .paper-note-title-input::placeholder {
-  color: #4a4a50;
+  color: var(--sticky-text-faint);
 }
 
+/* 按钮组浮在标题栏右端，平时不占标题宽度；出现时用纸张底色渐隐盖住标题末尾。 */
 .paper-note-actions {
+  position: absolute;
+  top: calc(50% + 1.5px * var(--sticky-ui-scale));
+  right: calc(8px * var(--sticky-ui-scale));
+  transform: translateY(-50%);
+  padding-left: calc(16px * var(--sticky-ui-scale));
   display: flex;
   align-items: center;
-  gap: calc(4px * var(--sticky-ui-scale));
-  flex-shrink: 0;
+  gap: calc(2px * var(--sticky-ui-scale));
   -webkit-app-region: no-drag;
+}
+
+.paper-note:hover .paper-note-actions,
+.paper-note:focus-within .paper-note-actions {
+  background: linear-gradient(90deg, transparent, var(--sticky-paper-top) calc(16px * var(--sticky-ui-scale)));
 }
 
 .paper-note-action,
@@ -2841,55 +2864,68 @@ html.sticky-note-mode.is-linux .paper-note {
   justify-content: center;
   border: none;
   background: transparent;
-  color: #8e8e93;
-  border-radius: calc(6px * var(--sticky-ui-scale));
+  color: var(--sticky-text-muted);
+  border-radius: calc(7px * var(--sticky-ui-scale));
   cursor: pointer;
-  transition: all 0.2s ease;
+  /* 按钮平时隐藏，悬停或编辑便签时出现；已锚定的图钉常驻，提示便签被锁定。 */
+  opacity: 0;
+  transition: opacity 0.16s ease, background-color 0.16s ease, color 0.16s ease;
+}
+
+.paper-note:hover .paper-note-action,
+.paper-note:hover .paper-note-close,
+.paper-note:focus-within .paper-note-action,
+.paper-note:focus-within .paper-note-close,
+.paper-note-action:focus-visible,
+.paper-note-close:focus-visible,
+.paper-note-action.pin.active {
+  opacity: 1;
+}
+
+.paper-note-action:focus-visible,
+.paper-note-close:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
 }
 
 .paper-note-action svg,
 .paper-note-close svg {
-  width: calc(16px * var(--sticky-ui-scale));
-  height: calc(16px * var(--sticky-ui-scale));
+  width: calc(15px * var(--sticky-ui-scale));
+  height: calc(15px * var(--sticky-ui-scale));
   stroke-width: 1.8;
 }
 
-.paper-note-action.pin {
-  color: #8c8d93;
-}
-
 .pin-icon-pencil {
-  width: calc(17px * var(--sticky-ui-scale));
-  height: calc(17px * var(--sticky-ui-scale));
+  width: calc(15px * var(--sticky-ui-scale));
+  height: calc(15px * var(--sticky-ui-scale));
   overflow: visible;
   transform-origin: center;
-  transition: transform 0.2s ease, filter 0.2s ease;
+  transition: transform 0.2s ease;
 }
 
 .paper-note-action.pin.active .pin-icon-pencil {
   transform: rotate(-45deg);
-  filter: drop-shadow(0 0 1px rgba(99, 102, 241, 0.55));
 }
 
 .paper-note-action:hover,
 .paper-note-close:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fafaf9;
+  background: var(--sticky-control-hover);
+  color: var(--sticky-title);
 }
 
 .paper-note-action.active {
-  color: #6366f1;
-  background: rgba(99, 102, 241, 0.1);
+  color: var(--primary-text);
+  background: var(--primary-soft);
 }
 
 .paper-note-action.complete:hover {
-  color: #32d583;
-  background: rgba(50, 213, 131, 0.1);
+  color: var(--success-text);
+  background: var(--success-soft);
 }
 
 .paper-note-close:hover {
-  color: #e85a4f;
-  background: rgba(232, 90, 79, 0.1);
+  color: var(--danger-text);
+  background: var(--danger-soft);
 }
 
 .paper-note-editor {
@@ -2897,9 +2933,9 @@ html.sticky-note-mode.is-linux .paper-note {
   min-height: 0;
   border: none;
   background: transparent;
-  padding: calc(16px * var(--sticky-ui-scale)) calc(20px * var(--sticky-ui-scale));
-  color: #fafaf9;
-  font-size: calc(15px * var(--sticky-ui-scale));
+  padding: 0;
+  color: var(--sticky-text);
+  font-size: calc(14px * var(--sticky-ui-scale));
   line-height: 1.6;
   resize: none;
   outline: none;
@@ -2915,9 +2951,8 @@ html.sticky-note-mode.is-linux .paper-note {
   height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
-  scrollbar-gutter: stable;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  scrollbar-color: var(--sticky-scrollbar) transparent;
 }
 
 .paper-note-editor-host .milkdown,
@@ -2925,8 +2960,86 @@ html.sticky-note-mode.is-linux .paper-note {
   min-height: 100%;
 }
 
-.paper-note-editor::placeholder {
-  color: #4a4a50;
+/* 便签里的排版比正文编辑器紧凑：Crepe 默认标题 36–42px、段落 16px。 */
+.paper-note-editor-host {
+  --md-ghost-padding: calc(2px * var(--sticky-ui-scale)) calc(16px * var(--sticky-ui-scale)) calc(12px * var(--sticky-ui-scale));
+}
+
+.paper-note-editor-host .milkdown .ProseMirror {
+  color: var(--sticky-text);
+}
+
+.paper-note-editor-host .milkdown .ProseMirror p {
+  font-size: calc(14px * var(--sticky-ui-scale));
+  line-height: 1.6;
+  padding: calc(2px * var(--sticky-ui-scale)) 0;
+}
+
+.paper-note-editor-host .milkdown .ProseMirror h1,
+.paper-note-editor-host .milkdown .ProseMirror h2,
+.paper-note-editor-host .milkdown .ProseMirror h3,
+.paper-note-editor-host .milkdown .ProseMirror h4,
+.paper-note-editor-host .milkdown .ProseMirror h5,
+.paper-note-editor-host .milkdown .ProseMirror h6 {
+  color: var(--sticky-title);
+  font-weight: 650;
+  line-height: 1.4;
+  margin-top: calc(10px * var(--sticky-ui-scale));
+  padding: calc(2px * var(--sticky-ui-scale)) 0;
+}
+
+.paper-note-editor-host .milkdown .ProseMirror > :first-child,
+.paper-note-editor-host .milkdown .ProseMirror > .ProseMirror-widget:first-child + * {
+  margin-top: 0;
+}
+
+.paper-note-editor-host .milkdown .ProseMirror h1 {
+  font-size: calc(18px * var(--sticky-ui-scale));
+}
+
+.paper-note-editor-host .milkdown .ProseMirror h2 {
+  font-size: calc(16px * var(--sticky-ui-scale));
+}
+
+.paper-note-editor-host .milkdown .ProseMirror h3 {
+  font-size: calc(15px * var(--sticky-ui-scale));
+}
+
+.paper-note-editor-host .milkdown .ProseMirror h4,
+.paper-note-editor-host .milkdown .ProseMirror h5,
+.paper-note-editor-host .milkdown .ProseMirror h6 {
+  font-size: calc(14px * var(--sticky-ui-scale));
+}
+
+.paper-note-editor-host .milkdown .milkdown-list-item-block li {
+  gap: calc(6px * var(--sticky-ui-scale));
+}
+
+.paper-note-editor-host .milkdown .milkdown-list-item-block li .label-wrapper,
+.paper-note-editor-host .milkdown .milkdown-list-item-block li .label-wrapper .label {
+  height: calc(26px * var(--sticky-ui-scale));
+  width: calc(18px * var(--sticky-ui-scale));
+}
+
+.paper-note-editor-host .milkdown .milkdown-list-item-block li .label-wrapper .label {
+  padding: calc(3px * var(--sticky-ui-scale)) 0;
+}
+
+.paper-note-editor-host .milkdown .milkdown-list-item-block li .label-wrapper svg {
+  width: calc(18px * var(--sticky-ui-scale));
+  height: calc(18px * var(--sticky-ui-scale));
+}
+
+/* 已勾选的待办项淡化并加删除线。 */
+.paper-note-editor-host .milkdown .milkdown-list-item-block li:has(> .label-wrapper .label.checked) > .children {
+  color: var(--sticky-text-muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--sticky-text-faint);
+}
+
+.paper-note-editor::placeholder,
+.paper-note-editor-host .milkdown .crepe-placeholder::before {
+  color: var(--sticky-text-faint);
 }
 
 .paper-note-editor-host .markdown-note-editor-root::-webkit-scrollbar {
@@ -2934,7 +3047,7 @@ html.sticky-note-mode.is-linux .paper-note {
 }
 
 .paper-note-editor-host .markdown-note-editor-root::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--sticky-scrollbar);
   border-radius: 10px;
 }
 
@@ -2943,20 +3056,21 @@ html.sticky-note-mode.is-linux .paper-note {
 }
 
 .paper-note-footer {
-  height: calc(48px * var(--sticky-ui-scale));
+  height: calc(34px * var(--sticky-ui-scale));
   flex-shrink: 0;
   box-sizing: border-box;
-  padding: 0 calc(20px * var(--sticky-ui-scale));
+  padding: 0 calc(10px * var(--sticky-ui-scale)) 0 calc(16px * var(--sticky-ui-scale));
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  gap: calc(8px * var(--sticky-ui-scale));
+  border-top: 1px solid var(--sticky-divider);
 }
 
 .paper-note-footer-right {
   display: flex;
   align-items: center;
-  gap: calc(8px * var(--sticky-ui-scale));
+  gap: calc(6px * var(--sticky-ui-scale));
   flex-shrink: 0;
   min-width: 0;
 }
@@ -2982,9 +3096,10 @@ html.sticky-note-mode.is-linux .paper-note {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
-  color: #6b6b70;
+  font-size: calc(11px * var(--sticky-ui-scale));
+  color: var(--sticky-text-faint);
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
   font-family: var(--font-sans);
 }
 
@@ -3002,15 +3117,17 @@ html.sticky-note-mode.is-linux .paper-note {
   display: inline-flex;
   align-items: center;
   gap: calc(4px * var(--sticky-ui-scale));
-  height: calc(24px * var(--sticky-ui-scale));
-  padding: 0 calc(6px * var(--sticky-ui-scale));
+  height: calc(22px * var(--sticky-ui-scale));
+  padding: 0 calc(8px * var(--sticky-ui-scale));
   border: none;
   border-radius: 999px;
   background: transparent;
-  color: #6b6b70;
+  color: var(--sticky-text-muted);
   font-size: calc(12px * var(--sticky-ui-scale));
+  font-variant-numeric: tabular-nums;
   font-family: var(--font-sans);
   cursor: pointer;
+  transition: background-color 0.16s ease, color 0.16s ease;
 }
 
 .paper-note-reminder-trigger span {
@@ -3025,21 +3142,41 @@ html.sticky-note-mode.is-linux .paper-note {
 }
 
 .paper-note-reminder-clear {
-  padding: 0 calc(4px * var(--sticky-ui-scale));
+  width: calc(22px * var(--sticky-ui-scale));
+  padding: 0;
+  justify-content: center;
+  opacity: 0;
+}
+
+.paper-note:hover .paper-note-reminder-clear,
+.paper-note-reminder-clear:focus-visible {
+  opacity: 1;
+}
+
+/* 没有提醒时只在悬停时显示“提醒”入口，平时页脚只剩创建时间。 */
+.paper-note-reminder-trigger:not(.is-upcoming):not(.is-past) {
+  opacity: 0;
+}
+
+.paper-note:hover .paper-note-reminder-trigger,
+.paper-note-reminder-trigger:focus-visible {
+  opacity: 1;
 }
 
 .paper-note-reminder-trigger.is-upcoming {
-  color: #e8a04f;
+  color: var(--warning-text);
+  background: var(--warning-soft);
 }
 
 .paper-note-reminder-trigger.is-past {
-  color: #8a8a90;
+  color: var(--sticky-text-faint);
+  text-decoration: line-through;
 }
 
 .paper-note-reminder-trigger:hover,
 .paper-note-reminder-clear:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fafaf9;
+  background: var(--sticky-control-hover);
+  color: var(--sticky-title);
 }
 
 .paper-note-reminder-input {
@@ -3053,91 +3190,16 @@ html.sticky-note-mode.is-linux .paper-note {
 }
 
 .paper-note-save-hint {
-  font-size: 12px;
-  color: #6b6b70;
-  font-style: italic;
+  font-size: calc(11px * var(--sticky-ui-scale));
+  color: var(--sticky-text-faint);
   font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .paper-note-save-countdown {
-  color: #e85a4f;
+  color: var(--sticky-text-muted);
   font-weight: 600;
-}
-
-.light-theme .paper-note {
-  background: #ffffff;
-  border-color: #e4e4e7;
-  box-shadow:
-    0 12px 24px rgba(0, 0, 0, 0.08),
-    8px 10px 0 -6px rgba(226, 230, 238, 0.96),
-    8px 18px 20px -14px rgba(0, 0, 0, 0.14);
-}
-
-.light-theme .paper-note-header {
-  border-bottom-color: #f4f4f5;
-}
-
-.light-theme .paper-note-title-input {
-  color: #18181b;
-}
-
-.light-theme .paper-note-title-input::placeholder {
-  color: #a1a1aa;
-}
-
-.light-theme .paper-note-action,
-.light-theme .paper-note-close {
-  color: #71717a;
-}
-
-.light-theme .paper-note-action:hover,
-.light-theme .paper-note-close:hover {
-  background: #f4f4f5;
-  color: #18181b;
-}
-
-.light-theme .paper-note-editor {
-  color: #18181b;
-}
-
-.light-theme .paper-note-editor-host .markdown-note-editor-root {
-  scrollbar-color: rgba(24, 24, 27, 0.18) transparent;
-}
-
-.light-theme .paper-note-editor::placeholder {
-  color: #d4d4d8;
-}
-
-.light-theme .paper-note-editor-host .markdown-note-editor-root::-webkit-scrollbar-thumb {
-  background: rgba(24, 24, 27, 0.18);
-}
-
-.light-theme .paper-note-footer {
-  border-top-color: #f4f4f5;
-}
-
-.light-theme .paper-note-time,
-.light-theme .paper-note-save-hint {
-  color: #71717a;
-}
-
-.light-theme .paper-note-reminder-trigger,
-.light-theme .paper-note-reminder-clear {
-  color: #71717a;
-}
-
-.light-theme .paper-note-reminder-trigger.is-upcoming {
-  color: #b7791f;
-}
-
-.light-theme .paper-note-reminder-trigger.is-past {
-  color: #a1a1aa;
-}
-
-.light-theme .paper-note-reminder-trigger:hover,
-.light-theme .paper-note-reminder-clear:hover {
-  background: #f4f4f5;
-  color: #18181b;
 }
 
 @media (max-width: 980px) {
@@ -3259,6 +3321,19 @@ html.sticky-note-mode.is-linux .paper-note {
   --focus-ring: rgba(59, 108, 246, 0.2);
   --shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.04), 0 4px 14px rgba(16, 24, 40, 0.04);
   --shadow-float: 0 24px 48px rgba(16, 24, 40, 0.16);
+  /* 桌面便签：暖色纸张 */
+  --sticky-paper-top: #fffdf7;
+  --sticky-paper-bottom: #fcf7ea;
+  --sticky-border: #e9e0ca;
+  --sticky-highlight: rgba(255, 255, 255, 0.85);
+  --sticky-accent: #f2b441;
+  --sticky-divider: rgba(120, 100, 60, 0.12);
+  --sticky-control-hover: rgba(120, 100, 60, 0.09);
+  --sticky-scrollbar: rgba(120, 100, 60, 0.26);
+  --sticky-title: #2a2519;
+  --sticky-text: #3a3427;
+  --sticky-text-muted: #6b6456;
+  --sticky-text-faint: #8f8778;
 }
 
 .light-theme .select {
@@ -3908,6 +3983,81 @@ html.sticky-note-mode.is-linux .paper-note {
 
 .trash-table .col-trash-actions {
   width: 176px;
+}
+
+/* 便签管理列表 */
+.sticky-search {
+  flex: 1;
+  min-width: 220px;
+  margin-bottom: 0;
+}
+
+.sticky-search .input {
+  height: 34px;
+  box-shadow: none;
+}
+
+/* 固定列尽量窄，把宽度留给内容预览。 */
+.sticky-table .col-sticky-state {
+  width: 72px;
+}
+
+.sticky-table .col-desc {
+  width: 20%;
+}
+
+.sticky-table .col-note {
+  width: auto;
+}
+
+.sticky-table .col-sticky-reminder {
+  width: 104px;
+}
+
+.sticky-table .col-datetime {
+  width: 92px;
+}
+
+.sticky-table .col-sticky-actions {
+  width: 116px;
+}
+
+.status-pill.sticky-showing {
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+
+.status-pill.sticky-hidden {
+  background: var(--warning-soft);
+  color: var(--warning-text);
+}
+
+/* 标题可点击：显示/打开便签。外观保持为普通的加粗标题。 */
+.sticky-title-link {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sticky-title-link:hover:not(:disabled) {
+  color: var(--primary-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.sticky-title-link:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .row-actions {

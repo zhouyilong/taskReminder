@@ -1,5 +1,8 @@
 //! 便签窗口管理：窗口标签编码、创建与显示、层级（置顶/桌面层）、UI 状态注入与窗口事件。
 
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
 use serde::Serialize;
 use tauri::{
     Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
@@ -9,6 +12,7 @@ use crate::db::DbManager;
 use crate::errors::AppError;
 use crate::models::{StickyNote, UiStatePayload};
 use crate::state::AppState;
+use crate::windows::placement::{self, Rect};
 
 pub const STICKY_NOTE_ITEM_PREFIX: &str = "sticky-note-item-";
 const STICKY_NOTE_ITEM_WIDTH: f64 = 284.0;
@@ -77,6 +81,15 @@ fn apply_sticky_note_via_eval(window: &tauri::WebviewWindow, note: &StickyNote) 
 struct StickyNoteReminderPayload {
     task_id: String,
     reminder_time: Option<String>,
+}
+
+/// 待办被删除或完成后收起它的便签窗口（`sticky_is_open` 由数据库在同一次更新中清掉），
+/// 并通知便签管理列表刷新。
+pub fn hide_sticky_note_window(app: &tauri::AppHandle, task_id: &str) {
+    if let Some(window) = app.get_webview_window(&sticky_note_item_label(task_id)) {
+        let _ = window.hide();
+    }
+    let _ = app.emit("sticky-note-changed", task_id.to_string());
 }
 
 pub fn emit_sticky_note_reminder(
@@ -206,6 +219,66 @@ fn emit_cached_ui_state_to_window(app: &tauri::AppHandle, window: &tauri::Webvie
     }
 }
 
+/// 为越界校正而移动窗口时记下校正后的位置：随后的 `Moved` 事件落在这里时不保存，
+/// 避免把本机的校正同步回原设备。用户之后拖到别处才会保存。
+fn corrected_positions() -> &'static Mutex<HashMap<String, (f64, f64)>> {
+    static POSITIONS: OnceLock<Mutex<HashMap<String, (f64, f64)>>> = OnceLock::new();
+    POSITIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 窗口停在校正位置（1 px 以内）时返回 `true`；移到别处后清除记录。
+fn is_at_corrected_position(note_id: &str, x: f64, y: f64) -> bool {
+    let Ok(mut positions) = corrected_positions().lock() else {
+        return false;
+    };
+    match positions.get(note_id) {
+        Some(&(cx, cy)) if (cx - x).abs() <= 1.0 && (cy - y).abs() <= 1.0 => true,
+        Some(_) => {
+            positions.remove(note_id);
+            false
+        }
+        None => false,
+    }
+}
+
+/// 显示器工作区（按窗口当前缩放换算为逻辑像素，与 `set_position` 的换算一致）。
+fn monitor_work_areas(window: &tauri::WebviewWindow) -> Vec<Rect> {
+    let scale_factor = window.scale_factor().unwrap_or(1.0);
+    window
+        .available_monitors()
+        .unwrap_or_default()
+        .iter()
+        .map(|monitor| {
+            let area = monitor.work_area();
+            let position = area.position.to_logical::<f64>(scale_factor);
+            let size = area.size.to_logical::<f64>(scale_factor);
+            Rect::new(position.x, position.y, size.width, size.height)
+        })
+        .collect()
+}
+
+/// 便签应显示的位置：保存的位置在本机屏幕外时移回屏幕内（只移动窗口，不写库）。
+fn visible_position(
+    window: &tauri::WebviewWindow,
+    note: &StickyNote,
+    width: f64,
+    height: f64,
+) -> (f64, f64) {
+    let saved = Rect::new(note.pos_x, note.pos_y, width, height);
+    let corrected = placement::clamp_to_work_areas(saved, &monitor_work_areas(window));
+    if let Ok(mut positions) = corrected_positions().lock() {
+        match corrected {
+            Some(position) => {
+                positions.insert(note.task_id.clone(), position);
+            }
+            None => {
+                positions.remove(&note.task_id);
+            }
+        }
+    }
+    corrected.unwrap_or((note.pos_x, note.pos_y))
+}
+
 pub fn show_sticky_note_item_window(
     app: &tauri::AppHandle,
     note: &StickyNote,
@@ -243,7 +316,8 @@ pub fn show_sticky_note_item_window(
     let width = note.width.max(STICKY_NOTE_ITEM_MIN_WIDTH);
     let height = note.height.max(STICKY_NOTE_ITEM_MIN_HEIGHT);
     let _ = window.set_size(LogicalSize::new(width, height));
-    let _ = window.set_position(LogicalPosition::new(note.pos_x, note.pos_y));
+    let (x, y) = visible_position(&window, note, width, height);
+    let _ = window.set_position(LogicalPosition::new(x, y));
     let _ = window.set_shadow(false);
     enforce_sticky_item_layer(&window, is_pinned);
     let _ = window.emit(&refresh_event, note.clone());
@@ -287,6 +361,8 @@ pub fn hide_all_sticky_windows(app: &tauri::AppHandle) {
             let _ = window.hide();
         }
     }
+    // 便签管理列表据此刷新“显示中 / 已隐藏”。
+    let _ = app.emit("sticky-note-changed", "");
 }
 
 /// 重新显示所有处于打开状态的便签（在主线程创建或显示窗口）。
@@ -298,6 +374,7 @@ pub fn show_all_sticky_windows(app: &tauri::AppHandle) {
                 eprintln!("[sticky-note] 显示全部便签失败: {}", err);
             }
         }
+        let _ = handle.emit("sticky-note-changed", "");
     });
     if let Err(err) = result {
         eprintln!("[sticky-note] 主线程调度显示全部便签失败: {}", err);
@@ -313,7 +390,8 @@ pub fn toggle_all_sticky_windows(app: &tauri::AppHandle) {
     }
 }
 
-/// 便签窗口事件：关闭时隐藏并记为已关闭，移动与缩放时保存位置和尺寸。
+/// 便签窗口事件：关闭时隐藏并记为已关闭，移动与缩放时保存位置和尺寸
+/// （越界校正造成的移动不保存）。
 pub fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
     let note_id = note_id_from_item_label(window.label());
     match event {
@@ -334,7 +412,12 @@ pub fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
             {
                 let scale_factor = window.scale_factor().unwrap_or(1.0);
                 let logical = position.to_logical::<f64>(scale_factor);
+                if is_at_corrected_position(&note_id, logical.x, logical.y) {
+                    return;
+                }
                 let _ = state.db.move_sticky_note(&note_id, logical.x, logical.y);
+                #[cfg(target_os = "windows")]
+                snap::on_moved(window, &note_id);
             }
         }
         WindowEvent::Resized(size) => {
@@ -349,6 +432,139 @@ pub fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
             }
         }
         _ => {}
+    }
+}
+
+/// 贴边吸附（仅 Windows）。
+///
+/// 拖动标题栏时系统进入模态移动循环，Tauri 只给出一连串 `Moved`，没有“拖动结束”事件，
+/// 所以按鼠标键状态判断：移动时有鼠标键按下才算用户拖动；松开鼠标且 150 ms 内没有新的
+/// 移动后吸附。打开便签、越界校正、吸附本身造成的移动发生时鼠标没有按下，不会触发；
+/// 拖动途中停顿也不会被“吸走”。松开时按住 Alt 不吸附。
+#[cfg(target_os = "windows")]
+mod snap {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
+    use tauri::{LogicalPosition, Manager};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, VIRTUAL_KEY, VK_LBUTTON, VK_MENU, VK_RBUTTON,
+    };
+
+    use super::{monitor_work_areas, STICKY_NOTE_ITEM_PREFIX};
+    use crate::state::AppState;
+    use crate::windows::placement::{self, Rect};
+
+    const SETTLE: Duration = Duration::from_millis(150);
+    const POLL: Duration = Duration::from_millis(50);
+    /// 防止异常情况下（如按键状态读不到松开）监视线程一直不退出。
+    const MAX_WAIT: Duration = Duration::from_secs(120);
+
+    fn key_down(key: VIRTUAL_KEY) -> bool {
+        // 最高位为 1 表示按下。
+        unsafe { GetAsyncKeyState(i32::from(key.0)) < 0 }
+    }
+
+    /// 左右键都算：交换了主次键的用户按的是物理右键。
+    fn mouse_down() -> bool {
+        key_down(VK_LBUTTON) || key_down(VK_RBUTTON)
+    }
+
+    /// 正在拖动的便签 → 最近一次移动的时间。有记录说明监视线程在运行。
+    fn drags() -> &'static Mutex<HashMap<String, Instant>> {
+        static DRAGS: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+        DRAGS.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    pub fn on_moved(window: &tauri::Window, note_id: &str) {
+        let Ok(mut drags) = drags().lock() else {
+            return;
+        };
+        if let Some(last_moved) = drags.get_mut(note_id) {
+            *last_moved = Instant::now();
+            return;
+        }
+        if !mouse_down() {
+            return;
+        }
+        drags.insert(note_id.to_string(), Instant::now());
+        // 从左边或上边缩放也会移动窗口；结束时尺寸变了就不吸附，避免把缩放后的便签整体挪动。
+        let start_size = window.outer_size().ok();
+        let app = window.app_handle().clone();
+        let label = window.label().to_string();
+        let note_id = note_id.to_string();
+        std::thread::spawn(move || watch_drag(app, label, note_id, start_size));
+    }
+
+    fn watch_drag(
+        app: tauri::AppHandle,
+        label: String,
+        note_id: String,
+        start_size: Option<tauri::PhysicalSize<u32>>,
+    ) {
+        let started = Instant::now();
+        loop {
+            std::thread::sleep(POLL);
+            let Ok(mut drags) = drags().lock() else {
+                return;
+            };
+            let last_moved = drags.get(&note_id).copied().unwrap_or(started);
+            let settled = last_moved.elapsed() >= SETTLE && !mouse_down();
+            if settled || started.elapsed() >= MAX_WAIT {
+                drags.remove(&note_id);
+                break;
+            }
+        }
+        if key_down(VK_MENU) {
+            return;
+        }
+        let enabled = app
+            .try_state::<AppState>()
+            .and_then(|state| state.db.sticky_snap_enabled().ok())
+            .unwrap_or(false);
+        if !enabled {
+            return;
+        }
+        let Some(window) = app.get_webview_window(&label) else {
+            return;
+        };
+        if start_size.is_none() || window.outer_size().ok() != start_size {
+            return;
+        }
+        snap_window(&app, &window);
+    }
+
+    fn logical_rect(window: &tauri::WebviewWindow, scale_factor: f64) -> Option<Rect> {
+        let position = window
+            .outer_position()
+            .ok()?
+            .to_logical::<f64>(scale_factor);
+        let size = window.outer_size().ok()?.to_logical::<f64>(scale_factor);
+        Some(Rect::new(position.x, position.y, size.width, size.height))
+    }
+
+    /// 按当前位置计算吸附位置并移动窗口；随后的 `Moved` 事件会照常保存新位置。
+    fn snap_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
+        // 所有窗口统一按本窗口的缩放换算，与工作区、`set_position` 的换算一致。
+        let scale_factor = window.scale_factor().unwrap_or(1.0);
+        let Some(note) = logical_rect(window, scale_factor) else {
+            return;
+        };
+        let peers: Vec<Rect> = app
+            .webview_windows()
+            .into_iter()
+            .filter(|(label, peer)| {
+                label.starts_with(STICKY_NOTE_ITEM_PREFIX)
+                    && label.as_str() != window.label()
+                    && peer.is_visible().unwrap_or(false)
+            })
+            .filter_map(|(_, peer)| logical_rect(&peer, scale_factor))
+            .collect();
+        let (x, y) = placement::snap_position(note, &monitor_work_areas(window), &peers);
+        if (x - note.x).abs() >= 0.5 || (y - note.y).abs() >= 0.5 {
+            let _ = window.set_position(LogicalPosition::new(x, y));
+        }
     }
 }
 

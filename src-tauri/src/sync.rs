@@ -5,7 +5,7 @@ use std::sync::{
 };
 
 use base64::Engine;
-use chrono::{Local, NaiveDateTime};
+use chrono::NaiveDateTime;
 use reqwest::StatusCode;
 use rusqlite::{params_from_iter, types::Value, Connection};
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,7 @@ use crate::db::{DbManager, TOMBSTONE_RETENTION_DAYS_SYNC};
 use crate::errors::AppError;
 use crate::models::{AppSettings, SyncStatus};
 use crate::sync_crypto::{self, KdfParams};
-use crate::time::parse_datetime_any;
+use crate::time::{self, parse_datetime_any};
 
 const REMOTE_DB_NAME: &str = "taskreminder.db";
 /// 开启端到端加密后的远端文件；`REMOTE_DB_NAME` 处改放占位说明，旧版本读到后同步失败而不会上传明文。
@@ -140,7 +140,9 @@ impl CloudSyncService {
         let service = self.clone();
         let reason = reason.to_string();
         let sync_start_seq = service.local_change_seq.load(Ordering::SeqCst);
-        tauri::async_runtime::spawn(async move {
+        // perform_sync 用 reqwest::blocking 并做 Argon2 派生，必须放在阻塞线程池：在异步任务里
+        // 会占住运行时的工作线程，debug 构建中 reqwest 还会直接 panic（同步从未执行）。
+        tauri::async_runtime::spawn_blocking(move || {
             let outcome = service.perform_sync(&reason);
             if matches!(outcome, Ok(SyncOutcome::Success)) {
                 let current_seq = service.local_change_seq.load(Ordering::SeqCst);
@@ -174,6 +176,56 @@ impl CloudSyncService {
         })
     }
 
+    /// 更换同步密码：与普通同步互斥（同一个进行中标记与远端锁），用已保存的连接设置执行
+    /// `change_passphrase_on_remote`。阻塞调用（网络与 Argon2），命令中放到后台线程执行。
+    pub fn change_passphrase(&self, current: &str, new: &str) -> Result<(), AppError> {
+        let settings = self.db.load_settings()?;
+        if !settings.webdav_enabled || settings.webdav_url.trim().is_empty() {
+            return Err(AppError::Invalid(
+                "请先启用并保存 WebDAV 同步设置".to_string(),
+            ));
+        }
+        validate_passphrase_change(&settings, current, new)?;
+        if self
+            .sync_in_progress
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return Err(AppError::Invalid("正在同步，请稍后再试".to_string()));
+        }
+
+        let _ = self.update_sync_status(SyncState::Syncing, None);
+        let mut lock_busy = false;
+        let result = (|| -> Result<(), AppError> {
+            let client = WebDavClient::new(&settings)?;
+            let lock = LockInfo::new(&settings.webdav_device_id);
+            if !client.try_acquire_lock(&lock)? {
+                lock_busy = true;
+                return Err(AppError::Sync("其他设备正在同步，请稍后再试".to_string()));
+            }
+            let result =
+                change_passphrase_on_remote(&client, &self.db, &settings, new, KdfParams::DEFAULT);
+            client.release_lock();
+            result.map(|_| ())
+        })();
+
+        match &result {
+            Ok(()) => {
+                let _ = self.update_sync_status(SyncState::Success, None);
+                let _ = self.refresh_dirty_from_settings();
+                let _ = self.app.emit("data-updated", ());
+            }
+            Err(_) if lock_busy => {
+                let _ = self.update_sync_status(SyncState::LockBusy, None);
+            }
+            Err(err) => {
+                let _ = self.update_sync_status(failure_state(err), Some(err.to_string()));
+            }
+        }
+        self.sync_in_progress.store(false, Ordering::SeqCst);
+        result
+    }
+
     fn schedule_if_needed(&self) -> Result<(), AppError> {
         if let Some(handle) = self.scheduled.lock().unwrap().take() {
             handle.abort();
@@ -202,7 +254,7 @@ impl CloudSyncService {
         if !settings.webdav_enabled || settings.webdav_url.trim().is_empty() {
             return Ok(());
         }
-        let now = Local::now().naive_local();
+        let now = time::now();
         let mut due = now + chrono::Duration::seconds(STARTUP_SYNC_DELAY_SECONDS as i64);
         if let Some(throttle_due) = next_allowed_auto_sync_time(&settings, now) {
             if throttle_due > due {
@@ -218,7 +270,7 @@ impl CloudSyncService {
         if !settings.webdav_enabled || settings.webdav_url.trim().is_empty() {
             return Ok(());
         }
-        let now = Local::now().naive_local();
+        let now = time::now();
         let mut due = now + chrono::Duration::seconds(LOCAL_CHANGE_DEBOUNCE_SECONDS as i64);
         if let Some(throttle_due) = next_allowed_auto_sync_time(&settings, now) {
             if throttle_due > due {
@@ -230,7 +282,7 @@ impl CloudSyncService {
     }
 
     fn schedule_auto_sync_at(&self, due: NaiveDateTime, reason: &str) -> Result<(), AppError> {
-        let now = Local::now().naive_local();
+        let now = time::now();
         if due <= now {
             return self.request_sync_if_needed(reason);
         }
@@ -265,7 +317,7 @@ impl CloudSyncService {
     }
 
     fn request_sync_on_interval(&self) -> Result<(), AppError> {
-        let now = Local::now().naive_local();
+        let now = time::now();
         if let Some(due) = *self.next_auto_sync_due.lock().unwrap() {
             let remaining = due - now;
             // 如果 debounce 很快就会触发，就避免 interval “抢跑”；否则 interval 作为兜底依然可以触发同步。
@@ -284,9 +336,13 @@ impl CloudSyncService {
         if !settings.webdav_enabled || settings.webdav_url.trim().is_empty() {
             return Ok(());
         }
+        // 手动同步（`request_sync`）不受影响；修改同步密码后由 `save_settings` 立即触发一次。
+        if auto_sync_paused(&settings) {
+            return Ok(());
+        }
 
         // throttle：距离上一次同步太近则延后。
-        let now = Local::now().naive_local();
+        let now = time::now();
         if let Some(throttle_due) = next_allowed_auto_sync_time(&settings, now) {
             self.schedule_auto_sync_at(throttle_due, "throttle")?;
             return Ok(());
@@ -333,7 +389,7 @@ impl CloudSyncService {
         let outcome = match result {
             Ok(outcome) => outcome,
             Err(err) => {
-                let _ = self.update_sync_status(SyncState::Failed, Some(err.to_string()));
+                let _ = self.update_sync_status(failure_state(&err), Some(err.to_string()));
                 SyncOutcome::Failed
             }
         };
@@ -372,6 +428,9 @@ pub enum SyncState {
     FirstSync,
     LockBusy,
     Failed,
+    /// 远端加密数据无法用本机的同步密码解密，通常是在其他设备上更换了同步密码。
+    /// 此状态下暂停自动同步，直到修改同步密码或手动同步。
+    PassphraseMismatch,
 }
 
 impl SyncState {
@@ -383,6 +442,7 @@ impl SyncState {
             SyncState::FirstSync => "first_sync",
             SyncState::LockBusy => "lock_busy",
             SyncState::Failed => "failed",
+            SyncState::PassphraseMismatch => "passphrase_mismatch",
         }
     }
 
@@ -395,6 +455,7 @@ impl SyncState {
             "first_sync" | "首次同步完成" => Some(SyncState::FirstSync),
             "lock_busy" | "锁被占用，稍后重试" => Some(SyncState::LockBusy),
             "failed" | "同步失败" => Some(SyncState::Failed),
+            "passphrase_mismatch" => Some(SyncState::PassphraseMismatch),
             _ => None,
         }
     }
@@ -410,6 +471,30 @@ fn status_code(stored: Option<&str>) -> String {
     SyncState::parse(raw)
         .map(|state| state.code().to_string())
         .unwrap_or_else(|| raw.to_string())
+}
+
+fn failure_state(err: &AppError) -> SyncState {
+    match err {
+        AppError::SyncPassphrase(_) => SyncState::PassphraseMismatch,
+        _ => SyncState::Failed,
+    }
+}
+
+/// 同步密码不匹配时暂停自动同步：每次都会失败，还要白白做一次 Argon2 派生。
+fn auto_sync_paused(settings: &AppSettings) -> bool {
+    settings
+        .webdav_last_sync_status
+        .as_deref()
+        .and_then(SyncState::parse)
+        == Some(SyncState::PassphraseMismatch)
+}
+
+/// 保存设置时，同步密码不匹配状态下改了同步密码：需要立即同步一次以确认并恢复自动同步。
+pub fn should_resync_after_passphrase_edit(previous: &AppSettings, saved: &AppSettings) -> bool {
+    auto_sync_paused(previous)
+        && saved.webdav_enabled
+        && saved.sync_encryption_enabled
+        && saved.sync_passphrase != previous.sync_passphrase
 }
 
 fn is_success_status(status: &Option<String>) -> bool {
@@ -525,8 +610,12 @@ fn placeholder_content() -> Vec<u8> {
     data
 }
 
+/// 解密认证失败单独归类：界面据此提示“同步密码已在其他设备更换”，并暂停自动同步。
 fn crypto_error(err: sync_crypto::CryptoError) -> AppError {
-    AppError::Sync(err.to_string())
+    match err {
+        sync_crypto::CryptoError::Decrypt => AppError::SyncPassphrase(err.to_string()),
+        other => AppError::Sync(other.to_string()),
+    }
 }
 
 /// 加锁之后的同步主体：下载（必要时解密）远端快照并合并，再上传本地快照（必要时加密）。
@@ -540,9 +629,22 @@ fn sync_with_remote(
     settings: &AppSettings,
     params: KdfParams,
 ) -> Result<RemoteSyncResult, AppError> {
+    sync_with_remote_as(store, db, settings, &settings.sync_passphrase, params)
+}
+
+/// `sync_with_remote` 的主体：用 `settings.sync_passphrase` 解密远端，用 `upload_passphrase`
+/// 加密上传。平时两者相同；更换同步密码时用新密码上传（见 `change_passphrase_on_remote`）。
+fn sync_with_remote_as(
+    store: &dyn RemoteStore,
+    db: &DbManager,
+    settings: &AppSettings,
+    upload_passphrase: &str,
+    params: KdfParams,
+) -> Result<RemoteSyncResult, AppError> {
     let encrypt = settings.sync_encryption_enabled;
     if encrypt {
         sync_crypto::validate_passphrase(&settings.sync_passphrase).map_err(crypto_error)?;
+        sync_crypto::validate_passphrase(upload_passphrase).map_err(crypto_error)?;
     }
 
     let remote_snapshot = if store.exists(REMOTE_ENC_NAME)? {
@@ -576,7 +678,7 @@ fn sync_with_remote(
 
     let local_snapshot = export_local_snapshot_bytes(&db.db_path())?;
     if encrypt {
-        let data = sync_crypto::encrypt(&local_snapshot, &settings.sync_passphrase, params)
+        let data = sync_crypto::encrypt(&local_snapshot, upload_passphrase, params)
             .map_err(crypto_error)?;
         store.put(REMOTE_ENC_NAME, data)?;
         // 先传加密文件再替换明文：中途失败时远端仍有一份可用的数据。
@@ -590,6 +692,52 @@ fn sync_with_remote(
     } else {
         RemoteSyncResult::FirstUpload
     })
+}
+
+/// 更换同步密码前的检查（不访问网络）：已开启加密、当前密码与本机保存的一致、新密码有效且不同。
+fn validate_passphrase_change(
+    settings: &AppSettings,
+    current: &str,
+    new: &str,
+) -> Result<(), AppError> {
+    if !settings.sync_encryption_enabled {
+        return Err(AppError::Invalid(
+            "请先开启端到端加密并保存设置".to_string(),
+        ));
+    }
+    if current != settings.sync_passphrase {
+        return Err(AppError::Invalid("当前同步密码不正确".to_string()));
+    }
+    sync_crypto::validate_passphrase(new).map_err(|e| AppError::Invalid(e.to_string()))?;
+    if new == current {
+        return Err(AppError::Invalid("新密码与当前密码相同".to_string()));
+    }
+    Ok(())
+}
+
+/// 更换同步密码（需已持有同步锁）：用当前密码下载、解密并合并远端数据，再用新密码加密上传；
+/// **上传成功后**才把新密码保存到本机。任一步失败都保留旧密码：
+/// - 当前密码解密失败：不上传，远端不变；
+/// - 上传失败：本机仍是旧密码，远端的 `.enc` 要么没变、要么已是新密码（此时本机同步会提示
+///   密码不匹配，填入新密码即可）。
+fn change_passphrase_on_remote(
+    store: &dyn RemoteStore,
+    db: &DbManager,
+    settings: &AppSettings,
+    new_passphrase: &str,
+    params: KdfParams,
+) -> Result<RemoteSyncResult, AppError> {
+    validate_passphrase_change(settings, &settings.sync_passphrase, new_passphrase)?;
+    let result = sync_with_remote_as(store, db, settings, new_passphrase, params)?;
+    let mut updated = db.load_settings()?;
+    updated.sync_passphrase = new_passphrase.to_string();
+    db.save_settings(&updated).map_err(|err| {
+        AppError::Sync(format!(
+            "云端已改用新密码，但本机保存失败（{}）：请在同步密码中填写新密码后保存",
+            err
+        ))
+    })?;
+    Ok(result)
 }
 
 fn temp_db_path(kind: &str) -> std::path::PathBuf {
@@ -860,7 +1008,7 @@ struct LockInfo {
 
 impl LockInfo {
     fn new(device_id: &str) -> Self {
-        let expires_at = chrono::Utc::now().timestamp_millis() + LOCK_TTL_SECONDS * 1000;
+        let expires_at = time::unix_millis() + LOCK_TTL_SECONDS * 1000;
         Self {
             device_id: device_id.to_string(),
             expires_at,
@@ -868,7 +1016,7 @@ impl LockInfo {
     }
 
     fn is_expired(&self) -> bool {
-        self.expires_at_millis() <= chrono::Utc::now().timestamp_millis()
+        self.expires_at_millis() <= time::unix_millis()
     }
 
     fn expires_at_millis(&self) -> i64 {
@@ -1082,9 +1230,7 @@ mod tests {
     }
 
     fn set_completed(path: &std::path::Path, id: &str, days_ago: i64) {
-        let completed = crate::time::format_datetime(
-            &(Local::now().naive_local() - chrono::Duration::days(days_ago)),
-        );
+        let completed = time::format_datetime(&(time::now() - chrono::Duration::days(days_ago)));
         let conn = Connection::open(path).unwrap();
         conn.execute(
             "UPDATE tasks SET status = 'COMPLETED', completed_at = ?1, updated_at = ?1 WHERE id = ?2",
@@ -1226,6 +1372,7 @@ mod tests {
             SyncState::FirstSync,
             SyncState::LockBusy,
             SyncState::Failed,
+            SyncState::PassphraseMismatch,
         ] {
             assert_eq!(SyncState::parse(state.code()), Some(state));
         }
@@ -1432,8 +1579,10 @@ mod tests {
         let before = store.file(REMOTE_ENC_NAME).unwrap();
 
         let wrong = settings_for(&b, true, "another passphrase");
-        let err = sync(&store, &b, &wrong).unwrap_err().to_string();
-        assert!(err.contains("同步密码错误"), "{}", err);
+        let err = sync(&store, &b, &wrong).unwrap_err();
+        assert!(matches!(err, AppError::SyncPassphrase(_)), "{:?}", err);
+        assert_eq!(failure_state(&err), SyncState::PassphraseMismatch);
+        assert!(err.to_string().contains("同步密码错误"), "{}", err);
         assert_eq!(store.file(REMOTE_ENC_NAME).unwrap(), before);
         assert_eq!(task_titles(&b), vec!["B 的待办"]);
 
@@ -1492,6 +1641,179 @@ mod tests {
         assert!(ok && message.contains("密码正确"), "{}", message);
         let (ok, message) = check_encryption(&store, &settings_for(&a, true, "wrong passphrase"));
         assert!(!ok && message.contains("密码错误"), "{}", message);
+
+        let _ = std::fs::remove_dir_all(a_dir);
+    }
+
+    const NEW_PASS: &str = "new staple passphrase";
+
+    fn change(
+        store: &dyn RemoteStore,
+        db: &DbManager,
+        settings: &AppSettings,
+        new: &str,
+    ) -> Result<RemoteSyncResult, AppError> {
+        change_passphrase_on_remote(store, db, settings, new, crate::sync_crypto::TEST_PARAMS)
+    }
+
+    /// 上传总是失败的远端，用来验证失败时本机仍保留旧密码。
+    struct FailingPutStore<'a>(&'a MemoryStore);
+
+    impl RemoteStore for FailingPutStore<'_> {
+        fn exists(&self, name: &str) -> Result<bool, AppError> {
+            self.0.exists(name)
+        }
+
+        fn get(&self, name: &str) -> Result<Vec<u8>, AppError> {
+            self.0.get(name)
+        }
+
+        fn put(&self, _name: &str, _data: Vec<u8>) -> Result<(), AppError> {
+            Err(AppError::Sync("upload failed".to_string()))
+        }
+    }
+
+    #[test]
+    fn changing_passphrase_reencrypts_and_other_device_recovers() {
+        let (a, a_dir) = temp_db("change-a");
+        let (b, b_dir) = temp_db("change-b");
+        let store = MemoryStore::default();
+        a.create_task("A 的待办", None).unwrap();
+        b.create_task("B 的待办", None).unwrap();
+        sync(&store, &a, &settings_for(&a, true, PASS)).unwrap();
+        sync(&store, &b, &settings_for(&b, true, PASS)).unwrap();
+
+        // A 更换密码前又改了数据：先合并远端（B 的待办），再用新密码上传。
+        a.create_task("A 更换前新增", None).unwrap();
+        let settings_a = settings_for(&a, true, PASS);
+        assert_eq!(
+            change(&store, &a, &settings_a, NEW_PASS).unwrap(),
+            RemoteSyncResult::Merged
+        );
+        assert_eq!(a.load_settings().unwrap().sync_passphrase, NEW_PASS);
+        assert_eq!(
+            task_titles(&a),
+            vec!["A 更换前新增", "A 的待办", "B 的待办"]
+        );
+        let encrypted = store.file(REMOTE_ENC_NAME).unwrap();
+        assert!(crate::sync_crypto::decrypt(&encrypted, NEW_PASS).is_ok());
+        assert!(crate::sync_crypto::decrypt(&encrypted, PASS).is_err());
+        assert!(!contains(&encrypted, NEW_PASS.as_bytes()));
+        assert!(store
+            .file(REMOTE_DB_NAME)
+            .unwrap()
+            .starts_with(PLACEHOLDER_MARKER));
+
+        // B 仍用旧密码：得到“密码不匹配”，不覆盖远端。
+        let err = sync(&store, &b, &settings_for(&b, true, PASS)).unwrap_err();
+        assert_eq!(failure_state(&err), SyncState::PassphraseMismatch);
+        assert_eq!(store.file(REMOTE_ENC_NAME).unwrap(), encrypted);
+
+        // B 填入新密码后恢复同步。
+        assert_eq!(
+            sync(&store, &b, &settings_for(&b, true, NEW_PASS)).unwrap(),
+            RemoteSyncResult::Merged
+        );
+        assert_eq!(
+            task_titles(&b),
+            vec!["A 更换前新增", "A 的待办", "B 的待办"]
+        );
+
+        let _ = std::fs::remove_dir_all(a_dir);
+        let _ = std::fs::remove_dir_all(b_dir);
+    }
+
+    #[test]
+    fn passphrase_change_is_validated_before_touching_remote() {
+        let (a, a_dir) = temp_db("change-check");
+        let plain = settings_for(&a, false, "");
+        assert!(validate_passphrase_change(&plain, "", NEW_PASS).is_err());
+        let settings = settings_for(&a, true, PASS);
+        for (current, new, expected) in [
+            ("not the current one", NEW_PASS, "不正确"),
+            (PASS, "short", "至少"),
+            (PASS, PASS, "相同"),
+        ] {
+            let err = validate_passphrase_change(&settings, current, new)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(expected), "{} -> {}", new, err);
+        }
+        assert!(validate_passphrase_change(&settings, PASS, NEW_PASS).is_ok());
+        let _ = std::fs::remove_dir_all(a_dir);
+    }
+
+    #[test]
+    fn passphrase_change_with_undecryptable_remote_keeps_everything() {
+        let (a, a_dir) = temp_db("change-wrong-a");
+        let (b, b_dir) = temp_db("change-wrong-b");
+        let store = MemoryStore::default();
+        // 云端已被另一台设备用别的密码加密（例如那台设备先改过密码）。
+        b.create_task("B 的待办", None).unwrap();
+        sync(&store, &b, &settings_for(&b, true, "some other passphrase")).unwrap();
+        let before = store.file(REMOTE_ENC_NAME).unwrap();
+
+        a.create_task("A 的待办", None).unwrap();
+        let err = change(&store, &a, &settings_for(&a, true, PASS), NEW_PASS).unwrap_err();
+        assert_eq!(failure_state(&err), SyncState::PassphraseMismatch);
+        assert_eq!(store.file(REMOTE_ENC_NAME).unwrap(), before);
+        assert_eq!(a.load_settings().unwrap().sync_passphrase, PASS);
+        assert_eq!(task_titles(&a), vec!["A 的待办"]);
+
+        let _ = std::fs::remove_dir_all(a_dir);
+        let _ = std::fs::remove_dir_all(b_dir);
+    }
+
+    #[test]
+    fn failed_upload_keeps_local_passphrase() {
+        let (a, a_dir) = temp_db("change-upload");
+        let store = MemoryStore::default();
+        a.create_task("A 的待办", None).unwrap();
+        sync(&store, &a, &settings_for(&a, true, PASS)).unwrap();
+        let before = store.file(REMOTE_ENC_NAME).unwrap();
+
+        let failing = FailingPutStore(&store);
+        assert!(change(&failing, &a, &settings_for(&a, true, PASS), NEW_PASS).is_err());
+        assert_eq!(a.load_settings().unwrap().sync_passphrase, PASS);
+        assert_eq!(store.file(REMOTE_ENC_NAME).unwrap(), before);
+        // 仍可用旧密码正常同步。
+        assert!(sync(&store, &a, &settings_for(&a, true, PASS)).is_ok());
+
+        let _ = std::fs::remove_dir_all(a_dir);
+    }
+
+    #[test]
+    fn passphrase_change_on_empty_remote_uploads_with_new_passphrase() {
+        let (a, a_dir) = temp_db("change-empty");
+        let store = MemoryStore::default();
+        a.create_task("A 的待办", None).unwrap();
+        assert_eq!(
+            change(&store, &a, &settings_for(&a, true, PASS), NEW_PASS).unwrap(),
+            RemoteSyncResult::FirstUpload
+        );
+        let encrypted = store.file(REMOTE_ENC_NAME).unwrap();
+        assert!(crate::sync_crypto::decrypt(&encrypted, NEW_PASS).is_ok());
+        let _ = std::fs::remove_dir_all(a_dir);
+    }
+
+    #[test]
+    fn mismatch_pauses_auto_sync_until_passphrase_is_edited() {
+        let (a, a_dir) = temp_db("pause");
+        let mut previous = settings_for(&a, true, PASS);
+        previous.webdav_enabled = true;
+        previous.webdav_last_sync_status = Some("failed".to_string());
+        assert!(!auto_sync_paused(&previous));
+
+        previous.webdav_last_sync_status = Some(SyncState::PassphraseMismatch.code().to_string());
+        assert!(auto_sync_paused(&previous));
+        // 仍不匹配时，未改密码的保存（例如只改了同步频率）不会触发同步。
+        assert!(!should_resync_after_passphrase_edit(&previous, &previous));
+
+        let mut saved = previous.clone();
+        saved.sync_passphrase = NEW_PASS.to_string();
+        assert!(should_resync_after_passphrase_edit(&previous, &saved));
+        saved.webdav_enabled = false;
+        assert!(!should_resync_after_passphrase_edit(&previous, &saved));
 
         let _ = std::fs::remove_dir_all(a_dir);
     }

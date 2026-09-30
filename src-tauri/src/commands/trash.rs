@@ -6,6 +6,7 @@ use tauri::State;
 use crate::commands::{into_api, ApiResult};
 use crate::db;
 use crate::errors::AppError;
+use crate::kinds::TaskStatus;
 use crate::models::{RecurringTask, Task};
 use crate::recurrence;
 use crate::scheduler;
@@ -48,7 +49,7 @@ pub fn list_trash(state: State<AppState>) -> ApiResult<TrashPayload> {
 pub fn restore_task(state: State<AppState>, id: String) -> ApiResult<()> {
     into_api(state.db.restore_task(&id))?;
     if let Some(task) = into_api(state.db.get_task(&id))? {
-        if task.status != "COMPLETED" {
+        if task.status != TaskStatus::Completed {
             if let Some(reminder_time) = &task.reminder_time {
                 if scheduler::is_future(reminder_time).unwrap_or(false) {
                     into_api(state.scheduler.schedule_task(task))?;

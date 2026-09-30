@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::kinds::{ReminderAction, ReminderKind, RepeatMode, TaskStatus, TaskType};
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Task {
@@ -7,8 +9,8 @@ pub struct Task {
     pub description: String,
     pub sticky_content: Option<String>,
     #[serde(rename = "type")]
-    pub task_type: String,
-    pub status: String,
+    pub task_type: TaskType,
+    pub status: TaskStatus,
     pub created_at: String,
     pub completed_at: Option<String>,
     pub reminder_time: Option<String>,
@@ -80,8 +82,8 @@ pub struct RecurringTask {
     pub id: String,
     pub description: String,
     #[serde(rename = "type")]
-    pub task_type: String,
-    pub status: String,
+    pub task_type: TaskType,
+    pub status: TaskStatus,
     pub created_at: String,
     pub completed_at: Option<String>,
     pub reminder_time: Option<String>,
@@ -93,7 +95,7 @@ pub struct RecurringTask {
     pub is_paused: bool,
     pub start_time: Option<String>,
     pub end_time: Option<String>,
-    pub repeat_mode: String,
+    pub repeat_mode: RepeatMode,
     pub schedule_time: Option<String>,
     pub schedule_weekday: Option<i64>,
     /// 每周多天位掩码（周一 = bit0 … 周日 = bit6）；`schedule_weekday` 保留为其中最早的一天以兼容旧版本。
@@ -110,10 +112,10 @@ pub struct ReminderRecord {
     pub reminder_id: String,
     pub description: String,
     #[serde(rename = "type")]
-    pub reminder_type: String,
+    pub reminder_type: ReminderKind,
     pub trigger_time: String,
     pub close_time: Option<String>,
-    pub action: String,
+    pub action: ReminderAction,
     pub updated_at: Option<String>,
     pub deleted_at: Option<String>,
 }
@@ -185,6 +187,12 @@ pub struct AppSettings {
     /// 显示/隐藏全部便签的全局快捷键，为空表示不启用。
     #[serde(default)]
     pub sticky_toggle_shortcut: String,
+    /// 拖动便签后贴边吸附（屏幕边缘与其他便签）。
+    #[serde(default = "default_true")]
+    pub sticky_snap_enabled: bool,
+    /// 每天从项目仓库检查节假日数据更新。
+    #[serde(default = "default_true")]
+    pub holiday_auto_update: bool,
     /// 密码存放位置（`secrets::STORAGE_*`），只读：保存时由后端决定。
     #[serde(default)]
     pub secret_storage: String,
@@ -211,7 +219,7 @@ pub fn default_quick_add_shortcut() -> String {
 pub struct NotificationPayload {
     pub record_id: String,
     pub reminder_id: String,
-    pub reminder_type: String,
+    pub reminder_type: ReminderKind,
     pub description: String,
     pub snooze_minutes: i64,
     /// 本次提醒原定的触发时间；用于在弹窗中标识“错过的提醒”。

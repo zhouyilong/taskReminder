@@ -742,14 +742,8 @@ const completeAndCloseNote = async () => {
     console.error("[sticky-note-item] 标记完成失败", error);
     const message = error instanceof Error ? error.message : String(error);
     alert(`标记完成失败：${message}`);
-    return;
   }
-  try {
-    await api.closeStickyNote(taskId);
-  } catch (error) {
-    console.error("[sticky-note-item] 关闭已完成便签失败", error);
-    await closeNote();
-  }
+  // 完成待办时后端已收起便签窗口并清掉 sticky_is_open，不需要再调用 closeStickyNote。
 };
 
 const applyLoadedNote = (row: StickyNote | null | undefined) => {

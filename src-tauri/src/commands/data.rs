@@ -1,12 +1,12 @@
 //! 导入导出与本地备份。
 
-use chrono::Local;
 use serde::Serialize;
 use tauri::{Manager, State};
 
 use crate::commands::{into_api, ApiResult};
 use crate::errors::AppError;
 use crate::state::AppState;
+use crate::time;
 use crate::{backup, sync};
 
 #[derive(Serialize)]
@@ -47,7 +47,7 @@ pub async fn export_data(
     format: String,
 ) -> ApiResult<Option<ExportResult>> {
     let format = into_api(backup::ExportFormat::parse(&format))?;
-    let now = Local::now().naive_local();
+    let now = time::now();
     let Some(file) = file_dialog(&app)
         .set_title("导出数据")
         .add_filter(format.filter_name(), &[format.extension()])
@@ -65,7 +65,7 @@ pub async fn export_data(
         backup::ExportFormat::Json => (into_api(backup::render_json(&data))?, 0),
         backup::ExportFormat::Markdown => (backup::render_markdown(&data), 0),
         backup::ExportFormat::Ics => {
-            let dtstamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+            let dtstamp = time::ics_utc_now();
             backup::render_ics(&data, &dtstamp)
         }
     };
@@ -93,10 +93,7 @@ pub async fn import_data(
     let content = std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败：{}", e))?;
     let data = into_api(backup::parse_backup(&content))?;
     // 导入前先留一份本地快照，出问题时可以从备份恢复。
-    into_api(backup::create_backup(
-        &state.db.db_path(),
-        &Local::now().naive_local(),
-    ))?;
+    into_api(backup::create_backup(&state.db.db_path(), &time::now()))?;
     let summary = into_api(backup::import_backup(&state.db, &data))?;
     into_api(after_bulk_change(&state))?;
     Ok(Some(summary))
@@ -113,10 +110,7 @@ pub fn list_backups(state: State<AppState>) -> ApiResult<BackupListPayload> {
 
 #[tauri::command]
 pub fn create_backup_now(state: State<AppState>) -> ApiResult<()> {
-    into_api(backup::create_backup(
-        &state.db.db_path(),
-        &Local::now().naive_local(),
-    ))?;
+    into_api(backup::create_backup(&state.db.db_path(), &time::now()))?;
     Ok(())
 }
 

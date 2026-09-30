@@ -65,12 +65,13 @@ impl NotificationQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kinds::ReminderKind;
 
     fn payload(record_id: &str, reminder_id: &str) -> NotificationPayload {
         NotificationPayload {
             record_id: record_id.to_string(),
             reminder_id: reminder_id.to_string(),
-            reminder_type: "TASK".to_string(),
+            reminder_type: ReminderKind::Task,
             description: format!("task {}", reminder_id),
             snooze_minutes: 5,
             scheduled_time: None,

@@ -1,6 +1,6 @@
-//! 便签命令：打开、新建、编辑内容/标题/提醒、移动、关闭与置顶。
+//! 便签命令：管理列表、打开、新建、编辑内容/标题/提醒、移动、关闭与置顶。
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, State};
 
 use crate::commands::tasks::normalize_reminder_time;
@@ -61,6 +61,72 @@ pub struct CreateStickyNotePayload {
     pub height: Option<f64>,
     pub default_x: Option<f64>,
     pub default_y: Option<f64>,
+}
+
+/// 便签管理列表的一行：便签本身加上窗口此刻是否可见。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StickyNoteSummary {
+    #[serde(flatten)]
+    note: StickyNote,
+    visible: bool,
+}
+
+/// 管理列表只列出真正在用的便签：已打开，或写过内容。
+fn is_listed_sticky_note(note: &StickyNote) -> bool {
+    note.is_open || !note.content.trim().is_empty()
+}
+
+#[tauri::command]
+pub fn list_sticky_note_summaries(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+) -> ApiResult<Vec<StickyNoteSummary>> {
+    let notes = into_api(state.db.list_sticky_notes())?;
+    Ok(notes
+        .into_iter()
+        .filter(is_listed_sticky_note)
+        .map(|note| {
+            let visible = note.is_open
+                && app
+                    .get_webview_window(&sticky_note_item_label(&note.task_id))
+                    .and_then(|window| window.is_visible().ok())
+                    .unwrap_or(false);
+            StickyNoteSummary { note, visible }
+        })
+        .collect())
+}
+
+/// 显示已打开（可能被“隐藏全部便签”隐藏）的便签并置前。只操作窗口，不写库，
+/// 避免在管理列表里点“置前”产生同步改动；未打开的便签走 `open_sticky_note`。
+#[tauri::command]
+pub fn show_sticky_note(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    task_id: String,
+) -> ApiResult<()> {
+    let Some(note) = into_api(state.db.get_sticky_note(&task_id))? else {
+        return Err("找不到对应便签".to_string());
+    };
+    // 与 `open_sticky_note` 相同：窗口可能需要新建，不能在同步命令里直接创建（Windows 上会卡死），
+    // 先换到后台线程，再调度到主线程。
+    std::thread::spawn(move || {
+        let app_in_main = app.clone();
+        if let Err(err) = app.run_on_main_thread(move || {
+            if let Err(err) = show_sticky_note_item_window(&app_in_main, &note) {
+                eprintln!("[sticky-note] 显示便签窗口失败: {}", err);
+                return;
+            }
+            let label = sticky_note_item_label(&note.task_id);
+            if let Some(window) = app_in_main.get_webview_window(&label) {
+                let _ = window.set_focus();
+            }
+            let _ = app_in_main.emit("sticky-note-changed", note.task_id.clone());
+        }) {
+            eprintln!("[sticky-note] 主线程调度显示便签失败: {}", err);
+        }
+    });
+    Ok(())
 }
 
 #[tauri::command]
@@ -295,4 +361,46 @@ pub fn get_sticky_note_pinned_by_window_label(
         return Ok(false);
     };
     into_api(state.db.get_sticky_note_pinned(&note_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn note(is_open: bool, content: &str) -> StickyNote {
+        StickyNote {
+            task_id: "t".to_string(),
+            title: "标题".to_string(),
+            note_type: "TASK".to_string(),
+            content: content.to_string(),
+            pos_x: 0.0,
+            pos_y: 0.0,
+            width: 284.0,
+            height: 280.0,
+            is_open,
+            is_pinned: false,
+            created_at: String::new(),
+            updated_at: String::new(),
+            reminder_time: None,
+        }
+    }
+
+    #[test]
+    fn lists_open_or_written_notes_only() {
+        assert!(is_listed_sticky_note(&note(true, "")));
+        assert!(is_listed_sticky_note(&note(false, "内容")));
+        assert!(!is_listed_sticky_note(&note(false, "  \n ")));
+    }
+
+    #[test]
+    fn summary_flattens_note_fields() {
+        let summary = StickyNoteSummary {
+            note: note(true, "内容"),
+            visible: true,
+        };
+        let json = serde_json::to_value(&summary).unwrap();
+        assert_eq!(json["taskId"], "t");
+        assert_eq!(json["isOpen"], true);
+        assert_eq!(json["visible"], true);
+    }
 }
