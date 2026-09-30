@@ -233,7 +233,7 @@ watch(() => props.placeholder, () => {
 }
 
 .markdown-note-editor.variant-ghost :deep(.milkdown .ProseMirror) {
-  padding: 14px 20px 18px;
+  padding: var(--md-ghost-padding, 14px 20px 18px);
 }
 
 .markdown-note-editor :deep(.milkdown .ProseMirror h1),
