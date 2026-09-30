@@ -32,6 +32,7 @@ pub fn save_settings(
     state: State<AppState>,
     settings: AppSettings,
 ) -> ApiResult<()> {
+    let previous = into_api(state.db.load_settings())?;
     into_api(state.db.save_settings(&settings))?;
     let mut sanitized_settings = settings.clone();
     sanitized_settings.sticky_note_opacity =
@@ -44,9 +45,29 @@ pub fn save_settings(
     let _ = app.emit("settings-updated", sanitized_settings);
     into_api(state.sync.update_settings())?;
     into_api(state.sync.notify_local_change())?;
+    // 同步密码不匹配时自动同步已暂停：填入新密码后立即同步一次，成功即恢复。
+    if sync::should_resync_after_passphrase_edit(&previous, &settings) {
+        into_api(state.sync.request_sync("passphrase-updated"))?;
+    }
     // 关闭或调整勿扰时段后，立即弹出积压的提醒。
     into_api(state.scheduler.release_quiet_hold())?;
     Ok(())
+}
+
+/// 更换同步密码：用当前密码合并云端数据后以新密码加密上传，成功后才保存新密码。
+#[tauri::command]
+pub async fn change_sync_passphrase(
+    state: State<'_, AppState>,
+    current_passphrase: String,
+    new_passphrase: String,
+) -> ApiResult<()> {
+    let sync = state.sync.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        sync.change_passphrase(&current_passphrase, &new_passphrase)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    into_api(result)
 }
 
 /// 按当前设置重新注册全局快捷键（快速添加、显示/隐藏便签），失败时返回原因供设置界面展示。

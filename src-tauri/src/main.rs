@@ -85,6 +85,7 @@ fn main() {
             sticky::get_sticky_note_pinned_by_window_label,
             settings::test_webdav,
             settings::sync_now,
+            settings::change_sync_passphrase,
             settings::set_autostart,
             notification::ack_notification,
             notification::ack_all_notifications,

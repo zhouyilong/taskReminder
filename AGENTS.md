@@ -141,8 +141,10 @@
 - 备份文件名固定为 `taskreminder-YYYYMMDD-HHMMSS.db`，`backup::resolve_backup` 只接受这种名字，防止路径穿越。
 
 ### 同步状态码
-- `settings.webdav_last_sync_status` 存状态码（`sync::SyncState`：`never` / `syncing` / `success` / `first_sync` / `lock_busy` / `failed`），`get_status` 与 `sync-status` 事件也返回状态码；文案只在前端 `src/syncStatus.ts` 映射。
+- `settings.webdav_last_sync_status` 存状态码（`sync::SyncState`：`never` / `syncing` / `success` / `first_sync` / `lock_busy` / `failed` / `passphrase_mismatch`），`get_status` 与 `sync-status` 事件也返回状态码；文案只在前端 `src/syncStatus.ts` 映射。
 - **规则**：不要再按中文文案判断同步状态；新增状态时同时更新 `SyncState::parse` 与 `syncStatus.ts`。读取时兼容 2.0.1 之前存的中文文案。
+- `passphrase_mismatch`：远端加密数据无法用本机同步密码解密（`CryptoError::Decrypt` → `AppError::SyncPassphrase`），通常是其他设备更换了密码。此状态下 `request_sync_if_needed` 暂停自动同步，手动同步照常；`save_settings` 发现同步密码改动后立即同步一次。
+- **规则**：`perform_sync`、`change_passphrase` 用 `reqwest::blocking` 并做 Argon2 派生，只能在 `spawn_blocking` 或普通线程中调用，不要放进 `async` 任务（会占住运行时线程，debug 构建中 reqwest 直接 panic）。
 
 ### Cron 表达式
 - `recurrence::cron_schedule_expr` 把 5 段表达式转换为 `cron` crate 的 6 段格式：周字段按标准 Unix 含义（0/7 = 周日），数字周几会换成英文缩写，因为 `cron` crate 的数字周几是 1 = 周日。6、7 段原样透传。
@@ -160,6 +162,7 @@
 - 远端存储经 `RemoteStore` 接口访问，测试用内存实现（`sync.rs` 测试中的 `MemoryStore`）覆盖首次同步、明文转加密、密码错误等流程；测试使用 `sync_crypto::TEST_PARAMS` 的小 KDF 参数。
 - 上传的快照由 `export_local_snapshot_bytes` 生成并清空 `webdav_password` 与 `sync_passphrase`；新增敏感设置时要一并清空。
 - 同步密码存于本机 `settings.sync_passphrase`（settings 表不参与合并）；`save_settings` 广播给其他窗口的设置会清空两个密码。
+- 更换同步密码走 `CloudSyncService::change_passphrase`：用当前密码合并远端后以新密码上传（`sync_with_remote_as`），上传成功后才保存新密码；前端成功后只刷新同步相关字段，不要整体 `loadSettings` 覆盖草稿，也不要让旧草稿再次保存旧密码。
 - 开发构建对 `argon2`/`blake2` 单独开启优化（`Cargo.toml` 的 `profile.dev.package`），否则每次同步派生密钥要数秒。
 
 ### 全局快捷键

@@ -206,6 +206,10 @@ export const api = {
   async syncNow(reason: string): Promise<void> {
     return invoke("sync_now", { reason });
   },
+  /** 更换同步密码：用当前密码合并云端数据后以新密码加密上传，成功后才保存新密码。 */
+  async changeSyncPassphrase(currentPassphrase: string, newPassphrase: string): Promise<void> {
+    return invoke("change_sync_passphrase", { currentPassphrase, newPassphrase });
+  },
   async setAutoStart(enabled: boolean): Promise<void> {
     return invoke("set_autostart", { enabled });
   },

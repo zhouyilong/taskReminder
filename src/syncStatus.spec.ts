@@ -6,6 +6,7 @@ describe("parseSyncState", () => {
     expect(parseSyncState("success")).toBe("success");
     expect(parseSyncState("first_sync")).toBe("first_sync");
     expect(parseSyncState("lock_busy")).toBe("lock_busy");
+    expect(parseSyncState("passphrase_mismatch")).toBe("passphrase_mismatch");
   });
 
   it("兼容旧版中文文案", () => {
@@ -25,6 +26,7 @@ describe("parseSyncState", () => {
 describe("syncStateLabel", () => {
   it("状态码映射为文案，未知值原样显示", () => {
     expect(syncStateLabel("success")).toBe("同步成功");
+    expect(syncStateLabel("passphrase_mismatch")).toBe("同步密码不匹配");
     expect(syncStateLabel("never")).toBe("未同步");
     expect(syncStateLabel(undefined)).toBe("未同步");
     expect(syncStateLabel("同步成功")).toBe("同步成功");
@@ -38,6 +40,7 @@ describe("syncStateTone", () => {
     expect(syncStateTone("first_sync")).toBe("success");
     expect(syncStateTone("syncing")).toBe("syncing");
     expect(syncStateTone("failed")).toBe("error");
+    expect(syncStateTone("passphrase_mismatch")).toBe("error");
     expect(syncStateTone("lock_busy")).toBe("idle");
     expect(syncStateTone("never")).toBe("idle");
   });
