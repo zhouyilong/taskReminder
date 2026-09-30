@@ -83,6 +83,15 @@ struct StickyNoteReminderPayload {
     reminder_time: Option<String>,
 }
 
+/// 待办被删除或完成后收起它的便签窗口（`sticky_is_open` 由数据库在同一次更新中清掉），
+/// 并通知便签管理列表刷新。
+pub fn hide_sticky_note_window(app: &tauri::AppHandle, task_id: &str) {
+    if let Some(window) = app.get_webview_window(&sticky_note_item_label(task_id)) {
+        let _ = window.hide();
+    }
+    let _ = app.emit("sticky-note-changed", task_id.to_string());
+}
+
 pub fn emit_sticky_note_reminder(
     app: &tauri::AppHandle,
     task_id: &str,

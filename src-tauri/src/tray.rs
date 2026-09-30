@@ -272,7 +272,7 @@ fn complete_next(app: &AppHandle, task_id: &str) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
-    if let Err(err) = complete_task_by_id(&state, task_id) {
+    if let Err(err) = complete_task_by_id(app, &state, task_id) {
         eprintln!("[tray] 完成待办失败: {}", err);
     }
 }

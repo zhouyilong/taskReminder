@@ -523,7 +523,8 @@ impl DbManager {
         let conn = self.get_conn()?;
         let now = now_string();
         conn.execute(
-            "UPDATE tasks SET status = 'COMPLETED', completed_at = ?, updated_at = ? WHERE id = ?",
+            // 完成后便签随之关闭：已完成的待办不再恢复便签窗口，取消完成也不会自动重新打开。
+            "UPDATE tasks SET status = 'COMPLETED', completed_at = ?, sticky_is_open = 0, updated_at = ? WHERE id = ?",
             params![now, now, task_id],
         )?;
         Ok(())
@@ -543,7 +544,8 @@ impl DbManager {
         let conn = self.get_conn()?;
         let now = now_string();
         conn.execute(
-            "UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE id = ?",
+            // 同时关闭便签，从回收站恢复时不会突然弹出便签窗口。
+            "UPDATE tasks SET deleted_at = ?, sticky_is_open = 0, updated_at = ? WHERE id = ?",
             params![now, now, task_id],
         )?;
         Ok(())
@@ -2122,6 +2124,63 @@ mod tests {
         backdate_task(&db, &id);
         db.move_sticky_note(&id, 200.0, -100.0).unwrap();
         assert!(db.get_sticky_note(&id).unwrap().unwrap().is_open);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn deleting_or_completing_task_closes_its_sticky_note() {
+        let (db, dir) = temp_db();
+        let deleted = db
+            .create_custom_sticky_note("删除", Some("内容"), None, None, None, None)
+            .unwrap();
+        let completed = db
+            .create_custom_sticky_note("完成", Some("内容"), None, None, None, None)
+            .unwrap();
+        assert!(
+            db.get_sticky_note(&deleted.task_id)
+                .unwrap()
+                .unwrap()
+                .is_open
+        );
+
+        db.delete_task(&deleted.task_id).unwrap();
+        assert!(
+            !db.get_sticky_note(&deleted.task_id)
+                .unwrap()
+                .unwrap()
+                .is_open
+        );
+        // 从回收站恢复时不会重新弹出便签。
+        db.restore_task(&deleted.task_id).unwrap();
+        assert!(
+            !db.get_sticky_note(&deleted.task_id)
+                .unwrap()
+                .unwrap()
+                .is_open
+        );
+
+        db.complete_task(&completed.task_id).unwrap();
+        assert!(
+            !db.get_sticky_note(&completed.task_id)
+                .unwrap()
+                .unwrap()
+                .is_open
+        );
+        db.uncomplete_task(&completed.task_id).unwrap();
+        assert!(
+            !db.get_sticky_note(&completed.task_id)
+                .unwrap()
+                .unwrap()
+                .is_open
+        );
+        // 便签内容保留，可以手动重新打开。
+        assert_eq!(
+            db.get_sticky_note(&completed.task_id)
+                .unwrap()
+                .unwrap()
+                .content,
+            "内容"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

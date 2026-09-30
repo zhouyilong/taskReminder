@@ -2,12 +2,12 @@
 
 use chrono::Local;
 use serde::Deserialize;
-use tauri::{Emitter, Manager, State};
+use tauri::{Emitter, State};
 
 use crate::commands::{into_api, ApiResult};
 use crate::models::{NotificationPayload, ReminderRecord};
 use crate::state::AppState;
-use crate::windows::sticky::{emit_sticky_note_reminder, sticky_note_item_label};
+use crate::windows::sticky::{emit_sticky_note_reminder, hide_sticky_note_window};
 use crate::{scheduler, time};
 
 #[derive(Deserialize)]
@@ -118,11 +118,8 @@ pub fn complete_notification(
             into_api(state.db.complete_task(&task.id))?;
         }
         state.scheduler.cancel_task(&task.id);
-        if let Some(window) = app.get_webview_window(&sticky_note_item_label(&task.id)) {
-            let _ = window.hide();
-            into_api(state.db.close_sticky_note(&task.id))?;
-            let _ = app.emit("sticky-note-changed", task.id.clone());
-        }
+        // `complete_task` 已在同一次更新中清掉 `sticky_is_open`，这里只收起窗口。
+        hide_sticky_note_window(&app, &task.id);
     }
     // 同一任务可能还有其他排队中的提醒，一并撤下。
     let _ = state

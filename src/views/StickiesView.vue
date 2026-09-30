@@ -217,9 +217,7 @@ const confirmDelete = (item: StickyListItem) => {
     message: `确定要删除“${item.note.title || "（无标题）"}”吗？便签与所属待办会一起进入回收站。`,
     action: () =>
       withBusy(async () => {
-        if (item.state !== "closed") {
-          await api.closeStickyNote(item.note.taskId);
-        }
+        // 后端删除待办时会一并收起它的便签窗口。
         await api.deleteTask(item.note.taskId);
         await refreshAll();
       }),
