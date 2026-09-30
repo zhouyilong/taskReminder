@@ -39,6 +39,7 @@ import CalendarView from "./views/CalendarView.vue";
 import TasksView from "./views/TasksView.vue";
 import CompletedView from "./views/CompletedView.vue";
 import RecurringView from "./views/RecurringView.vue";
+import StickiesView from "./views/StickiesView.vue";
 import RecordsView from "./views/RecordsView.vue";
 import StatsView from "./views/StatsView.vue";
 import TrashView from "./views/TrashView.vue";
@@ -58,6 +59,7 @@ const VIEWS: Record<TabKey, Component> = {
   tasks: TasksView,
   completed: CompletedView,
   recurring: RecurringView,
+  stickies: StickiesView,
   records: RecordsView,
   stats: StatsView,
   trash: TrashView,

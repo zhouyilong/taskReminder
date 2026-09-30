@@ -5,6 +5,7 @@ import type {
   RecurringMode,
   ReminderRecord,
   StickyNote,
+  StickyNoteSummary,
   AppSettings,
   SyncStatus,
   NotificationPayload,
@@ -129,6 +130,14 @@ export const api = {
   },
   async saveSettings(settings: AppSettings): Promise<void> {
     return invoke("save_settings", { settings });
+  },
+  /** 便签管理列表：已打开或有内容的便签，附带窗口是否可见。 */
+  async listStickyNoteSummaries(): Promise<StickyNoteSummary[]> {
+    return invoke("list_sticky_note_summaries");
+  },
+  /** 显示已打开的便签并置前，不写库。 */
+  async showStickyNote(taskId: string): Promise<void> {
+    return invoke("show_sticky_note", { taskId });
   },
   async getStickyNoteByWindowLabel(label: string): Promise<StickyNote | null> {
     return invoke("get_sticky_note_by_window_label", { label });

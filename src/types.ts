@@ -74,6 +74,11 @@ export interface StickyNote {
   reminderTime?: string | null;
 }
 
+/** 便签管理列表的一行：便签加上窗口此刻是否可见。 */
+export interface StickyNoteSummary extends StickyNote {
+  visible: boolean;
+}
+
 export interface AppSettings {
   autoStartEnabled: boolean;
   soundEnabled: boolean;

@@ -352,6 +352,8 @@ pub fn hide_all_sticky_windows(app: &tauri::AppHandle) {
             let _ = window.hide();
         }
     }
+    // 便签管理列表据此刷新“显示中 / 已隐藏”。
+    let _ = app.emit("sticky-note-changed", "");
 }
 
 /// 重新显示所有处于打开状态的便签（在主线程创建或显示窗口）。
@@ -363,6 +365,7 @@ pub fn show_all_sticky_windows(app: &tauri::AppHandle) {
                 eprintln!("[sticky-note] 显示全部便签失败: {}", err);
             }
         }
+        let _ = handle.emit("sticky-note-changed", "");
     });
     if let Err(err) = result {
         eprintln!("[sticky-note] 主线程调度显示全部便签失败: {}", err);

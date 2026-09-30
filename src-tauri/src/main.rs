@@ -69,6 +69,8 @@ fn main() {
             recurring::preview_recurring_triggers,
             settings::get_settings,
             settings::save_settings,
+            sticky::list_sticky_note_summaries,
+            sticky::show_sticky_note,
             sticky::get_sticky_note_by_window_label,
             sticky::get_sticky_note,
             sticky::open_sticky_note,

@@ -3984,6 +3984,81 @@ html.sticky-note-mode.is-linux .paper-note {
   width: 176px;
 }
 
+/* 便签管理列表 */
+.sticky-search {
+  flex: 1;
+  min-width: 220px;
+  margin-bottom: 0;
+}
+
+.sticky-search .input {
+  height: 34px;
+  box-shadow: none;
+}
+
+/* 固定列尽量窄，把宽度留给内容预览。 */
+.sticky-table .col-sticky-state {
+  width: 72px;
+}
+
+.sticky-table .col-desc {
+  width: 20%;
+}
+
+.sticky-table .col-note {
+  width: auto;
+}
+
+.sticky-table .col-sticky-reminder {
+  width: 104px;
+}
+
+.sticky-table .col-datetime {
+  width: 92px;
+}
+
+.sticky-table .col-sticky-actions {
+  width: 116px;
+}
+
+.status-pill.sticky-showing {
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+
+.status-pill.sticky-hidden {
+  background: var(--warning-soft);
+  color: var(--warning-text);
+}
+
+/* 标题可点击：显示/打开便签。外观保持为普通的加粗标题。 */
+.sticky-title-link {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sticky-title-link:hover:not(:disabled) {
+  color: var(--primary-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.sticky-title-link:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .row-actions {
   display: flex;
   gap: 6px;

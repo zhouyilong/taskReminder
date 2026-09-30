@@ -847,8 +847,8 @@ impl DbManager {
                 .filter(|value| value.is_finite())
                 .or_else(|| existing.as_ref().map(|note| note.pos_x))
                 .unwrap_or(STICKY_NOTE_DEFAULT_POS_X)
-        }
-        .max(0.0);
+        };
+        // 负坐标（主屏左侧 / 上方的副屏）原样保留；屏幕外的位置在显示窗口时校正。
         let y = if keep_existing_position {
             existing
                 .as_ref()
@@ -859,8 +859,7 @@ impl DbManager {
                 .filter(|value| value.is_finite())
                 .or_else(|| existing.as_ref().map(|note| note.pos_y))
                 .unwrap_or(STICKY_NOTE_DEFAULT_POS_Y)
-        }
-        .max(0.0);
+        };
         let width = existing
             .as_ref()
             .map(|note| normalize_sticky_item_width(Some(note.width)))
@@ -2123,6 +2122,24 @@ mod tests {
         backdate_task(&db, &id);
         db.move_sticky_note(&id, 200.0, -100.0).unwrap();
         assert!(db.get_sticky_note(&id).unwrap().unwrap().is_open);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn reopening_sticky_note_keeps_negative_coordinates() {
+        let (db, dir) = temp_db();
+        let note = db
+            .create_custom_sticky_note("note", None, Some(48.0), Some(76.0), None, None)
+            .unwrap();
+        db.move_sticky_note(&note.task_id, -1500.0, -100.0).unwrap();
+        db.close_sticky_note(&note.task_id).unwrap();
+        let reopened = db
+            .open_sticky_note(&note.task_id, None, Some(48.0), Some(76.0))
+            .unwrap();
+        assert_eq!((reopened.pos_x, reopened.pos_y), (-1500.0, -100.0));
+        let stored = db.get_sticky_note(&note.task_id).unwrap().unwrap();
+        assert_eq!((stored.pos_x, stored.pos_y), (-1500.0, -100.0));
+        assert!(stored.is_open);
         let _ = std::fs::remove_dir_all(dir);
     }
 
