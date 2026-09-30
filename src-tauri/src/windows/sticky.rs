@@ -1,5 +1,8 @@
 //! 便签窗口管理：窗口标签编码、创建与显示、层级（置顶/桌面层）、UI 状态注入与窗口事件。
 
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
 use serde::Serialize;
 use tauri::{
     Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
@@ -9,6 +12,7 @@ use crate::db::DbManager;
 use crate::errors::AppError;
 use crate::models::{StickyNote, UiStatePayload};
 use crate::state::AppState;
+use crate::windows::placement::{self, Rect};
 
 pub const STICKY_NOTE_ITEM_PREFIX: &str = "sticky-note-item-";
 const STICKY_NOTE_ITEM_WIDTH: f64 = 284.0;
@@ -206,6 +210,66 @@ fn emit_cached_ui_state_to_window(app: &tauri::AppHandle, window: &tauri::Webvie
     }
 }
 
+/// 为越界校正而移动窗口时记下校正后的位置：随后的 `Moved` 事件落在这里时不保存，
+/// 避免把本机的校正同步回原设备。用户之后拖到别处才会保存。
+fn corrected_positions() -> &'static Mutex<HashMap<String, (f64, f64)>> {
+    static POSITIONS: OnceLock<Mutex<HashMap<String, (f64, f64)>>> = OnceLock::new();
+    POSITIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 窗口停在校正位置（1 px 以内）时返回 `true`；移到别处后清除记录。
+fn is_at_corrected_position(note_id: &str, x: f64, y: f64) -> bool {
+    let Ok(mut positions) = corrected_positions().lock() else {
+        return false;
+    };
+    match positions.get(note_id) {
+        Some(&(cx, cy)) if (cx - x).abs() <= 1.0 && (cy - y).abs() <= 1.0 => true,
+        Some(_) => {
+            positions.remove(note_id);
+            false
+        }
+        None => false,
+    }
+}
+
+/// 显示器工作区（按窗口当前缩放换算为逻辑像素，与 `set_position` 的换算一致）。
+fn monitor_work_areas(window: &tauri::WebviewWindow) -> Vec<Rect> {
+    let scale_factor = window.scale_factor().unwrap_or(1.0);
+    window
+        .available_monitors()
+        .unwrap_or_default()
+        .iter()
+        .map(|monitor| {
+            let area = monitor.work_area();
+            let position = area.position.to_logical::<f64>(scale_factor);
+            let size = area.size.to_logical::<f64>(scale_factor);
+            Rect::new(position.x, position.y, size.width, size.height)
+        })
+        .collect()
+}
+
+/// 便签应显示的位置：保存的位置在本机屏幕外时移回屏幕内（只移动窗口，不写库）。
+fn visible_position(
+    window: &tauri::WebviewWindow,
+    note: &StickyNote,
+    width: f64,
+    height: f64,
+) -> (f64, f64) {
+    let saved = Rect::new(note.pos_x, note.pos_y, width, height);
+    let corrected = placement::clamp_to_work_areas(saved, &monitor_work_areas(window));
+    if let Ok(mut positions) = corrected_positions().lock() {
+        match corrected {
+            Some(position) => {
+                positions.insert(note.task_id.clone(), position);
+            }
+            None => {
+                positions.remove(&note.task_id);
+            }
+        }
+    }
+    corrected.unwrap_or((note.pos_x, note.pos_y))
+}
+
 pub fn show_sticky_note_item_window(
     app: &tauri::AppHandle,
     note: &StickyNote,
@@ -243,7 +307,8 @@ pub fn show_sticky_note_item_window(
     let width = note.width.max(STICKY_NOTE_ITEM_MIN_WIDTH);
     let height = note.height.max(STICKY_NOTE_ITEM_MIN_HEIGHT);
     let _ = window.set_size(LogicalSize::new(width, height));
-    let _ = window.set_position(LogicalPosition::new(note.pos_x, note.pos_y));
+    let (x, y) = visible_position(&window, note, width, height);
+    let _ = window.set_position(LogicalPosition::new(x, y));
     let _ = window.set_shadow(false);
     enforce_sticky_item_layer(&window, is_pinned);
     let _ = window.emit(&refresh_event, note.clone());
@@ -313,7 +378,8 @@ pub fn toggle_all_sticky_windows(app: &tauri::AppHandle) {
     }
 }
 
-/// 便签窗口事件：关闭时隐藏并记为已关闭，移动与缩放时保存位置和尺寸。
+/// 便签窗口事件：关闭时隐藏并记为已关闭，移动与缩放时保存位置和尺寸
+/// （越界校正造成的移动不保存）。
 pub fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
     let note_id = note_id_from_item_label(window.label());
     match event {
@@ -334,6 +400,9 @@ pub fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
             {
                 let scale_factor = window.scale_factor().unwrap_or(1.0);
                 let logical = position.to_logical::<f64>(scale_factor);
+                if is_at_corrected_position(&note_id, logical.x, logical.y) {
+                    return;
+                }
                 let _ = state.db.move_sticky_note(&note_id, logical.x, logical.y);
             }
         }

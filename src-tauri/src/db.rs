@@ -1007,9 +1007,10 @@ impl DbManager {
         let now = now_string();
         conn.execute(
             "UPDATE tasks
-             SET sticky_pos_x = ?, sticky_pos_y = ?, sticky_is_open = 1, updated_at = ?
-             WHERE id = ?",
-            params![x.max(0.0), y.max(0.0), now, task_id],
+             SET sticky_pos_x = ?1, sticky_pos_y = ?2, sticky_is_open = 1, updated_at = ?3
+             WHERE id = ?4
+               AND (ABS(sticky_pos_x - ?1) >= 0.5 OR ABS(sticky_pos_y - ?2) >= 0.5 OR sticky_is_open != 1)",
+            params![x, y, now, task_id],
         )?;
         Ok(())
     }
@@ -1024,8 +1025,9 @@ impl DbManager {
         let now = now_string();
         conn.execute(
             "UPDATE tasks
-             SET sticky_width = ?, sticky_height = ?, sticky_is_open = 1, updated_at = ?
-             WHERE id = ?",
+             SET sticky_width = ?1, sticky_height = ?2, sticky_is_open = 1, updated_at = ?3
+             WHERE id = ?4
+               AND (ABS(sticky_width - ?1) >= 0.5 OR ABS(sticky_height - ?2) >= 0.5 OR sticky_is_open != 1)",
             params![
                 normalize_sticky_item_width(Some(width)),
                 normalize_sticky_item_height(Some(height)),
@@ -2038,6 +2040,66 @@ mod tests {
         // 已软删除的记录也算触发过，删除记录不应导致重复弹出。
         db.delete_reminder_record(&record.id).unwrap();
         assert!(db.has_reminder_record_since("task-1", &trigger).unwrap());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn sticky_row(db: &DbManager, id: &str) -> (f64, f64, f64, f64, String) {
+        let conn = db.get_conn().unwrap();
+        conn.query_row(
+            "SELECT sticky_pos_x, sticky_pos_y, sticky_width, sticky_height, updated_at FROM tasks WHERE id = ?",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        )
+        .unwrap()
+    }
+
+    fn backdate_task(db: &DbManager, id: &str) {
+        let conn = db.get_conn().unwrap();
+        conn.execute(
+            "UPDATE tasks SET updated_at = '2020-01-01 00:00:00' WHERE id = ?",
+            [id],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn sticky_move_keeps_negative_coordinates_and_skips_unchanged() {
+        let (db, dir) = temp_db();
+        let note = db
+            .create_custom_sticky_note("note", None, Some(48.0), Some(76.0), None, None)
+            .unwrap();
+        let id = note.task_id.clone();
+
+        // 主屏左侧副屏的负坐标原样保存。
+        db.move_sticky_note(&id, -1500.0, -100.0).unwrap();
+        let (x, y, _, _, _) = sticky_row(&db, &id);
+        assert_eq!((x, y), (-1500.0, -100.0));
+
+        // 位置不变（打开窗口时 set_position 触发的 Moved）不改 updated_at，避免产生同步改动。
+        backdate_task(&db, &id);
+        db.move_sticky_note(&id, -1500.2, -100.0).unwrap();
+        let (_, _, _, _, updated_at) = sticky_row(&db, &id);
+        assert_eq!(updated_at, "2020-01-01 00:00:00");
+
+        db.move_sticky_note(&id, 200.0, -100.0).unwrap();
+        let (x, _, _, _, updated_at) = sticky_row(&db, &id);
+        assert_eq!(x, 200.0);
+        assert_ne!(updated_at, "2020-01-01 00:00:00");
+
+        // 尺寸同理。
+        let (_, _, width, height, _) = sticky_row(&db, &id);
+        backdate_task(&db, &id);
+        db.resize_sticky_note(&id, width, height).unwrap();
+        assert_eq!(sticky_row(&db, &id).4, "2020-01-01 00:00:00");
+        db.resize_sticky_note(&id, width + 40.0, height).unwrap();
+        assert_eq!(sticky_row(&db, &id).2, width + 40.0);
+        assert_ne!(sticky_row(&db, &id).4, "2020-01-01 00:00:00");
+
+        // 已关闭的便签被移动时重新记为打开。
+        db.close_sticky_note(&id).unwrap();
+        backdate_task(&db, &id);
+        db.move_sticky_note(&id, 200.0, -100.0).unwrap();
+        assert!(db.get_sticky_note(&id).unwrap().unwrap().is_open);
         let _ = std::fs::remove_dir_all(dir);
     }
 }
