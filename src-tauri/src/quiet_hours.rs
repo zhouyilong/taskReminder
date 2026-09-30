@@ -1,22 +1,17 @@
 //! 勿扰时段：期间提醒照常写记录并进入队列，但不弹窗；结束后由巡检一次性弹出。
 
-use chrono::{Local, NaiveTime};
+use chrono::NaiveTime;
 
 use crate::models::AppSettings;
+use crate::time::{self, format_clock, parse_clock};
 
 pub const DEFAULT_START: &str = "22:00";
 pub const DEFAULT_END: &str = "08:00";
 
-fn parse_clock(value: &str) -> Option<NaiveTime> {
-    NaiveTime::parse_from_str(value.trim(), "%H:%M")
-        .or_else(|_| NaiveTime::parse_from_str(value.trim(), "%H:%M:%S"))
-        .ok()
-}
-
 /// 规范为 `HH:MM`；无法解析时回退为默认值。
 pub fn normalize_clock(value: &str, fallback: &str) -> String {
     parse_clock(value)
-        .map(|time| time.format("%H:%M").to_string())
+        .map(|time| format_clock(&time))
         .unwrap_or_else(|| fallback.to_string())
 }
 
@@ -41,7 +36,7 @@ pub fn is_quiet_now(settings: &AppSettings) -> bool {
         && is_quiet_at(
             &settings.quiet_hours_start,
             &settings.quiet_hours_end,
-            Local::now().time(),
+            time::now().time(),
         )
 }
 
@@ -49,8 +44,27 @@ pub fn is_quiet_now(settings: &AppSettings) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn quiet_now_follows_the_clock_and_the_switch() {
+        let mut settings = AppSettings {
+            quiet_hours_enabled: true,
+            quiet_hours_start: "22:00".to_string(),
+            quiet_hours_end: "08:00".to_string(),
+            ..Default::default()
+        };
+        {
+            let _now = crate::time::fix_now("2026-09-30T23:30");
+            assert!(is_quiet_now(&settings));
+            settings.quiet_hours_enabled = false;
+            assert!(!is_quiet_now(&settings));
+            settings.quiet_hours_enabled = true;
+        }
+        let _now = crate::time::fix_now("2026-10-01T08:00");
+        assert!(!is_quiet_now(&settings));
+    }
+
     fn at(value: &str) -> NaiveTime {
-        NaiveTime::parse_from_str(value, "%H:%M").unwrap()
+        parse_clock(value).unwrap()
     }
 
     #[test]

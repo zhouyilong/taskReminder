@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::{Duration, Local, NaiveDateTime};
+use chrono::{Duration, NaiveDateTime};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
@@ -16,7 +16,7 @@ use crate::errors::AppError;
 use crate::kinds::{RepeatMode, TaskStatus};
 use crate::models::{RecurringTask, ReminderRecord, Task, PRIORITY_MAX};
 use crate::recurrence::{self, weekday_mask};
-use crate::time::{format_datetime, parse_datetime_any};
+use crate::time::{self, format_datetime, parse_datetime_any};
 
 pub const BACKUP_APP_ID: &str = "TaskReminder";
 pub const BACKUP_FORMAT_VERSION: u32 = 1;
@@ -80,7 +80,12 @@ impl ExportFormat {
             Self::Markdown => "任务提醒待办",
             Self::Ics => "任务提醒日历",
         };
-        format!("{}-{}.{}", stem, now.format("%Y%m%d"), self.extension())
+        format!(
+            "{}-{}.{}",
+            stem,
+            time::format_compact_date(now),
+            self.extension()
+        )
     }
 }
 
@@ -92,7 +97,7 @@ pub fn build_backup(db: &DbManager, app_version: &str) -> Result<BackupFile, App
         app: BACKUP_APP_ID.to_string(),
         format_version: BACKUP_FORMAT_VERSION,
         app_version: app_version.to_string(),
-        exported_at: format_datetime(&Local::now().naive_local()),
+        exported_at: format_datetime(&time::now()),
         tasks,
         recurring_tasks: db.list_recurring_tasks()?,
         reminder_records: db.list_reminder_records()?,
@@ -128,7 +133,7 @@ pub struct ImportSummary {
 
 /// 按 id 合并备份，返回统计。循环提醒的下次触发时间若已过去，按当前时间重新计算。
 pub fn import_backup(db: &DbManager, backup: &BackupFile) -> Result<ImportSummary, AppError> {
-    let now = Local::now().naive_local();
+    let now = time::now();
     let recurring: Vec<RecurringTask> = backup
         .recurring_tasks
         .iter()
@@ -358,7 +363,7 @@ fn ics_fold(line: &str) -> String {
 }
 
 fn ics_datetime(value: &NaiveDateTime) -> String {
-    value.format("%Y%m%dT%H%M%S").to_string()
+    time::format_ics_local(value)
 }
 
 const ICS_WEEKDAYS: [&str; 7] = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
@@ -535,7 +540,7 @@ pub fn backup_dir(db_path: &Path) -> PathBuf {
 }
 
 fn backup_file_name(now: &NaiveDateTime) -> String {
-    format!("{}{}.db", AUTO_BACKUP_PREFIX, now.format("%Y%m%d-%H%M%S"))
+    format!("{}{}.db", AUTO_BACKUP_PREFIX, time::format_stamp(now))
 }
 
 /// 解析备份文件名中的时间；不是本应用生成的备份返回 None（也用来防止路径穿越）。
@@ -544,7 +549,7 @@ fn parse_backup_name(name: &str) -> Option<NaiveDateTime> {
     if stamp.len() != 15 || !stamp.chars().all(|c| c.is_ascii_digit() || c == '-') {
         return None;
     }
-    NaiveDateTime::parse_from_str(stamp, "%Y%m%d-%H%M%S").ok()
+    time::parse_stamp(stamp)
 }
 
 pub fn list_backups(dir: &Path) -> Vec<BackupInfo> {

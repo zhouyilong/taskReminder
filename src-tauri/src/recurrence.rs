@@ -7,6 +7,7 @@ use crate::errors::AppError;
 use crate::holidays;
 use crate::kinds::RepeatMode;
 use crate::models::RecurringTask;
+use crate::time;
 
 /// 每周多天的位掩码：周一 = bit0 … 周日 = bit6。
 pub const WEEKDAY_MASK_ALL: i64 = 0b111_1111;
@@ -156,7 +157,7 @@ pub fn compute_next_trigger(
     let mut normalized = task.clone();
     sanitize_recurring_task(&mut normalized)?;
 
-    let base = base.unwrap_or_else(|| Local::now().naive_local());
+    let base = base.unwrap_or_else(time::now);
     let next = match &normalized.repeat_mode {
         RepeatMode::IntervalRange => compute_interval_next(&normalized, base)?,
         RepeatMode::Daily => compute_daily_next(&normalized, base)?,
@@ -166,7 +167,7 @@ pub fn compute_next_trigger(
         RepeatMode::Workday => compute_workday_next(&normalized, base)?,
         RepeatMode::Unknown(mode) => return Err(unsupported_mode(mode)),
     };
-    Ok(next.format("%Y-%m-%dT%H:%M:%S").to_string())
+    Ok(time::format_datetime(&next))
 }
 
 /// 节假日数据更新后，“法定工作日”提醒的下次触发可能变化（例如新公布的调休上班日）。
@@ -179,12 +180,12 @@ pub fn refreshed_workday_trigger(
     if task.is_paused || task.deleted_at.is_some() || task.repeat_mode != RepeatMode::Workday {
         return Ok(None);
     }
-    let pending = crate::time::parse_datetime_any(&task.next_trigger);
+    let pending = time::parse_datetime_any(&task.next_trigger);
     if pending.is_some_and(|scheduled| scheduled <= now) {
         return Ok(None);
     }
     let next = compute_next_trigger(task, Some(now))?;
-    let unchanged = match (pending, crate::time::parse_datetime_any(&next)) {
+    let unchanged = match (pending, time::parse_datetime_any(&next)) {
         (Some(current), Some(recomputed)) => current == recomputed,
         _ => next == task.next_trigger,
     };
@@ -205,13 +206,13 @@ pub fn upcoming_triggers(
     if task.is_paused || limit == 0 || !task.repeat_mode.is_known() {
         return Ok(result);
     }
-    let Some(mut current) = crate::time::parse_datetime_any(&task.next_trigger) else {
+    let Some(mut current) = time::parse_datetime_any(&task.next_trigger) else {
         return Ok(result);
     };
     while current <= until && result.len() < limit {
-        result.push(current.format("%Y-%m-%dT%H:%M:%S").to_string());
+        result.push(time::format_datetime(&current));
         let next = compute_next_trigger(task, Some(current))?;
-        match crate::time::parse_datetime_any(&next) {
+        match time::parse_datetime_any(&next) {
             Some(value) if value > current => current = value,
             _ => break,
         }
@@ -500,7 +501,7 @@ fn normalize_time_field(value: Option<&str>, field: &str) -> Result<Option<Strin
     }
     let parsed = parse_time(trimmed)
         .map_err(|_| AppError::Invalid(format!("{}格式错误，应为 HH:mm，例如 08:30", field)))?;
-    Ok(Some(parsed.format("%H:%M").to_string()))
+    Ok(Some(time::format_clock(&parsed)))
 }
 
 fn normalize_text(value: Option<&str>) -> Option<String> {
@@ -515,7 +516,7 @@ fn normalize_text(value: Option<&str>) -> Option<String> {
 }
 
 fn parse_time(value: &str) -> Result<NaiveTime, AppError> {
-    NaiveTime::parse_from_str(value, "%H:%M").map_err(|e| AppError::Invalid(e.to_string()))
+    time::parse_clock(value).ok_or_else(|| AppError::Invalid(format!("无法解析时间: {}", value)))
 }
 
 fn month_datetime(
@@ -564,7 +565,7 @@ mod tests {
     use crate::kinds::{TaskStatus, TaskType};
 
     fn dt(value: &str) -> NaiveDateTime {
-        NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M").unwrap()
+        time::parse_datetime_any(value).unwrap()
     }
 
     fn task(mode: RepeatMode) -> RecurringTask {

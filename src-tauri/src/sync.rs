@@ -5,7 +5,7 @@ use std::sync::{
 };
 
 use base64::Engine;
-use chrono::{Local, NaiveDateTime};
+use chrono::NaiveDateTime;
 use reqwest::StatusCode;
 use rusqlite::{params_from_iter, types::Value, Connection};
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,7 @@ use crate::db::{DbManager, TOMBSTONE_RETENTION_DAYS_SYNC};
 use crate::errors::AppError;
 use crate::models::{AppSettings, SyncStatus};
 use crate::sync_crypto::{self, KdfParams};
-use crate::time::parse_datetime_any;
+use crate::time::{self, parse_datetime_any};
 
 const REMOTE_DB_NAME: &str = "taskreminder.db";
 /// 开启端到端加密后的远端文件；`REMOTE_DB_NAME` 处改放占位说明，旧版本读到后同步失败而不会上传明文。
@@ -254,7 +254,7 @@ impl CloudSyncService {
         if !settings.webdav_enabled || settings.webdav_url.trim().is_empty() {
             return Ok(());
         }
-        let now = Local::now().naive_local();
+        let now = time::now();
         let mut due = now + chrono::Duration::seconds(STARTUP_SYNC_DELAY_SECONDS as i64);
         if let Some(throttle_due) = next_allowed_auto_sync_time(&settings, now) {
             if throttle_due > due {
@@ -270,7 +270,7 @@ impl CloudSyncService {
         if !settings.webdav_enabled || settings.webdav_url.trim().is_empty() {
             return Ok(());
         }
-        let now = Local::now().naive_local();
+        let now = time::now();
         let mut due = now + chrono::Duration::seconds(LOCAL_CHANGE_DEBOUNCE_SECONDS as i64);
         if let Some(throttle_due) = next_allowed_auto_sync_time(&settings, now) {
             if throttle_due > due {
@@ -282,7 +282,7 @@ impl CloudSyncService {
     }
 
     fn schedule_auto_sync_at(&self, due: NaiveDateTime, reason: &str) -> Result<(), AppError> {
-        let now = Local::now().naive_local();
+        let now = time::now();
         if due <= now {
             return self.request_sync_if_needed(reason);
         }
@@ -317,7 +317,7 @@ impl CloudSyncService {
     }
 
     fn request_sync_on_interval(&self) -> Result<(), AppError> {
-        let now = Local::now().naive_local();
+        let now = time::now();
         if let Some(due) = *self.next_auto_sync_due.lock().unwrap() {
             let remaining = due - now;
             // 如果 debounce 很快就会触发，就避免 interval “抢跑”；否则 interval 作为兜底依然可以触发同步。
@@ -342,7 +342,7 @@ impl CloudSyncService {
         }
 
         // throttle：距离上一次同步太近则延后。
-        let now = Local::now().naive_local();
+        let now = time::now();
         if let Some(throttle_due) = next_allowed_auto_sync_time(&settings, now) {
             self.schedule_auto_sync_at(throttle_due, "throttle")?;
             return Ok(());
@@ -1008,7 +1008,7 @@ struct LockInfo {
 
 impl LockInfo {
     fn new(device_id: &str) -> Self {
-        let expires_at = chrono::Utc::now().timestamp_millis() + LOCK_TTL_SECONDS * 1000;
+        let expires_at = time::unix_millis() + LOCK_TTL_SECONDS * 1000;
         Self {
             device_id: device_id.to_string(),
             expires_at,
@@ -1016,7 +1016,7 @@ impl LockInfo {
     }
 
     fn is_expired(&self) -> bool {
-        self.expires_at_millis() <= chrono::Utc::now().timestamp_millis()
+        self.expires_at_millis() <= time::unix_millis()
     }
 
     fn expires_at_millis(&self) -> i64 {
@@ -1230,9 +1230,7 @@ mod tests {
     }
 
     fn set_completed(path: &std::path::Path, id: &str, days_ago: i64) {
-        let completed = crate::time::format_datetime(
-            &(Local::now().naive_local() - chrono::Duration::days(days_ago)),
-        );
+        let completed = time::format_datetime(&(time::now() - chrono::Duration::days(days_ago)));
         let conn = Connection::open(path).unwrap();
         conn.execute(
             "UPDATE tasks SET status = 'COMPLETED', completed_at = ?1, updated_at = ?1 WHERE id = ?2",

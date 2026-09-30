@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use chrono::{Duration, Local, NaiveDateTime};
+use chrono::{Duration, NaiveDateTime};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tokio::time::sleep;
 
@@ -16,7 +16,7 @@ use crate::recurrence::{
     compute_next_trigger, refreshed_workday_trigger, sanitize_recurring_task, should_trigger_now,
 };
 use crate::sync::CloudSyncService;
-use crate::time::{now_string, parse_datetime_any};
+use crate::time::{self, now_string, parse_datetime_any};
 
 /// 校准巡检间隔：兜底系统休眠/唤醒、修改系统时间、云同步带来的新提醒等
 /// 单次 sleep 计时器覆盖不到的情况。
@@ -87,7 +87,7 @@ impl ReminderScheduler {
     /// 触发所有已到点但尚未触发的提醒。`handle_*` 自身是幂等的，
     /// 与计时器重复命中时不会产生重复提醒。
     pub fn fire_due(&self) -> Result<(), AppError> {
-        let now = Local::now().naive_local();
+        let now = time::now();
         let lookback = now - Duration::days(MISSED_REMINDER_LOOKBACK_DAYS);
         for task in self.db.list_active_tasks()? {
             let Some(reminder) = task.reminder_time.as_deref().and_then(parse_datetime_any) else {
@@ -148,7 +148,7 @@ impl ReminderScheduler {
         payload: NotificationPayload,
         settings: &AppSettings,
     ) -> Result<(), AppError> {
-        let title = native_notification_title(&payload, Local::now().naive_local());
+        let title = native_notification_title(&payload, time::now());
         let body = payload.description.clone();
         let queue = self.queue.push(payload);
         if quiet_hours::is_quiet_now(settings) {
@@ -204,7 +204,7 @@ impl ReminderScheduler {
     /// 只写入时间确实变化的提醒，返回更新的数量。
     pub fn reschedule_workday_tasks(&self) -> Result<usize, AppError> {
         let _guard = self.fire_lock.lock().unwrap_or_else(|e| e.into_inner());
-        let now = Local::now().naive_local();
+        let now = time::now();
         let mut updated = 0;
         for mut task in self.db.list_recurring_tasks()? {
             let Some(next) = refreshed_workday_trigger(&task, now)? else {
@@ -274,7 +274,7 @@ impl ReminderScheduler {
         if task.deleted_at.is_some() || task.is_paused || !task.repeat_mode.is_known() {
             return Ok(());
         }
-        let now = Local::now().naive_local();
+        let now = time::now();
         // 计时器可能因精度或系统休眠/唤醒而提前触发；若尚未到达本次计划触发时间，
         // 则仅重新排程而不触发提醒，避免在同一秒内反复触发产生大量重复记录。
         if let Ok(scheduled) = parse_datetime(&task.next_trigger) {
@@ -365,7 +365,7 @@ fn native_notification_title(payload: &NotificationPayload, now: NaiveDateTime) 
         .and_then(parse_datetime_any);
     match scheduled {
         Some(time) if now - time > Duration::minutes(2) => {
-            format!("错过的提醒 · 原定 {}", time.format("%H:%M"))
+            format!("错过的提醒 · 原定 {}", time::format_clock(&time.time()))
         }
         _ => "任务提醒".to_string(),
     }
@@ -441,7 +441,7 @@ fn emit_notification(app: &AppHandle, queue: &[NotificationPayload]) -> Result<(
 
 fn seconds_until(value: &str) -> Result<u64, AppError> {
     let target = parse_datetime(value)?;
-    let now = Local::now().naive_local();
+    let now = time::now();
     let millis = target.signed_duration_since(now).num_milliseconds();
     if millis <= 0 {
         return Ok(0);
@@ -457,12 +457,24 @@ fn parse_datetime(value: &str) -> Result<NaiveDateTime, AppError> {
 
 pub fn is_future(value: &str) -> Result<bool, AppError> {
     let target = parse_datetime(value)?;
-    Ok(target > Local::now().naive_local())
+    Ok(target > time::now())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn future_checks_and_timer_delays_use_the_injected_clock() {
+        let _now = time::fix_now("2026-09-30T10:00:00");
+        assert!(is_future("2026-09-30T10:00:01").unwrap());
+        assert!(!is_future("2026-09-30T10:00:00").unwrap());
+        assert!(is_future("not a time").is_err());
+        assert_eq!(seconds_until("2026-09-30T10:05").unwrap(), 300);
+        // 已过的时间立即触发；不足一秒的向上取整，避免提前醒来。
+        assert_eq!(seconds_until("2026-09-30T09:00").unwrap(), 0);
+        assert_eq!(seconds_until("2026-09-30T10:00:00.200").unwrap(), 1);
+    }
 
     fn payload(scheduled: Option<&str>) -> NotificationPayload {
         NotificationPayload {

@@ -1,3 +1,4 @@
+use crate::time;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use std::sync::{OnceLock, RwLock};
@@ -91,7 +92,7 @@ fn parse_date(value: &Value) -> Result<NaiveDate, String> {
     let text = value
         .as_str()
         .ok_or_else(|| format!("无效日期: {}", value))?;
-    NaiveDate::parse_from_str(text, "%Y-%m-%d").map_err(|_| format!("无效日期: {}", text))
+    time::parse_date(text).ok_or_else(|| format!("无效日期: {}", text))
 }
 
 fn parse_dates(value: Option<&Value>) -> Result<Vec<NaiveDate>, String> {
@@ -257,7 +258,7 @@ mod tests {
     use super::*;
 
     fn d(value: &str) -> NaiveDate {
-        NaiveDate::parse_from_str(value, "%Y-%m-%d").unwrap()
+        time::parse_date(value).unwrap()
     }
 
     #[test]

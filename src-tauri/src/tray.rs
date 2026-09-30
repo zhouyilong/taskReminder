@@ -1,6 +1,6 @@
 use std::sync::{Mutex, OnceLock};
 
-use chrono::{Datelike, Duration, Local, NaiveDateTime};
+use chrono::{Datelike, Duration, NaiveDateTime};
 use tauri::{
     menu::{Menu, MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -14,7 +14,7 @@ use crate::models::{RecurringTask, Task};
 use crate::paths;
 use crate::quiet_hours;
 use crate::state::AppState;
-use crate::time::{format_datetime, parse_datetime_any};
+use crate::time::{self, format_datetime, parse_datetime_any};
 use crate::windows::sticky;
 
 const TRAY_ID: &str = "main-tray";
@@ -75,7 +75,7 @@ pub fn find_next_reminder(
 
 /// 今天只显示钟点，明天显示“明天”，今年内显示月日，更远的显示完整日期。
 pub fn format_when(time: NaiveDateTime, now: NaiveDateTime) -> String {
-    let clock = time.format("%H:%M");
+    let clock = time::format_clock(&time.time());
     let date = time.date();
     if date == now.date() {
         clock.to_string()
@@ -84,7 +84,7 @@ pub fn format_when(time: NaiveDateTime, now: NaiveDateTime) -> String {
     } else if date.year() == now.year() {
         format!("{}月{}日 {}", date.month(), date.day(), clock)
     } else {
-        format!("{} {}", date.format("%Y-%m-%d"), clock)
+        format!("{} {}", time::format_date(&date), clock)
     }
 }
 
@@ -196,7 +196,7 @@ fn refresh(app: &AppHandle) {
     let (Some(state), Some(tray)) = (app.try_state::<AppState>(), app.tray_by_id(TRAY_ID)) else {
         return;
     };
-    let now = Local::now().naive_local();
+    let now = time::now();
     let tasks = state.db.list_active_tasks().unwrap_or_default();
     let recurring = state.db.list_recurring_tasks().unwrap_or_default();
     let next = find_next_reminder(&tasks, &recurring, now);
@@ -283,15 +283,14 @@ fn snooze_next(app: &AppHandle, task_id: &str) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
-    let until =
-        format_datetime(&(Local::now().naive_local() + Duration::minutes(TRAY_SNOOZE_MINUTES)));
+    let until = format_datetime(&(time::now() + Duration::minutes(TRAY_SNOOZE_MINUTES)));
     if let Err(err) = reschedule_task_reminder(app, &state, task_id, &until) {
         eprintln!("[tray] 推迟待办失败: {}", err);
     }
 }
 
 pub fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
-    let menu = build_menu(app, None, Local::now().naive_local())?;
+    let menu = build_menu(app, None, time::now())?;
 
     let mut tray_builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)

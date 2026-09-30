@@ -1,6 +1,5 @@
 //! 提醒弹窗与提醒记录：知道了、完成、稍后提醒、队列读取与记录删除。
 
-use chrono::Local;
 use serde::Deserialize;
 use tauri::{Emitter, State};
 
@@ -139,14 +138,7 @@ pub fn snooze_notification(
     state: State<AppState>,
     payload: SnoozePayload,
 ) -> ApiResult<Vec<NotificationPayload>> {
-    let minutes = payload.minutes.max(1);
-    let snooze_until = payload
-        .until
-        .as_deref()
-        .and_then(time::parse_datetime_any)
-        .filter(|value| *value > Local::now().naive_local())
-        .map(|value| time::format_datetime(&value))
-        .unwrap_or_else(|| add_minutes(minutes));
+    let snooze_until = snooze_target(payload.until.as_deref(), payload.minutes);
     into_api(
         state
             .db
@@ -188,7 +180,34 @@ pub fn get_notification_queue(state: State<AppState>) -> ApiResult<Vec<Notificat
     Ok(state.scheduler.queue().snapshot())
 }
 
-fn add_minutes(minutes: i64) -> String {
-    let dt = Local::now().naive_local() + chrono::Duration::minutes(minutes);
-    dt.format("%Y-%m-%dT%H:%M:%S").to_string()
+/// 稍后提醒的目标时间：指定了未来的时间（如“明早 9 点”）就用它，否则从现在起推迟
+/// `minutes` 分钟（至少 1 分钟）。
+fn snooze_target(until: Option<&str>, minutes: i64) -> String {
+    let now = time::now();
+    let target = until
+        .and_then(time::parse_datetime_any)
+        .filter(|value| *value > now)
+        .unwrap_or_else(|| now + chrono::Duration::minutes(minutes.max(1)));
+    time::format_datetime(&target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snooze_target_uses_future_until_or_minutes() {
+        let _now = time::fix_now("2026-09-30T21:50");
+        assert_eq!(
+            snooze_target(Some("2026-10-01T09:00"), 15),
+            "2026-10-01T09:00:00"
+        );
+        // 指定的时间已过或无法解析：按分钟推迟。
+        assert_eq!(
+            snooze_target(Some("2026-09-30T21:00"), 15),
+            "2026-09-30T22:05:00"
+        );
+        assert_eq!(snooze_target(Some("明早"), 15), "2026-09-30T22:05:00");
+        assert_eq!(snooze_target(None, 0), "2026-09-30T21:51:00");
+    }
 }

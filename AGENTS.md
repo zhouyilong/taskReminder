@@ -29,7 +29,7 @@
 - `src/update.ts` 自动更新逻辑模块（检查更新、安装更新、偏好管理）。
 - `src/weekdays.ts` 每周位掩码工具（与后端一致：周一 = bit0 … 周日 = bit6）；`src/shortcut.ts` 全局快捷键录制与展示。
 - `src-tauri/` 存放 Tauri 应用的 Rust 后端。
-  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（插件、命令注册与启动流程）、`commands/`（前端 `invoke` 的命令，按业务分为 `tasks`、`recurring`、`notification`、`trash`、`settings`、`sticky`、`system`、`data`，公共的 `ApiResult` / `into_api` 在 `commands/mod.rs`）、`windows/`（窗口事件；`windows/sticky.rs` 为便签窗口的标签编码、创建显示、层级与 UI 状态注入，以及 Windows 上的贴边吸附；`windows/placement.rs` 为便签位置的纯几何计算：越界校正、吸附）、`db.rs`（SQLite 读写）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync.rs`（WebDAV 同步）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（本地时间格式化与解析）、`holidays.rs`（中国法定节假日与调休：内置数据、在线更新缓存与用户覆盖文件的合并与校验）、`holiday_update.rs`（每天从仓库拉取节假日数据）、`quick_add.rs`（快速添加窗口）、`shortcuts.rs`（全局快捷键统一注册：快速添加、显示/隐藏全部便签）、`quiet_hours.rs`（勿扰时段判断）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单与提示：下一条提醒、完成/推迟、显示/隐藏全部便签）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`kinds.rs`（状态、类型、处理结果、循环模式的强类型枚举，未知值原样保留）、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
+  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（插件、命令注册与启动流程）、`commands/`（前端 `invoke` 的命令，按业务分为 `tasks`、`recurring`、`notification`、`trash`、`settings`、`sticky`、`system`、`data`，公共的 `ApiResult` / `into_api` 在 `commands/mod.rs`）、`windows/`（窗口事件；`windows/sticky.rs` 为便签窗口的标签编码、创建显示、层级与 UI 状态注入，以及 Windows 上的贴边吸附；`windows/placement.rs` 为便签位置的纯几何计算：越界校正、吸附）、`db.rs`（SQLite 读写）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync.rs`（WebDAV 同步）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（时间的唯一入口：`now()`、数据库时间格式与各固定格式的解析与格式化）、`holidays.rs`（中国法定节假日与调休：内置数据、在线更新缓存与用户覆盖文件的合并与校验）、`holiday_update.rs`（每天从仓库拉取节假日数据）、`quick_add.rs`（快速添加窗口）、`shortcuts.rs`（全局快捷键统一注册：快速添加、显示/隐藏全部便签）、`quiet_hours.rs`（勿扰时段判断）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单与提示：下一条提醒、完成/推迟、显示/隐藏全部便签）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`kinds.rs`（状态、类型、处理结果、循环模式的强类型枚举，未知值原样保留）、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
   - `src-tauri/migrations/` 存放数据库迁移文件；新增迁移后需在 `db.rs` 的 `migration_scripts()` 中登记，并同步 `sync.rs` 的列清单与 `ensure_sync_columns`。
   - `src-tauri/data/holidays-cn.json` 为内置法定节假日数据（`off` 放假日、`work` 调休上班日，支持 `[开始, 结束]` 区间），每年国务院发布次年安排后追加，并补充 `holidays.rs` 中的测试。
   - **该文件同时是在线更新的数据源**：客户端每天从 `main` 分支拉取（jsDelivr / GitHub raw），推送到 `main` 后已发布的应用即可获得新年份。客户端只采用内置数据没有的年份，且拒绝删减已下载年份的文件，因此**只能追加年份**；已发布年份的更正需随应用版本发布（内置数据优先）。
@@ -181,6 +181,10 @@
 - **问题**：多个异步操作放在同一个 `try` 块中，前面的操作抛异常会导致后面的操作被跳过（如自动更新检查被数据初始化异常阻断）。
 - **解决**：将相互独立的异步操作放在各自独立的 `try/catch` 块中。
 - **规则**：`onMounted` 中多个独立的异步初始化操作应分别用 `try/catch` 包裹，互不影响。
+
+### 时间处理
+- 当前时间一律用 `time::now()` / `time::now_string()`，格式一律用 `time.rs` 的函数（数据库时间、钟点、日期、备份时间戳、ICS 等）；**不要在其他模块直接调用 `Local::now()`、`parse_from_str` 或写格式字符串**。
+- 与当前时间有关的逻辑在测试中用 `let _now = time::fix_now("2026-09-30T10:00");` 固定时间（只影响当前线程，守卫离开作用域时恢复）。
 
 ## 测试指南
 - 前端使用 Vitest：测试与被测模块同目录，命名为 `*.spec.ts`，运行 `pnpm test`。前端改动至少执行 `pnpm build`（含 `vue-tsc` 类型检查）与 `pnpm test`。

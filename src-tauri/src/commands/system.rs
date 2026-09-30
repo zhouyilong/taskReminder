@@ -1,6 +1,5 @@
 //! 系统与界面状态：主题、UI 状态广播、开发模式与调试信息。
 
-use chrono::Local;
 use serde::Serialize;
 use tauri::State;
 
@@ -8,6 +7,7 @@ use crate::commands::{into_api, ApiResult};
 use crate::models::UiStatePayload;
 use crate::paths;
 use crate::state::AppState;
+use crate::time;
 use crate::windows::sticky::emit_ui_state_to_sticky_windows;
 
 #[derive(Serialize)]
@@ -111,11 +111,9 @@ pub fn get_debug_info(state: State<AppState>) -> ApiResult<DebugInfo> {
     let db_path = state.db.db_path();
     let metadata = std::fs::metadata(&db_path).ok();
     let db_size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
-    let db_last_modified = metadata.and_then(|m| m.modified().ok()).map(|time| {
-        chrono::DateTime::<Local>::from(time)
-            .format("%Y-%m-%d %H:%M:%S")
-            .to_string()
-    });
+    let db_last_modified = metadata
+        .and_then(|m| m.modified().ok())
+        .map(|time| time::format_display(&time::from_system_time(time)));
 
     let active_tasks = into_api(state.db.list_active_tasks())?.len();
     let completed_tasks = into_api(state.db.list_completed_tasks())?.len();

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use chrono::{Local, NaiveDateTime};
+use chrono::NaiveDateTime;
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -16,7 +16,7 @@ use crate::models::{
 };
 use crate::quiet_hours;
 use crate::secrets::{self, SecretStore, Secrets};
-use crate::time::{format_datetime, now_string, parse_datetime_any};
+use crate::time::{self, format_datetime, now_string, parse_datetime_any};
 
 /// 墓碑（软删除行）的保留天数。开启云同步时保留更久，
 /// 让较长时间未同步的设备也能收到删除，而不是把旧数据重新上传“复活”。
@@ -51,7 +51,7 @@ impl TrashTable {
 }
 
 fn tombstone_cutoff(retention_days: i64) -> String {
-    format_datetime(&(Local::now().naive_local() - chrono::Duration::days(retention_days.max(1))))
+    format_datetime(&(time::now() - chrono::Duration::days(retention_days.max(1))))
 }
 
 #[derive(Clone)]
@@ -1284,7 +1284,7 @@ impl DbManager {
     /// 2. 物理删除超过保留期的墓碑。
     pub fn cleanup_data(&self, tombstone_retention_days: i64) -> Result<(), AppError> {
         let conn = self.get_conn()?;
-        let now = Local::now().naive_local();
+        let now = time::now();
         let now_text = format_datetime(&now);
         let completed_cutoff = format_datetime(&(now - chrono::Duration::days(30)));
 
@@ -1784,7 +1784,7 @@ mod tests {
     }
 
     fn days_ago(days: i64) -> String {
-        format_datetime(&(Local::now().naive_local() - chrono::Duration::days(days)))
+        format_datetime(&(time::now() - chrono::Duration::days(days)))
     }
 
     fn task_row(db: &DbManager, id: &str) -> Option<(String, Option<String>)> {
@@ -2215,6 +2215,15 @@ mod tests {
         let parsed: ReminderRecord = serde_json::from_value(json).unwrap();
         assert_eq!(parsed.action, ReminderAction::Pending);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn tombstone_cutoff_counts_back_from_now() {
+        let _now = time::fix_now("2026-09-30T12:00:00");
+        assert_eq!(tombstone_cutoff(7), "2026-09-23T12:00:00");
+        assert_eq!(tombstone_cutoff(60), "2026-08-01T12:00:00");
+        // 至少保留 1 天。
+        assert_eq!(tombstone_cutoff(0), "2026-09-29T12:00:00");
     }
 
     #[test]
