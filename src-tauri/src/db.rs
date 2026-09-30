@@ -1053,6 +1053,19 @@ impl DbManager {
         Ok(value.unwrap_or(1) == 1)
     }
 
+    /// 是否开启节假日数据在线更新。只读一列，后台检查时调用，避免 `load_settings` 访问凭据库。
+    pub fn holiday_auto_update_enabled(&self) -> Result<bool, AppError> {
+        let conn = self.get_conn()?;
+        let value: Option<i64> = conn
+            .query_row(
+                "SELECT holiday_auto_update FROM settings WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(value.unwrap_or(1) == 1)
+    }
+
     pub fn set_sticky_note_pinned(&self, task_id: &str, pinned: bool) -> Result<(), AppError> {
         let conn = self.get_conn()?;
         let now = now_string();
@@ -1101,7 +1114,7 @@ impl DbManager {
                    sync_encryption_enabled, sync_passphrase,
                    quiet_hours_enabled, quiet_hours_start, quiet_hours_end,
                    native_notification_enabled, sticky_toggle_shortcut, secret_storage,
-                   sticky_snap_enabled
+                   sticky_snap_enabled, holiday_auto_update
                    FROM settings WHERE id = 1";
         let mut stmt = conn.prepare(sql)?;
         let row = stmt.query_row([], |row| {
@@ -1171,6 +1184,7 @@ impl DbManager {
                     .get::<_, Option<String>>(32)?
                     .unwrap_or_else(|| secrets::STORAGE_DB.to_string()),
                 sticky_snap_enabled: row.get::<_, Option<i64>>(33)?.unwrap_or(1) == 1,
+                holiday_auto_update: row.get::<_, Option<i64>>(34)?.unwrap_or(1) == 1,
             })
         })?;
         let mut settings = row;
@@ -1200,7 +1214,7 @@ impl DbManager {
                  sync_encryption_enabled = ?, sync_passphrase = ?,
                  quiet_hours_enabled = ?, quiet_hours_start = ?, quiet_hours_end = ?,
                  native_notification_enabled = ?, sticky_toggle_shortcut = ?, secret_storage = ?,
-                 sticky_snap_enabled = ?
+                 sticky_snap_enabled = ?, holiday_auto_update = ?
              WHERE id = 1",
             params![
                 if settings.auto_start_enabled { 1 } else { 0 },
@@ -1237,6 +1251,7 @@ impl DbManager {
                 settings.sticky_toggle_shortcut.trim(),
                 secret_storage,
                 if settings.sticky_snap_enabled { 1 } else { 0 },
+                if settings.holiday_auto_update { 1 } else { 0 },
             ],
         )?;
         Ok(())
@@ -1708,6 +1723,11 @@ fn migration_scripts() -> Vec<MigrationScript> {
             version: "2.0.4".to_string(),
             description: "add sticky snap".to_string(),
             sql: include_str!("../migrations/V2.0.4__add_sticky_snap.sql"),
+        },
+        MigrationScript {
+            version: "2.0.5".to_string(),
+            description: "add holiday auto update".to_string(),
+            sql: include_str!("../migrations/V2.0.5__add_holiday_auto_update.sql"),
         },
     ]
 }
@@ -2212,6 +2232,19 @@ mod tests {
         db.save_settings(&settings).unwrap();
         assert!(!db.load_settings().unwrap().sticky_snap_enabled);
         assert!(!db.sticky_snap_enabled().unwrap());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn holiday_auto_update_defaults_on_and_roundtrips() {
+        let (db, dir) = temp_db();
+        assert!(db.holiday_auto_update_enabled().unwrap());
+        let mut settings = db.load_settings().unwrap();
+        assert!(settings.holiday_auto_update);
+        settings.holiday_auto_update = false;
+        db.save_settings(&settings).unwrap();
+        assert!(!db.load_settings().unwrap().holiday_auto_update);
+        assert!(!db.holiday_auto_update_enabled().unwrap());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

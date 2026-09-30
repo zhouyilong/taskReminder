@@ -11,7 +11,9 @@ use crate::errors::AppError;
 use crate::models::{AppSettings, NotificationPayload, RecurringTask, Task};
 use crate::notification_queue::NotificationQueue;
 use crate::quiet_hours;
-use crate::recurrence::{compute_next_trigger, sanitize_recurring_task, should_trigger_now};
+use crate::recurrence::{
+    compute_next_trigger, refreshed_workday_trigger, sanitize_recurring_task, should_trigger_now,
+};
 use crate::sync::CloudSyncService;
 use crate::time::{now_string, parse_datetime_any};
 
@@ -191,6 +193,27 @@ impl ReminderScheduler {
             }
         }
         Ok(())
+    }
+
+    /// 节假日数据更新后，重新计算运行中“法定工作日”提醒的下次触发并重新计时。
+    /// 只写入时间确实变化的提醒，返回更新的数量。
+    pub fn reschedule_workday_tasks(&self) -> Result<usize, AppError> {
+        let _guard = self.fire_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let now = Local::now().naive_local();
+        let mut updated = 0;
+        for mut task in self.db.list_recurring_tasks()? {
+            let Some(next) = refreshed_workday_trigger(&task, now)? else {
+                continue;
+            };
+            task.next_trigger = next;
+            self.db.update_recurring_task(&task)?;
+            self.schedule_recurring(task)?;
+            updated += 1;
+        }
+        if updated > 0 {
+            self.sync.notify_local_change()?;
+        }
+        Ok(updated)
     }
 
     pub fn schedule_recurring(&self, task: RecurringTask) -> Result<(), AppError> {

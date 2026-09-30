@@ -150,3 +150,14 @@ pub fn preview_recurring_triggers(
 pub fn get_holiday_years() -> Vec<i32> {
     holidays::covered_years()
 }
+
+/// 立即从项目仓库检查节假日数据更新（设置界面“立即检查”），网络请求放在后台线程。
+#[tauri::command]
+pub async fn check_holiday_updates(
+    app: tauri::AppHandle,
+) -> ApiResult<crate::holiday_update::HolidayCheckResult> {
+    let data_dir = crate::paths::resolve_data_dir(&app).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || crate::holiday_update::check_now(&app, &data_dir))
+        .await
+        .map_err(|e| e.to_string())?
+}

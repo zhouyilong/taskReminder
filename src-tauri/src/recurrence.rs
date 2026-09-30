@@ -181,6 +181,31 @@ pub fn compute_next_trigger(
     Ok(next.format("%Y-%m-%dT%H:%M:%S").to_string())
 }
 
+/// 节假日数据更新后，“法定工作日”提醒的下次触发可能变化（例如新公布的调休上班日）。
+/// 返回需要改成的时间；不是运行中的法定工作日提醒、已经到点等待触发（交给巡检处理，
+/// 避免跳过一次提醒）或时间不变时返回 None。
+pub fn refreshed_workday_trigger(
+    task: &RecurringTask,
+    now: NaiveDateTime,
+) -> Result<Option<String>, AppError> {
+    if task.is_paused
+        || task.deleted_at.is_some()
+        || normalize_repeat_mode(&task.repeat_mode) != REPEAT_MODE_WORKDAY
+    {
+        return Ok(None);
+    }
+    let pending = crate::time::parse_datetime_any(&task.next_trigger);
+    if pending.is_some_and(|scheduled| scheduled <= now) {
+        return Ok(None);
+    }
+    let next = compute_next_trigger(task, Some(now))?;
+    let unchanged = match (pending, crate::time::parse_datetime_any(&next)) {
+        (Some(current), Some(recomputed)) => current == recomputed,
+        _ => next == task.next_trigger,
+    };
+    Ok(if unchanged { None } else { Some(next) })
+}
+
 /// 预估 `until`（含）之前的触发时间，用于“今天”视图展示即将到来的循环提醒。
 ///
 /// 从任务当前的 `next_trigger` 开始，按调度器的方式（以上一次触发时间为基准）
@@ -643,6 +668,43 @@ mod tests {
         assert_eq!(next(&t, "2026-09-30T10:00"), "2026-10-08T09:00:00");
         // 10 月 9 日（周五）之后：10 日周六调休上班。
         assert_eq!(next(&t, "2026-10-09T10:00"), "2026-10-10T09:00:00");
+    }
+
+    #[test]
+    fn refreshed_workday_trigger_picks_up_new_holiday_data() {
+        let mut t = task(REPEAT_MODE_WORKDAY);
+        // 按没有节假日数据时算出的下次触发：10 月 9 日之后为 10 月 12 日（周一）。
+        // 有了数据后，10 日周六调休上班，应改到 10 日。
+        t.next_trigger = "2026-10-12T09:00:00".to_string();
+        assert_eq!(
+            refreshed_workday_trigger(&t, dt("2026-10-09T10:00")).unwrap(),
+            Some("2026-10-10T09:00:00".to_string())
+        );
+        // 已是正确时间：不改，避免产生同步改动。
+        t.next_trigger = "2026-10-10T09:00:00".to_string();
+        assert_eq!(
+            refreshed_workday_trigger(&t, dt("2026-10-09T10:00")).unwrap(),
+            None
+        );
+        // 已经到点、等待巡检触发：不改，免得跳过这次提醒。
+        t.next_trigger = "2026-10-09T09:00:00".to_string();
+        assert_eq!(
+            refreshed_workday_trigger(&t, dt("2026-10-09T10:00")).unwrap(),
+            None
+        );
+        // 暂停的、其他模式的不处理。
+        t.next_trigger = "2026-10-12T09:00:00".to_string();
+        t.is_paused = true;
+        assert_eq!(
+            refreshed_workday_trigger(&t, dt("2026-10-09T10:00")).unwrap(),
+            None
+        );
+        let mut daily = task(REPEAT_MODE_DAILY);
+        daily.next_trigger = "2026-10-12T09:00:00".to_string();
+        assert_eq!(
+            refreshed_workday_trigger(&daily, dt("2026-10-09T10:00")).unwrap(),
+            None
+        );
     }
 
     #[test]

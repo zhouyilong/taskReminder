@@ -188,6 +188,9 @@ pub struct AppSettings {
     /// 拖动便签后贴边吸附（屏幕边缘与其他便签）。
     #[serde(default = "default_true")]
     pub sticky_snap_enabled: bool,
+    /// 每天从项目仓库检查节假日数据更新。
+    #[serde(default = "default_true")]
+    pub holiday_auto_update: bool,
     /// 密码存放位置（`secrets::STORAGE_*`），只读：保存时由后端决定。
     #[serde(default)]
     pub secret_storage: String,

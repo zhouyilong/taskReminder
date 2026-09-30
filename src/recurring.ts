@@ -43,9 +43,19 @@ export const formatRecurringRule = (task: RecurringTask) => {
   }
 };
 
+/** 节假日数据覆盖的年份范围，如“2025–2027 年”；为空时返回“暂无”。 */
+export const formatYearRange = (years: number[]) => {
+  if (!years.length) {
+    return "暂无";
+  }
+  const sorted = [...years].sort((a, b) => a - b);
+  return sorted.length > 1 ? `${sorted[0]}–${sorted[sorted.length - 1]} 年` : `${sorted[0]} 年`;
+};
+
 export const formatWorkdayHint = (years: number[]) => {
+  // 数据可能来自内置或在线更新，统一说“已有”。
   const coverage = years.length
-    ? `已内置 ${years[0]}${years.length > 1 ? `–${years[years.length - 1]}` : ""} 年安排，其他年份按周一至周五`
+    ? `已有 ${formatYearRange(years)}安排，其他年份按周一至周五`
     : "暂无节假日数据，按周一至周五";
   return `跳过法定节假日，调休上班日照常提醒（${coverage}）`;
 };

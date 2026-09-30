@@ -206,6 +206,10 @@ export const api = {
   async syncNow(reason: string): Promise<void> {
     return invoke("sync_now", { reason });
   },
+  /** 立即检查节假日数据更新，返回是否有变化与已覆盖的年份。 */
+  async checkHolidayUpdates(): Promise<{ changed: boolean; years: number[] }> {
+    return invoke("check_holiday_updates");
+  },
   /** 更换同步密码：用当前密码合并云端数据后以新密码加密上传，成功后才保存新密码。 */
   async changeSyncPassphrase(currentPassphrase: string, newPassphrase: string): Promise<void> {
     return invoke("change_sync_passphrase", { currentPassphrase, newPassphrase });

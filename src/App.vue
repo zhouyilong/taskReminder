@@ -150,6 +150,8 @@ onMounted(async () => {
     await refreshSyncStatus();
   });
   await listenSafely("open-sync-settings", () => openWebdav());
+  // 节假日数据在线更新后，刷新“节假日待更新”等覆盖范围提示。
+  await listenSafely("holidays-updated", () => loadHolidayYears());
   await listenSafely("tray-create-sticky-note", () => handleCreateStickyNote());
   await listenSafely("tray-check-update", async () => {
     await openSettings();

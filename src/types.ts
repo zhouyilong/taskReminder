@@ -120,6 +120,8 @@ export interface AppSettings {
   stickyToggleShortcut: string;
   /** 拖动便签后贴边吸附（屏幕边缘与其他便签，仅 Windows）。 */
   stickySnapEnabled: boolean;
+  /** 每天从项目仓库检查节假日数据更新（本机设置）。 */
+  holidayAutoUpdate: boolean;
   /** 密码存放位置（只读）：keyring 为 Windows 凭据管理器，db 为本机数据库。 */
   secretStorage?: "db" | "keyring" | string;
 }

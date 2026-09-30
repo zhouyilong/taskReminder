@@ -5,6 +5,7 @@ mod backup;
 mod commands;
 mod db;
 mod errors;
+mod holiday_update;
 mod holidays;
 mod maintenance;
 mod models;
@@ -67,6 +68,7 @@ fn main() {
             trash::restore_recurring_task,
             trash::purge_trash,
             recurring::preview_recurring_triggers,
+            recurring::check_holiday_updates,
             settings::get_settings,
             settings::save_settings,
             sticky::list_sticky_note_summaries,
@@ -145,7 +147,7 @@ fn main() {
                     }
                 }
 
-                holidays::load_override(&data_dir);
+                holidays::load(&data_dir);
                 let db_path = paths::db_path(&data_dir);
                 let is_first_launch = !db_path.exists();
                 let db = DbManager::new(db_path)?;
@@ -195,6 +197,7 @@ fn main() {
                     }
                 }
                 windows::sticky::restore_open_sticky_note_items(app_handle, &db_for_restore)?;
+                holiday_update::start(app_handle.clone(), data_dir.clone());
                 Ok(())
             })();
             result.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)

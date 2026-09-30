@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatWorkdayHint,
+  formatYearRange,
   buildRecurringPayload,
   createRecurringDraft,
   draftFromRecurringTask,
@@ -93,5 +95,18 @@ describe("节假日数据覆盖提示", () => {
   it("新建表单按当前时间判断", () => {
     expect(workdayDraftWarning(years, new Date(2026, 8, 27))).toBeNull();
     expect(workdayDraftWarning(years, new Date(2026, 11, 20))).toContain("2027");
+  });
+});
+
+describe("formatYearRange", () => {
+  it("formats the covered years", () => {
+    expect(formatYearRange([])).toBe("暂无");
+    expect(formatYearRange([2026])).toBe("2026 年");
+    expect(formatYearRange([2027, 2025, 2026])).toBe("2025–2027 年");
+  });
+
+  it("is used by the workday hint", () => {
+    expect(formatWorkdayHint([2025, 2026])).toContain("已有 2025–2026 年安排");
+    expect(formatWorkdayHint([])).toContain("暂无节假日数据");
   });
 });
