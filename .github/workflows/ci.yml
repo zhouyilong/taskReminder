@@ -10,6 +10,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # holidays-cn.json 推到 main 即下发给已发布的客户端：只允许追加年份（规则见 scripts/holidays-check.mjs）。
+  holidays:
+    name: holidays data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check holidays-cn.json
+        env:
+          HOLIDAYS_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+          HOLIDAYS_CORRECTION: ${{ contains(github.event.pull_request.title, 'holidays-correction') || contains(github.event.head_commit.message, 'holidays-correction') }}
+        run: node scripts/check-holidays.mjs
+
   check:
     name: check (${{ matrix.os }})
     strategy:
