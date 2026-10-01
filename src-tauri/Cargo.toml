@@ -27,7 +27,7 @@ thiserror = "1.0"
 uuid = { version = "1", features = ["v4"] }
 dirs-next = "2.0"
 tokio = { version = "1", features = ["time"] }
-cron = "0.12"
+cron = "0.17"
 aes-gcm = "0.10"
 argon2 = "0.5"
 
