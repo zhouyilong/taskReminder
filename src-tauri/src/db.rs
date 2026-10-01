@@ -1765,6 +1765,31 @@ fn compare_version(a: &str, b: &str) -> std::cmp::Ordering {
     std::cmp::Ordering::Equal
 }
 
+/// 测试用：建出某个版本发布时的库（只执行版本号不超过 `version` 的迁移，并记下库结构版本），
+/// 之后用 `DbManager::new` 打开即可模拟从该版本升级。
+#[cfg(test)]
+pub(crate) fn create_schema_up_to(conn: &Connection, version: &str) -> Result<(), AppError> {
+    for script in migration_scripts() {
+        if compare_version(&script.version, version) != std::cmp::Ordering::Greater {
+            execute_sql_script(conn, script.sql)?;
+        }
+    }
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS schema_version (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            version TEXT NOT NULL,
+            applied_at TEXT NOT NULL,
+            description TEXT
+        );",
+    )?;
+    conn.execute(
+        "INSERT OR REPLACE INTO schema_version (id, version, applied_at, description)
+         VALUES (1, ?, '2026-09-01T00:00:00', 'test fixture')",
+        [version],
+    )?;
+    Ok(())
+}
+
 fn execute_sql_script(conn: &Connection, sql: &str) -> Result<(), AppError> {
     let mut cleaned = String::new();
     for line in sql.lines() {

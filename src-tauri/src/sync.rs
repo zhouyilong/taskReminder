@@ -1154,6 +1154,10 @@ fn build_auth_header(username: &str, password: &str) -> Option<String> {
 }
 
 #[cfg(test)]
+#[path = "sync_compat_tests.rs"]
+mod compat_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1461,16 +1465,32 @@ mod tests {
         let (local, local_dir) = temp_db("local");
         let (remote, remote_dir) = temp_db("remote");
         let task = local.create_task("shared", None).unwrap();
+        let other = local.create_task("other", None).unwrap();
         copy_task(&local.db_path(), &remote.db_path(), &task.id);
+        copy_task(&local.db_path(), &remote.db_path(), &other.id);
+        local.set_sticky_note_pinned(&task.id, true).unwrap();
         exec(
             &remote.db_path(),
             &format!(
-                "UPDATE tasks SET sticky_is_pinned = 1, updated_at = '2999-01-01T00:00:00' WHERE id = '{}'",
-                task.id
+                "UPDATE tasks SET description = 'remote edit', sticky_is_pinned = 1,
+                                  updated_at = '2999-01-01T00:00:00' WHERE id = '{}';
+                 UPDATE tasks SET description = 'remote edit', sticky_is_pinned = 0,
+                                  updated_at = '2999-01-01T00:00:00' WHERE id = '{}';",
+                other.id, task.id
             ),
         );
         merge_databases(&local.db_path(), &remote.db_path()).unwrap();
-        assert!(!local.get_sticky_note_pinned(&task.id).unwrap());
+        // 远端行胜出：同步列取远端的值，锚定状态各自保留本机的值。
+        assert_eq!(
+            local.get_task(&task.id).unwrap().unwrap().description,
+            "remote edit"
+        );
+        assert!(local.get_sticky_note_pinned(&task.id).unwrap());
+        assert_eq!(
+            local.get_task(&other.id).unwrap().unwrap().description,
+            "remote edit"
+        );
+        assert!(!local.get_sticky_note_pinned(&other.id).unwrap());
 
         let _ = std::fs::remove_dir_all(local_dir);
         let _ = std::fs::remove_dir_all(remote_dir);
