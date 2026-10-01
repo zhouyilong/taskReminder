@@ -29,8 +29,8 @@
 - `src/update.ts` 自动更新逻辑模块（检查更新、安装更新、偏好管理）。
 - `src/weekdays.ts` 每周位掩码工具（与后端一致：周一 = bit0 … 周日 = bit6）；`src/shortcut.ts` 全局快捷键录制与展示。
 - `src-tauri/` 存放 Tauri 应用的 Rust 后端。
-  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（插件、命令注册与启动流程）、`commands/`（前端 `invoke` 的命令，按业务分为 `tasks`、`recurring`、`notification`、`trash`、`settings`、`sticky`、`system`、`data`，公共的 `ApiResult` / `into_api` 在 `commands/mod.rs`）、`windows/`（窗口事件；`windows/sticky.rs` 为便签窗口的标签编码、创建显示、层级与 UI 状态注入，以及 Windows 上的贴边吸附；`windows/placement.rs` 为便签位置的纯几何计算：越界校正、吸附）、`db.rs`（SQLite 读写）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync.rs`（WebDAV 同步）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（时间的唯一入口：`now()`、数据库时间格式与各固定格式的解析与格式化）、`holidays.rs`（中国法定节假日与调休：内置数据、在线更新缓存与用户覆盖文件的合并与校验）、`holiday_update.rs`（每天从仓库拉取节假日数据）、`quick_add.rs`（快速添加窗口）、`shortcuts.rs`（全局快捷键统一注册：快速添加、显示/隐藏全部便签）、`quiet_hours.rs`（勿扰时段判断）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单与提示：下一条提醒、完成/推迟、显示/隐藏全部便签）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`kinds.rs`（状态、类型、处理结果、循环模式的强类型枚举，未知值原样保留）、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
-  - `src-tauri/migrations/` 存放数据库迁移文件；新增迁移后需在 `db.rs` 的 `migration_scripts()` 中登记，并同步 `sync.rs` 的列清单与 `ensure_sync_columns`。
+  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（插件、命令注册与启动流程）、`commands/`（前端 `invoke` 的命令，按业务分为 `tasks`、`recurring`、`notification`、`trash`、`settings`、`sticky`、`system`、`data`，公共的 `ApiResult` / `into_api` 在 `commands/mod.rs`）、`windows/`（窗口事件；`windows/sticky.rs` 为便签窗口的标签编码、创建显示、层级与 UI 状态注入，以及 Windows 上的贴边吸附；`windows/placement.rs` 为便签位置的纯几何计算：越界校正、吸附）、`db.rs`（SQLite 读写）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync.rs`（WebDAV 同步）、`sync_schema.rs`（参与同步的表与列的唯一定义、合并时保留不认识的列）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（时间的唯一入口：`now()`、数据库时间格式与各固定格式的解析与格式化）、`holidays.rs`（中国法定节假日与调休：内置数据、在线更新缓存与用户覆盖文件的合并与校验）、`holiday_update.rs`（每天从仓库拉取节假日数据）、`quick_add.rs`（快速添加窗口）、`shortcuts.rs`（全局快捷键统一注册：快速添加、显示/隐藏全部便签）、`quiet_hours.rs`（勿扰时段判断）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单与提示：下一条提醒、完成/推迟、显示/隐藏全部便签）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`kinds.rs`（状态、类型、处理结果、循环模式的强类型枚举，未知值原样保留）、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
+  - `src-tauri/migrations/` 存放数据库迁移文件；新增迁移后需在 `db.rs` 的 `migration_scripts()` 中登记；新增同步列还要登记到 `sync_schema.rs` 的 `SYNC_TABLES`（测试会检查迁移结果与登记一致）。
   - `src-tauri/data/holidays-cn.json` 为内置法定节假日数据（`off` 放假日、`work` 调休上班日，支持 `[开始, 结束]` 区间），每年国务院发布次年安排后追加，并补充 `holidays.rs` 中的测试。
   - **该文件同时是在线更新的数据源**：客户端每天从 `main` 分支拉取（jsDelivr / GitHub raw），推送到 `main` 后已发布的应用即可获得新年份。客户端只采用内置数据没有的年份，且拒绝删减已下载年份的文件，因此**只能追加年份**；已发布年份的更正需随应用版本发布（内置数据优先）。
   - `src-tauri/icons/` 存放应用图标；源文件在 `src-tauri/icons/source/`（`icon.svg` 为主图标，`icon-small.svg` 为 16–32px 简化版），修改后执行 `python3 src-tauri/icons/source/render.py` 重新生成 PNG 与 `icon.ico`（需 `pip install cairosvg pillow`）。
@@ -127,6 +127,12 @@
 - **规则**：业务删除与定期清理一律写 `deleted_at` + `updated_at`（墓碑）；只有 `purge_expired_tombstones` 按保留期（本地 7 天，开启同步 60 天）物理删除，同步在合并后、上传前也会调用它。
 - 回收站（`list_trash`）只列出保留期内的墓碑。恢复即清除 `deleted_at`；恢复循环提醒时从当前时间重新计算下次触发。
 - 回收站的“永久删除”（`purge_trash` → `expire_tombstones`）不能直接 `DELETE`：把 `deleted_at` 改为 `EXPIRED_TOMBSTONE_TIME` 并刷新 `updated_at`，让本地行在合并中胜出，再由清理物理删除（未开启同步时立即清理）。
+
+### 同步列的前向兼容（2.0.3 起）
+- 合并时参与同步的列 = `SYNC_TABLES` 中登记的列 ∪ 远端库中本版本不认识的列：`sync_schema::adopt_remote_columns` 把远端新增的列按其定义 `ALTER TABLE ADD COLUMN` 补到本机，值随合并保存、随上传带回。胜出的行只写它所在库实际拥有的列（`INSERT ... ON CONFLICT DO UPDATE`），远端来自不认识某列的旧版本时，该列保留本机的值。
+- **规则**：新增同步列必须可空或带字面量 `DEFAULT`（`NOT NULL` 无默认值的列旧版本补不上，会被跳过）；同步表中不要再加只在本机使用的列（放到 `settings` 或单独的表），已有的 `tasks.sticky_is_pinned` 登记在 `local_only`。
+- 迁移中的 `ALTER TABLE ... ADD COLUMN` 遇到已存在的列会跳过（`db::adds_existing_column`），因为同步可能已经提前补上了这一列。
+- 本机写同步表时不要用 `INSERT OR REPLACE` / `REPLACE`（会把不认识的列清成默认值），用 `UPDATE` 或 `ON CONFLICT DO UPDATE` 只改自己认识的列。
 
 ### 循环模式的兼容性
 - 每周多天存于 `schedule_weekdays` 位掩码，`schedule_weekday` 始终写入掩码中最早的一天，供旧版本读取；读取时掩码为空则回退到 `schedule_weekday`。

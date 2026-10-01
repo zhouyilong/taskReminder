@@ -22,6 +22,7 @@ mod single_instance;
 mod state;
 mod sync;
 mod sync_crypto;
+mod sync_schema;
 mod time;
 mod tray;
 mod windows;

@@ -1397,13 +1397,23 @@ impl DbManager {
                 continue;
             }
             tx.execute(
-                "INSERT OR REPLACE INTO recurring_tasks (
+                "INSERT INTO recurring_tasks (
                     id, description, type, status, created_at, completed_at, interval_minutes,
                     last_triggered, next_trigger, is_paused, start_time, end_time,
                     repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
                     updated_at, deleted_at, schedule_weekdays
                  )
-                 VALUES (?, ?, 'RECURRING', 'PENDING', ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 VALUES (?, ?, 'RECURRING', 'PENDING', ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(id) DO UPDATE SET
+                    description = excluded.description, type = excluded.type, status = excluded.status,
+                    created_at = excluded.created_at, completed_at = excluded.completed_at,
+                    interval_minutes = excluded.interval_minutes, last_triggered = excluded.last_triggered,
+                    next_trigger = excluded.next_trigger, is_paused = excluded.is_paused,
+                    start_time = excluded.start_time, end_time = excluded.end_time,
+                    repeat_mode = excluded.repeat_mode, schedule_time = excluded.schedule_time,
+                    schedule_weekday = excluded.schedule_weekday, schedule_day = excluded.schedule_day,
+                    cron_expression = excluded.cron_expression, updated_at = excluded.updated_at,
+                    deleted_at = excluded.deleted_at, schedule_weekdays = excluded.schedule_weekdays",
                 params![
                     task.id,
                     task.description.trim(),
@@ -1445,10 +1455,15 @@ impl DbManager {
                 continue;
             }
             tx.execute(
-                "INSERT OR REPLACE INTO reminder_records (
+                "INSERT INTO reminder_records (
                     id, reminder_id, description, type, trigger_time, close_time, action, updated_at, deleted_at
                  )
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(id) DO UPDATE SET
+                    reminder_id = excluded.reminder_id, description = excluded.description,
+                    type = excluded.type, trigger_time = excluded.trigger_time,
+                    close_time = excluded.close_time, action = excluded.action,
+                    updated_at = excluded.updated_at, deleted_at = excluded.deleted_at",
                 params![
                     record.id,
                     record.reminder_id,
@@ -1763,12 +1778,37 @@ fn execute_sql_script(conn: &Connection, sql: &str) -> Result<(), AppError> {
 
     for statement in cleaned.split(';') {
         let trimmed = statement.trim();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() || adds_existing_column(conn, trimmed)? {
             continue;
         }
         conn.execute_batch(trimmed)?;
     }
     Ok(())
+}
+
+/// `ALTER TABLE t ADD [COLUMN] c ...` 且该列已存在时返回 `true`：同步会把更新版本新增的同步列
+/// 提前补到本机（`sync_schema::adopt_remote_columns`），升级到那个版本时对应迁移要跳过补列，
+/// 而不是报“duplicate column name”。
+fn adds_existing_column(conn: &Connection, statement: &str) -> Result<bool, AppError> {
+    let tokens: Vec<&str> = statement.split_whitespace().take(6).collect();
+    let keyword =
+        |i: usize, word: &str| tokens.get(i).is_some_and(|t| t.eq_ignore_ascii_case(word));
+    if !(keyword(0, "ALTER") && keyword(1, "TABLE") && keyword(3, "ADD")) {
+        return Ok(false);
+    }
+    let column_index = if keyword(4, "COLUMN") { 5 } else { 4 };
+    let (Some(table), Some(column)) = (tokens.get(2), tokens.get(column_index)) else {
+        return Ok(false);
+    };
+    let unquote = |name: &str| {
+        name.trim_matches(|c| c == '"' || c == '`' || c == '[' || c == ']')
+            .to_string()
+    };
+    let existing = crate::sync_schema::table_columns(conn, &unquote(table))?;
+    let column = unquote(column);
+    Ok(existing
+        .iter()
+        .any(|c| c.name.eq_ignore_ascii_case(&column)))
 }
 
 #[cfg(test)]
@@ -2311,6 +2351,55 @@ mod tests {
         db.save_settings(&settings).unwrap();
         assert!(!db.load_settings().unwrap().sticky_snap_enabled);
         assert!(!db.sticky_snap_enabled().unwrap());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn migration_skips_columns_already_adopted_by_sync() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE tasks (id TEXT PRIMARY KEY, due_at TEXT)")
+            .unwrap();
+        // 同步已把 due_at 补到本机，之后的迁移再加这一列时跳过；其他语句照常执行。
+        execute_sql_script(
+            &conn,
+            "-- 迁移\nALTER TABLE tasks ADD COLUMN due_at TEXT;\nALTER TABLE tasks ADD lead_minutes INTEGER NOT NULL DEFAULT 0;",
+        )
+        .unwrap();
+        let columns = crate::sync_schema::table_columns(&conn, "tasks").unwrap();
+        let names: Vec<&str> = columns.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["id", "due_at", "lead_minutes"]);
+        // 其他错误仍然报出。
+        assert!(execute_sql_script(&conn, "ALTER TABLE missing ADD COLUMN x TEXT").is_err());
+    }
+
+    #[test]
+    fn import_keeps_columns_unknown_to_this_version() {
+        let (db, dir) = temp_db();
+        let recurring = db.create_recurring_task(&sample_recurring()).unwrap();
+        {
+            let conn = Connection::open(db.db_path()).unwrap();
+            conn.execute_batch(&format!(
+                "ALTER TABLE recurring_tasks ADD COLUMN tags TEXT;
+                 UPDATE recurring_tasks SET tags = '健身' WHERE id = '{}';",
+                recurring.id
+            ))
+            .unwrap();
+        }
+        let mut imported = db.get_recurring_task(&recurring.id).unwrap().unwrap();
+        imported.description = "imported".to_string();
+        imported.updated_at = Some("2999-01-01T00:00:00".to_string());
+        db.import_rows(&[], &[imported], &[]).unwrap();
+
+        let conn = Connection::open(db.db_path()).unwrap();
+        let (description, tags): (String, Option<String>) = conn
+            .query_row(
+                "SELECT description, tags FROM recurring_tasks WHERE id = ?",
+                [&recurring.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(description, "imported");
+        assert_eq!(tags.as_deref(), Some("健身"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
