@@ -980,7 +980,7 @@ impl WebDavClient {
         Ok(Self {
             base_url,
             auth_header,
-            client: reqwest::blocking::Client::builder()
+            client: crate::http::blocking_client_builder()
                 .build()
                 .map_err(|e| AppError::Sync(e.to_string()))?,
         })
