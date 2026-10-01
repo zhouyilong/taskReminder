@@ -46,7 +46,7 @@ fn sources() -> Vec<String> {
 
 /// 下载数据文件：只接受 2xx、不超过 `MAX_BYTES` 的 UTF-8 文本。
 fn fetch(url: &str) -> Result<String, String> {
-    let client = reqwest::blocking::Client::builder()
+    let client = crate::http::blocking_client_builder()
         .timeout(REQUEST_TIMEOUT)
         .user_agent(concat!("TaskReminder/", env!("CARGO_PKG_VERSION")))
         .build()

@@ -16,6 +16,9 @@ use crate::db::{DbManager, TOMBSTONE_RETENTION_DAYS_SYNC};
 use crate::errors::AppError;
 use crate::models::{AppSettings, SyncStatus};
 use crate::sync_crypto::{self, KdfParams};
+use crate::sync_schema::{
+    adopt_remote_columns, ensure_sync_columns, quote_ident, table_columns, SyncTable, SYNC_TABLES,
+};
 use crate::time::{self, parse_datetime_any};
 
 const REMOTE_DB_NAME: &str = "taskreminder.db";
@@ -30,59 +33,6 @@ const LOCK_TTL_SECONDS: i64 = 120;
 const LOCAL_CHANGE_DEBOUNCE_SECONDS: u64 = 5 * 60;
 const MIN_AUTOMATIC_SYNC_INTERVAL_SECONDS: i64 = 15 * 60;
 const STARTUP_SYNC_DELAY_SECONDS: u64 = 15;
-
-const TASK_COLUMNS: &[&str] = &[
-    "id",
-    "description",
-    "type",
-    "status",
-    "created_at",
-    "completed_at",
-    "reminder_time",
-    "sticky_content",
-    "sticky_pos_x",
-    "sticky_pos_y",
-    "sticky_width",
-    "sticky_height",
-    "sticky_is_open",
-    "updated_at",
-    "deleted_at",
-    "tags",
-    "priority",
-];
-const RECURRING_COLUMNS: &[&str] = &[
-    "id",
-    "description",
-    "type",
-    "status",
-    "created_at",
-    "completed_at",
-    "interval_minutes",
-    "last_triggered",
-    "next_trigger",
-    "is_paused",
-    "start_time",
-    "end_time",
-    "repeat_mode",
-    "schedule_time",
-    "schedule_weekday",
-    "schedule_day",
-    "cron_expression",
-    "updated_at",
-    "deleted_at",
-    "schedule_weekdays",
-];
-const RECORD_COLUMNS: &[&str] = &[
-    "id",
-    "reminder_id",
-    "description",
-    "type",
-    "trigger_time",
-    "close_time",
-    "action",
-    "updated_at",
-    "deleted_at",
-];
 
 #[derive(Clone)]
 pub struct CloudSyncService {
@@ -785,80 +735,125 @@ pub(crate) fn merge_databases(
     ensure_sync_columns(&remote)?;
 
     let tx = local.transaction()?;
-    merge_table(&tx, &remote, "tasks", TASK_COLUMNS, "created_at")?;
-    merge_table(
-        &tx,
-        &remote,
-        "recurring_tasks",
-        RECURRING_COLUMNS,
-        "created_at",
-    )?;
-    merge_table(
-        &tx,
-        &remote,
-        "reminder_records",
-        RECORD_COLUMNS,
-        "trigger_time",
-    )?;
+    for table in SYNC_TABLES {
+        merge_table(&tx, &remote, table)?;
+    }
     tx.commit()?;
     Ok(())
 }
 
-fn merge_table(
-    local: &Connection,
-    remote: &Connection,
-    table: &str,
-    columns: &[&str],
-    fallback_time_column: &str,
-) -> Result<(), AppError> {
-    let local_rows = load_rows(local, table, columns, fallback_time_column)?;
-    let remote_rows = load_rows(remote, table, columns, fallback_time_column)?;
-    let mut all_ids = local_rows.keys().cloned().collect::<Vec<_>>();
-    for id in remote_rows.keys() {
-        if !all_ids.contains(id) {
-            all_ids.push(id.clone());
-        }
-    }
+/// 按行合并一张表，较新的一方胜出（见 `choose_row`）。
+///
+/// 参与合并的是本机表的全部同步列，包括更新版本新增、本版本不认识的列（`adopt_remote_columns`）。
+/// 胜出的行只写入它所在的库实际拥有的列：远端来自不认识某列的旧版本时，该列保留本机的值，
+/// 不会被清成默认值。本次才补上的列本机还没有值，本机行胜出时这些列取远端的值。
+fn merge_table(local: &Connection, remote: &Connection, table: &SyncTable) -> Result<(), AppError> {
+    let adopted = adopt_remote_columns(local, remote, table)?;
+    let local_columns = adopted.columns;
+    let remote_names = table_columns(remote, table.name)?;
+    let remote_columns: Vec<String> = local_columns
+        .iter()
+        .filter(|name| {
+            remote_names
+                .iter()
+                .any(|c| c.name.eq_ignore_ascii_case(name))
+        })
+        .cloned()
+        .collect();
+
+    let local_rows = load_rows(
+        local,
+        table.name,
+        &local_columns,
+        table.fallback_time_column,
+    )?;
+    let remote_rows = load_rows(
+        remote,
+        table.name,
+        &remote_columns,
+        table.fallback_time_column,
+    )?;
+    let mut all_ids: Vec<&String> = local_rows.keys().collect();
+    all_ids.extend(
+        remote_rows
+            .keys()
+            .filter(|id| !local_rows.contains_key(*id)),
+    );
     if all_ids.is_empty() {
         return Ok(());
     }
 
-    let placeholders = vec!["?"; columns.len()].join(", ");
-    let sql = format!(
-        "REPLACE INTO {} ({}) VALUES ({})",
-        table,
-        columns.join(", "),
-        placeholders
-    );
+    let position =
+        |columns: &[String], name: &str| columns.iter().position(|c| c.eq_ignore_ascii_case(name));
+    let fill_from_remote: Vec<(usize, usize)> = adopted
+        .newly_added
+        .iter()
+        .filter_map(|name| {
+            Some((
+                position(&local_columns, name)?,
+                position(&remote_columns, name)?,
+            ))
+        })
+        .collect();
 
-    let mut stmt = local.prepare(&sql)?;
+    let mut local_stmt = local.prepare(&upsert_sql(table.name, &local_columns))?;
+    let mut remote_stmt = local.prepare(&upsert_sql(table.name, &remote_columns))?;
     for id in all_ids {
-        let row = choose_row(local_rows.get(&id), remote_rows.get(&id));
-        if let Some(row) = row {
-            let params = params_from_iter(row.values.iter());
-            stmt.execute(params)?;
+        match choose_row(local_rows.get(id), remote_rows.get(id)) {
+            Some(Side::Local(row)) => match remote_rows.get(id) {
+                Some(remote_row) if !fill_from_remote.is_empty() => {
+                    let mut values = row.values.clone();
+                    for &(local_index, remote_index) in &fill_from_remote {
+                        values[local_index] = remote_row.values[remote_index].clone();
+                    }
+                    local_stmt.execute(params_from_iter(values.iter()))?;
+                }
+                _ => {
+                    local_stmt.execute(params_from_iter(row.values.iter()))?;
+                }
+            },
+            Some(Side::Remote(row)) => {
+                remote_stmt.execute(params_from_iter(row.values.iter()))?;
+            }
+            None => {}
         }
     }
     Ok(())
 }
 
-fn choose_row<'a>(local: Option<&'a RowData>, remote: Option<&'a RowData>) -> Option<&'a RowData> {
+/// 插入或只更新给出的列：没有给出的列（远端没有的列）保留本机原值。
+fn upsert_sql(table: &str, columns: &[String]) -> String {
+    let quoted: Vec<String> = columns.iter().map(|c| quote_ident(c)).collect();
+    let updates: Vec<String> = quoted
+        .iter()
+        .zip(columns)
+        .filter(|(_, name)| !name.eq_ignore_ascii_case("id"))
+        .map(|(q, _)| format!("{0} = excluded.{0}", q))
+        .collect();
+    format!(
+        "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT(id) DO UPDATE SET {}",
+        quote_ident(table),
+        quoted.join(", "),
+        vec!["?"; columns.len()].join(", "),
+        updates.join(", ")
+    )
+}
+
+enum Side<'a> {
+    Local(&'a RowData),
+    Remote(&'a RowData),
+}
+
+fn choose_row<'a>(local: Option<&'a RowData>, remote: Option<&'a RowData>) -> Option<Side<'a>> {
     match (local, remote) {
-        (Some(l), None) => Some(l),
-        (None, Some(r)) => Some(r),
+        (Some(l), None) => Some(Side::Local(l)),
+        (None, Some(r)) => Some(Side::Remote(r)),
         (Some(l), Some(r)) => match (l.compare_time, r.compare_time) {
-            (Some(lc), Some(rc)) => {
-                if rc > lc {
-                    Some(r)
-                } else {
-                    Some(l)
-                }
-            }
-            (Some(_), None) => Some(l),
-            (None, Some(_)) => Some(r),
-            _ => Some(l),
+            (Some(lc), Some(rc)) if rc > lc => Some(Side::Remote(r)),
+            (None, Some(_)) => Some(Side::Remote(r)),
+            _ => Some(Side::Local(l)),
         },
-        _ => None,
+        (None, None) => None,
     }
 }
 
@@ -871,17 +866,19 @@ struct RowData {
 fn load_rows(
     conn: &Connection,
     table: &str,
-    columns: &[&str],
+    columns: &[String],
     fallback_time_column: &str,
 ) -> Result<HashMap<String, RowData>, AppError> {
-    let sql = format!("SELECT {} FROM {}", columns.join(", "), table);
+    let quoted: Vec<String> = columns.iter().map(|c| quote_ident(c)).collect();
+    let sql = format!("SELECT {} FROM {}", quoted.join(", "), quote_ident(table));
     let mut stmt = conn.prepare(&sql)?;
     let mut rows = stmt.query([])?;
 
-    let id_index = columns.iter().position(|c| *c == "id").unwrap_or(0);
-    let updated_index = columns.iter().position(|c| *c == "updated_at");
-    let deleted_index = columns.iter().position(|c| *c == "deleted_at");
-    let fallback_index = columns.iter().position(|c| *c == fallback_time_column);
+    let position = |name: &str| columns.iter().position(|c| c.eq_ignore_ascii_case(name));
+    let id_index = position("id").unwrap_or(0);
+    let updated_index = position("updated_at");
+    let deleted_index = position("deleted_at");
+    let fallback_index = position(fallback_time_column);
 
     let mut map = HashMap::new();
     while let Some(row) = rows.next()? {
@@ -940,64 +937,6 @@ fn value_to_string(value: &Value) -> Option<String> {
     }
 }
 
-fn ensure_sync_columns(conn: &Connection) -> Result<(), AppError> {
-    ensure_column(conn, "tasks", "updated_at", "TEXT")?;
-    ensure_column(conn, "tasks", "deleted_at", "TEXT")?;
-    ensure_column(conn, "tasks", "sticky_content", "TEXT NOT NULL DEFAULT ''")?;
-    ensure_column(conn, "tasks", "sticky_pos_x", "REAL NOT NULL DEFAULT 48")?;
-    ensure_column(conn, "tasks", "sticky_pos_y", "REAL NOT NULL DEFAULT 76")?;
-    ensure_column(conn, "tasks", "sticky_width", "REAL NOT NULL DEFAULT 284")?;
-    ensure_column(conn, "tasks", "sticky_height", "REAL NOT NULL DEFAULT 280")?;
-    ensure_column(
-        conn,
-        "tasks",
-        "sticky_is_open",
-        "INTEGER NOT NULL DEFAULT 0",
-    )?;
-    ensure_column(conn, "tasks", "tags", "TEXT NOT NULL DEFAULT ''")?;
-    ensure_column(conn, "tasks", "priority", "INTEGER NOT NULL DEFAULT 0")?;
-    ensure_column(conn, "recurring_tasks", "updated_at", "TEXT")?;
-    ensure_column(conn, "recurring_tasks", "deleted_at", "TEXT")?;
-    ensure_column(
-        conn,
-        "recurring_tasks",
-        "repeat_mode",
-        "TEXT NOT NULL DEFAULT 'INTERVAL_RANGE'",
-    )?;
-    ensure_column(conn, "recurring_tasks", "schedule_time", "TEXT")?;
-    ensure_column(conn, "recurring_tasks", "schedule_weekday", "INTEGER")?;
-    ensure_column(conn, "recurring_tasks", "schedule_day", "INTEGER")?;
-    ensure_column(conn, "recurring_tasks", "cron_expression", "TEXT")?;
-    ensure_column(conn, "recurring_tasks", "schedule_weekdays", "INTEGER")?;
-    ensure_column(conn, "reminder_records", "updated_at", "TEXT")?;
-    ensure_column(conn, "reminder_records", "deleted_at", "TEXT")?;
-    Ok(())
-}
-
-fn ensure_column(
-    conn: &Connection,
-    table: &str,
-    column: &str,
-    column_type: &str,
-) -> Result<(), AppError> {
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
-    let mut rows = stmt.query([])?;
-    while let Some(row) = rows.next()? {
-        let name: String = row.get("name")?;
-        if name.eq_ignore_ascii_case(column) {
-            return Ok(());
-        }
-    }
-    conn.execute(
-        &format!(
-            "ALTER TABLE {} ADD COLUMN {} {}",
-            table, column, column_type
-        ),
-        [],
-    )?;
-    Ok(())
-}
-
 #[derive(Serialize, Deserialize, Clone)]
 struct LockInfo {
     #[serde(rename = "deviceId", alias = "device_id")]
@@ -1041,7 +980,7 @@ impl WebDavClient {
         Ok(Self {
             base_url,
             auth_header,
-            client: reqwest::blocking::Client::builder()
+            client: crate::http::blocking_client_builder()
                 .build()
                 .map_err(|e| AppError::Sync(e.to_string()))?,
         })
@@ -1215,6 +1154,10 @@ fn build_auth_header(username: &str, password: &str) -> Option<String> {
 }
 
 #[cfg(test)]
+#[path = "sync_compat_tests.rs"]
+mod compat_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1331,6 +1274,223 @@ mod tests {
         assert_eq!(merged.description, "remote edit");
         assert_eq!(merged.tags, vec!["工作", "周报"]);
         assert_eq!(merged.priority, 2);
+
+        let _ = std::fs::remove_dir_all(local_dir);
+        let _ = std::fs::remove_dir_all(remote_dir);
+    }
+
+    fn exec(path: &std::path::Path, sql: &str) {
+        Connection::open(path).unwrap().execute_batch(sql).unwrap();
+    }
+
+    fn text_column(path: &std::path::Path, table: &str, column: &str, id: &str) -> Option<String> {
+        let conn = Connection::open(path).unwrap();
+        conn.query_row(
+            &format!("SELECT {} FROM {} WHERE id = ?", column, table),
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn has_table_column(path: &std::path::Path, table: &str, column: &str) -> bool {
+        let conn = Connection::open(path).unwrap();
+        table_columns(&conn, table)
+            .unwrap()
+            .iter()
+            .any(|c| c.name == column)
+    }
+
+    /// 模拟更新版本（v2.1）的设备：多一个同步列 `due_at`。
+    fn add_future_column(path: &std::path::Path) {
+        exec(path, "ALTER TABLE tasks ADD COLUMN due_at TEXT");
+    }
+
+    #[test]
+    fn unknown_remote_column_is_adopted_with_its_values() {
+        let (local, local_dir) = temp_db("local");
+        let (remote, remote_dir) = temp_db("remote");
+        let task = local.create_task("shared", None).unwrap();
+        copy_task(&local.db_path(), &remote.db_path(), &task.id);
+        add_future_column(&remote.db_path());
+        exec(
+            &remote.db_path(),
+            &format!(
+                "UPDATE tasks SET due_at = '2026-10-08T18:00:00', updated_at = '2999-01-01T00:00:00' WHERE id = '{}'",
+                task.id
+            ),
+        );
+
+        merge_databases(&local.db_path(), &remote.db_path()).unwrap();
+        assert!(has_table_column(&local.db_path(), "tasks", "due_at"));
+        assert_eq!(
+            text_column(&local.db_path(), "tasks", "due_at", &task.id).as_deref(),
+            Some("2026-10-08T18:00:00")
+        );
+        // 新列不影响本版本读取。
+        assert_eq!(
+            local.get_task(&task.id).unwrap().unwrap().description,
+            "shared"
+        );
+
+        let _ = std::fs::remove_dir_all(local_dir);
+        let _ = std::fs::remove_dir_all(remote_dir);
+    }
+
+    #[test]
+    fn local_edit_keeps_adopted_column_and_uploads_it() {
+        let (local, local_dir) = temp_db("local");
+        let (remote, remote_dir) = temp_db("remote");
+        let task = local.create_task("shared", None).unwrap();
+        copy_task(&local.db_path(), &remote.db_path(), &task.id);
+        add_future_column(&remote.db_path());
+        exec(
+            &remote.db_path(),
+            &format!(
+                "UPDATE tasks SET due_at = '2026-10-08T18:00:00', updated_at = '2000-01-02T00:00:00' WHERE id = '{}'",
+                task.id
+            ),
+        );
+        merge_databases(&local.db_path(), &remote.db_path()).unwrap();
+
+        // 本机（不认识 due_at 的版本）修改标题后再次同步：本机行胜出，due_at 仍在。
+        local
+            .update_task(&task.id, "local edit", None, None, None)
+            .unwrap();
+        merge_databases(&local.db_path(), &remote.db_path()).unwrap();
+        assert_eq!(
+            text_column(&local.db_path(), "tasks", "due_at", &task.id).as_deref(),
+            Some("2026-10-08T18:00:00")
+        );
+
+        // 上传的快照由更新版本的设备合并：标题改动与 due_at 都在。
+        let (newer, newer_dir) = temp_db("newer");
+        add_future_column(&newer.db_path());
+        let snapshot = export_local_snapshot_bytes(&local.db_path()).unwrap();
+        merge_snapshot_bytes(&newer.db_path(), &snapshot).unwrap();
+        assert_eq!(
+            text_column(&newer.db_path(), "tasks", "description", &task.id).as_deref(),
+            Some("local edit")
+        );
+        assert_eq!(
+            text_column(&newer.db_path(), "tasks", "due_at", &task.id).as_deref(),
+            Some("2026-10-08T18:00:00")
+        );
+
+        let _ = std::fs::remove_dir_all(local_dir);
+        let _ = std::fs::remove_dir_all(remote_dir);
+        let _ = std::fs::remove_dir_all(newer_dir);
+    }
+
+    #[test]
+    fn older_remote_without_column_keeps_local_value() {
+        let (local, local_dir) = temp_db("local");
+        let (remote, remote_dir) = temp_db("remote");
+        let task = local.create_task("shared", None).unwrap();
+        copy_task(&local.db_path(), &remote.db_path(), &task.id);
+        // 本机是更新版本（有 due_at），远端来自不认识它的旧版本，并且旧版本改过这一行。
+        add_future_column(&local.db_path());
+        exec(
+            &local.db_path(),
+            &format!(
+                "UPDATE tasks SET due_at = '2026-10-08T18:00:00' WHERE id = '{}'",
+                task.id
+            ),
+        );
+        exec(
+            &remote.db_path(),
+            &format!(
+                "UPDATE tasks SET description = 'old device edit', updated_at = '2999-01-01T00:00:00' WHERE id = '{}'",
+                task.id
+            ),
+        );
+
+        merge_databases(&local.db_path(), &remote.db_path()).unwrap();
+        assert_eq!(
+            text_column(&local.db_path(), "tasks", "description", &task.id).as_deref(),
+            Some("old device edit")
+        );
+        assert_eq!(
+            text_column(&local.db_path(), "tasks", "due_at", &task.id).as_deref(),
+            Some("2026-10-08T18:00:00")
+        );
+
+        let _ = std::fs::remove_dir_all(local_dir);
+        let _ = std::fs::remove_dir_all(remote_dir);
+    }
+
+    #[test]
+    fn unaddable_remote_column_is_skipped_without_failing() {
+        let (local, local_dir) = temp_db("local");
+        let (remote, remote_dir) = temp_db("remote");
+        let task = local.create_task("shared", None).unwrap();
+        copy_task(&local.db_path(), &remote.db_path(), &task.id);
+        // 远端表被重建为带 NOT NULL 且无默认值的新列：本机无法给已有行补值，只能跳过。
+        exec(
+            &remote.db_path(),
+            "CREATE TABLE tasks_new AS SELECT *, 'x' AS strict_col FROM tasks;
+             DROP TABLE tasks;
+             CREATE TABLE tasks AS SELECT * FROM tasks_new WHERE 0;
+             DROP TABLE tasks_new;",
+        );
+        {
+            // 用完整定义重建，确保 strict_col 为 NOT NULL 无默认值。
+            let conn = Connection::open(remote.db_path()).unwrap();
+            conn.execute_batch("DROP TABLE tasks").unwrap();
+            conn.execute_batch(
+                "CREATE TABLE tasks (id TEXT PRIMARY KEY, description TEXT NOT NULL, type TEXT NOT NULL,
+                 status TEXT NOT NULL, created_at TEXT NOT NULL, completed_at TEXT, reminder_time TEXT,
+                 strict_col TEXT NOT NULL)",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO tasks (id, description, type, status, created_at, strict_col)
+                 VALUES ('remote-only', 'from remote', 'ONE_TIME', 'PENDING', '2026-01-01T00:00:00', 'v')",
+                [],
+            )
+            .unwrap();
+        }
+
+        merge_databases(&local.db_path(), &remote.db_path()).unwrap();
+        assert!(!has_table_column(&local.db_path(), "tasks", "strict_col"));
+        assert!(local.get_task("remote-only").unwrap().is_some());
+        assert!(local.get_task(&task.id).unwrap().is_some());
+
+        let _ = std::fs::remove_dir_all(local_dir);
+        let _ = std::fs::remove_dir_all(remote_dir);
+    }
+
+    #[test]
+    fn local_only_columns_are_not_synced() {
+        let (local, local_dir) = temp_db("local");
+        let (remote, remote_dir) = temp_db("remote");
+        let task = local.create_task("shared", None).unwrap();
+        let other = local.create_task("other", None).unwrap();
+        copy_task(&local.db_path(), &remote.db_path(), &task.id);
+        copy_task(&local.db_path(), &remote.db_path(), &other.id);
+        local.set_sticky_note_pinned(&task.id, true).unwrap();
+        exec(
+            &remote.db_path(),
+            &format!(
+                "UPDATE tasks SET description = 'remote edit', sticky_is_pinned = 1,
+                                  updated_at = '2999-01-01T00:00:00' WHERE id = '{}';
+                 UPDATE tasks SET description = 'remote edit', sticky_is_pinned = 0,
+                                  updated_at = '2999-01-01T00:00:00' WHERE id = '{}';",
+                other.id, task.id
+            ),
+        );
+        merge_databases(&local.db_path(), &remote.db_path()).unwrap();
+        // 远端行胜出：同步列取远端的值，锚定状态各自保留本机的值。
+        assert_eq!(
+            local.get_task(&task.id).unwrap().unwrap().description,
+            "remote edit"
+        );
+        assert!(local.get_sticky_note_pinned(&task.id).unwrap());
+        assert_eq!(
+            local.get_task(&other.id).unwrap().unwrap().description,
+            "remote edit"
+        );
+        assert!(!local.get_sticky_note_pinned(&other.id).unwrap());
 
         let _ = std::fs::remove_dir_all(local_dir);
         let _ = std::fs::remove_dir_all(remote_dir);
