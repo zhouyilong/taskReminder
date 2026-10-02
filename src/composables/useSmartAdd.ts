@@ -58,7 +58,12 @@ export const useSmartAdd = (text: Ref<string>) => {
         }
         await api.createRecurringTask(buildRecurringPayload(draft));
       } else {
-        const reminder = result?.reminderTime ?? options.fallbackReminder ?? null;
+        const due = result?.dueTime ?? null;
+        let reminder = result?.reminderTime ?? options.fallbackReminder ?? null;
+        // 有截止时间而提前量算出的提醒时间已过：只记截止时间、不提醒。
+        if (due && reminder && reminder.getTime() <= now.getTime() && due.getTime() > now.getTime()) {
+          reminder = null;
+        }
         if (reminder && reminder.getTime() <= now.getTime()) {
           error.value = "提醒时间需晚于当前时间";
           return false;
@@ -69,6 +74,7 @@ export const useSmartAdd = (text: Ref<string>) => {
           tags: result?.tags ?? [],
           priority: result?.priority ?? 0,
           reminderTime: reminder ? toLocalDateTimeString(reminder) : null,
+          dueAt: due ? toLocalDateTimeString(due) : null,
         });
       }
       text.value = "";

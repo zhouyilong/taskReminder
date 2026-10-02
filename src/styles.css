@@ -1216,6 +1216,20 @@ label:has(> input[type="checkbox"]) {
   background: var(--bg-hover);
 }
 
+/* 截止时间（v2.1）：截止标签下方附注提前的提醒时间 */
+.due-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.due-reminder-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* 多选：避免 Shift 连选时浏览器选中文字 */
 .table.is-selecting {
   user-select: none;

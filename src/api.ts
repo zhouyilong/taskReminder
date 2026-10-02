@@ -37,6 +37,8 @@ export const api = {
     tags?: string[];
     priority?: number;
     reminderTime?: string | null;
+    /** 截止时间（v2.1）。 */
+    dueAt?: string | null;
   }): Promise<Task> {
     return invoke("create_task", { payload });
   },
@@ -48,6 +50,8 @@ export const api = {
     /** 省略时保留原有标签与优先级。 */
     tags?: string[];
     priority?: number;
+    /** 截止时间：省略时保留，null 清除。 */
+    dueAt?: string | null;
   }): Promise<void> {
     return invoke("update_task", { task });
   },
@@ -259,6 +263,7 @@ export const api = {
     reminderTime?: string | null;
     tags?: string[];
     priority?: number;
+    dueAt?: string | null;
   }): Promise<Task> {
     return invoke("quick_add_task", { payload });
   },

@@ -2,6 +2,7 @@
 // 循环提醒预估合并成一条按时间排列的时间线。纯函数，便于测试。
 import { dateKey, toLocalDateTimeString } from "./format";
 import type { RecurringPreview, RecurringTask, ReminderRecord, Task, UserAction } from "./types";
+import { taskAnchorTime } from "./due";
 
 /** 同一循环提醒当天超过这么多次（如每 30 分钟一次）时折叠为一条。 */
 export const MAX_OCCURRENCES_PER_TASK = 3;
@@ -82,13 +83,14 @@ export const buildTodayData = (input: TodayInput): TodayData => {
   const entries: TimelineEntry[] = [];
 
   for (const task of input.tasks) {
-    if (!isToday(task.reminderTime)) {
+    const time = taskAnchorTime(task);
+    if (!isToday(time)) {
       continue;
     }
-    const isPast = task.reminderTime <= now;
+    const isPast = time <= now;
     entries.push({
       key: `task-${task.id}`,
-      time: task.reminderTime,
+      time,
       kind: "task",
       title: task.description,
       state: isPast ? "overdue" : "upcoming",
@@ -99,16 +101,17 @@ export const buildTodayData = (input: TodayInput): TodayData => {
   }
 
   for (const task of input.completedTasks) {
-    if (!isToday(task.reminderTime)) {
+    const time = taskAnchorTime(task);
+    if (!isToday(time)) {
       continue;
     }
     entries.push({
       key: `task-${task.id}`,
-      time: task.reminderTime,
+      time,
       kind: "task",
       title: task.description,
       state: "done",
-      isPast: task.reminderTime <= now,
+      isPast: time <= now,
       task,
       collapsedCount: 0,
     });
@@ -159,8 +162,11 @@ export const buildTodayData = (input: TodayInput): TodayData => {
   entries.sort((a, b) => byTime(a, b) || (a.kind === b.kind ? 0 : a.kind === "task" ? -1 : 1));
 
   const overdueTasks = input.tasks
-    .filter(task => !!task.reminderTime && task.reminderTime < dayStart)
-    .sort((a, b) => (a.reminderTime ?? "").localeCompare(b.reminderTime ?? ""));
+    .filter(task => {
+      const time = taskAnchorTime(task);
+      return !!time && time < dayStart;
+    })
+    .sort((a, b) => (taskAnchorTime(a) ?? "").localeCompare(taskAnchorTime(b) ?? ""));
 
   const count = (entry: TimelineEntry) => 1 + entry.collapsedCount;
   return {

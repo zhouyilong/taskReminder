@@ -2,6 +2,7 @@
 // 按天归类。纯函数，便于测试。
 import { addDays, dateKey, toLocalDateTimeString } from "./format";
 import type { RecurringPreview, RecurringTask, ReminderRecord, Task } from "./types";
+import { taskAnchorTime } from "./due";
 
 export interface CalendarDay {
   date: Date;
@@ -122,23 +123,25 @@ export const bucketCalendarItems = (input: CalendarInput): Map<string, CalendarI
   };
 
   for (const task of input.tasks) {
-    if (!inRange(task.reminderTime)) {
+    // 有截止时间时按截止时间（v2.1），否则按提醒时间。
+    const time = taskAnchorTime(task);
+    if (!inRange(time)) {
       continue;
     }
     push({
       key: `task-${task.id}`,
       kind: "task",
-      time: task.reminderTime,
+      time,
       title: task.description,
-      state: task.reminderTime <= now ? "overdue" : "upcoming",
+      state: time <= now ? "overdue" : "upcoming",
       count: 1,
       task,
     });
   }
 
   for (const task of input.completedTasks) {
-    // 设过提醒的按提醒日期，否则按完成日期。
-    const time = task.reminderTime || task.completedAt;
+    // 有截止 / 提醒时间的按该日期，否则按完成日期。
+    const time = taskAnchorTime(task) || task.completedAt;
     if (!inRange(time)) {
       continue;
     }

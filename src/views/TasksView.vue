@@ -90,7 +90,7 @@
               </th>
               <th class="col-desc">标题</th>
               <th class="col-note">描述</th>
-              <th class="col-datetime">提醒时间</th>
+              <th class="col-datetime">截止 / 提醒</th>
               <th class="col-datetime">创建时间</th>
             </tr>
           </thead>
@@ -128,8 +128,19 @@
                 </div>
               </td>
               <td class="col-note cell-muted" :class="{ 'cell-empty': !task.stickyContent?.trim() }" :title="taskStickyPreview(task.stickyContent)">{{ taskStickyPreview(task.stickyContent) }}</td>
-              <td class="col-datetime" :title="formatDateTime(task.reminderTime)">
-                <span v-if="task.reminderTime" class="time-chip" :class="reminderTone(task.reminderTime)">
+              <td class="col-datetime" :title="timeTitle(task)">
+                <div v-if="task.dueAt" class="due-cell">
+                  <span class="time-chip is-due" :class="reminderTone(task.dueAt)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M6 4v16M6 5h11l-2.5 4L17 13H6" />
+                    </svg>
+                    截止 {{ formatDateTime(task.dueAt).slice(5, 16) }}
+                  </span>
+                  <span v-if="separateReminder(task)" class="due-reminder-note">
+                    {{ task.reminderTime ? `提醒 ${formatDateTime(task.reminderTime).slice(5, 16)}` : "" }}
+                  </span>
+                </div>
+                <span v-else-if="task.reminderTime" class="time-chip" :class="reminderTone(task.reminderTime)">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <circle cx="12" cy="12" r="8" />
                     <path d="M12 8v4l2.5 1.5" />
@@ -170,6 +181,8 @@ import SmartParseHint from "../components/SmartParseHint.vue";
 import TaskBatchBar from "../components/TaskBatchBar.vue";
 import TaskBadges from "../components/TaskBadges.vue";
 import { formatDateTime, reminderTone, taskStickyPreview } from "../format";
+import { separateReminder } from "../due";
+import type { Task } from "../types";
 import { VIEW_SHORTCUT_EVENT, type ShortcutAction } from "../keyboard";
 import { safeStorage } from "../safeStorage";
 import { api } from "../api";
@@ -213,6 +226,14 @@ watch(allTags, list => {
     filter.tag = "";
   }
 });
+
+const timeTitle = (task: Task) =>
+  [
+    task.dueAt ? `截止 ${formatDateTime(task.dueAt)}` : "",
+    task.reminderTime ? `提醒 ${formatDateTime(task.reminderTime)}` : task.dueAt ? "不提醒" : ""
+  ]
+    .filter(Boolean)
+    .join("，") || "未设置";
 
 const toggleTagFilter = (tag: string) => {
   filter.tag = filter.tag.toLowerCase() === tag.toLowerCase() ? "" : tag;

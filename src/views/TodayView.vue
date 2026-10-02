@@ -35,7 +35,7 @@
             @dblclick="openTaskEditor(task)"
             @contextmenu.prevent.stop="openTaskMenu($event, task)"
           >
-            <span class="timeline-time is-date">{{ formatShortDate(task.reminderTime) }}</span>
+            <span class="timeline-time is-date">{{ formatShortDate(taskAnchorTime(task)) }}</span>
             <span class="timeline-dot" aria-hidden="true"></span>
             <div class="timeline-body">
               <input type="checkbox" class="check-round" title="标记完成" @change="toggleTask(task)" />
@@ -101,6 +101,7 @@
 </template>
 
 <script setup lang="ts">
+import { taskAnchorTime } from "../due";
 import { computed, ref, watch } from "vue";
 import { api } from "../api";
 import { formatAction, formatClock, formatMonthDay, recordDescription, toLocalDateTimeString, dateKey } from "../format";

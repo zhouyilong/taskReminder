@@ -212,3 +212,33 @@ describe("month-end recurring rules", () => {
     expect(parseQuickInput("工作日 9点 站会", now).recurring?.mode).toBe("WORKDAY");
   });
 });
+
+describe("due time and lead", () => {
+  const now = new Date(2026, 9, 2, 10, 0); // 周五
+  it("treats a time followed by 前 as the due time", () => {
+    const parsed = parseQuickInput("下周三下午3点前交周报 #工作", now);
+    expect(parsed.dueTime).toEqual(new Date(2026, 9, 7, 15, 0));
+    expect(parsed.reminderTime).toEqual(new Date(2026, 9, 7, 15, 0));
+    expect(parsed.title).toBe("交周报");
+    expect(describeParsedSchedule(parsed, now)).toBe("截止 10月7日 周三 15:00");
+  });
+
+  it("applies 提前 N to the reminder", () => {
+    const parsed = parseQuickInput("明天18:00截止 提交报销 提前1小时提醒", now);
+    expect(parsed.dueTime).toEqual(new Date(2026, 9, 3, 18, 0));
+    expect(parsed.reminderTime).toEqual(new Date(2026, 9, 3, 17, 0));
+    expect(parsed.leadMinutes).toBe(60);
+    expect(parsed.title).toBe("提交报销");
+    expect(describeParsedSchedule(parsed, now)).toBe("截止 明天 18:00 · 提前 1 小时提醒");
+    expect(parseQuickInput("截止 10月8日 9点 交材料 提前1天", now).reminderTime).toEqual(new Date(2026, 9, 7, 9, 0));
+  });
+
+  it("keeps plain reminders and words like 前台 unchanged", () => {
+    const plain = parseQuickInput("明天下午3点 交周报", now);
+    expect(plain.dueTime).toBeNull();
+    expect(plain.reminderTime).toEqual(new Date(2026, 9, 3, 15, 0));
+    const desk = parseQuickInput("下午3点前台取快递", now);
+    expect(desk.dueTime).toBeNull();
+    expect(desk.title).toBe("前台取快递");
+  });
+});

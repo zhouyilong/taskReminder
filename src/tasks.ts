@@ -1,4 +1,5 @@
 // 待办列表的标签、优先级、筛选与排序。纯函数，便于测试。
+import { taskAnchorTime } from "./due";
 import type { Task } from "./types";
 
 export const PRIORITY_OPTIONS = [
@@ -49,12 +50,14 @@ export const collectTags = (tasks: ReadonlyArray<Pick<Task, "tags">>) => {
   return [...counts.values()].sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, "zh-CN"));
 };
 
-export type TaskSortKey = "created" | "reminder" | "priority";
+export type TaskSortKey = "created" | "reminder" | "priority" | "manual";
 
 export const TASK_SORT_OPTIONS: { value: TaskSortKey; label: string }[] = [
   { value: "created", label: "创建时间" },
-  { value: "reminder", label: "提醒时间" },
+  // 键名沿用 reminder（记在 localStorage 中）；有截止时间时按截止时间（v2.1）。
+  { value: "reminder", label: "截止 / 提醒时间" },
   { value: "priority", label: "优先级" },
+  { value: "manual", label: "手动顺序" },
 ];
 
 export interface TaskFilter {
@@ -95,15 +98,27 @@ const compareOptionalTime = (a?: string | null, b?: string | null) => {
   return 0;
 };
 
+/** 手动顺序：有位置的按位置升序，没有的排在后面（再按创建时间）。 */
+const compareOptionalOrder = (a?: number | null, b?: number | null) => {
+  const hasA = typeof a === "number" && Number.isFinite(a);
+  const hasB = typeof b === "number" && Number.isFinite(b);
+  if (hasA && hasB) return (a as number) - (b as number);
+  if (hasA) return -1;
+  if (hasB) return 1;
+  return 0;
+};
+
 /** 排序：提醒时间升序（未设置的排在最后），优先级降序；相同则按创建时间升序。 */
 export const sortTasks = (tasks: Task[], key: TaskSortKey) => {
   const sorted = [...tasks];
   sorted.sort((a, b) => {
     let result = 0;
     if (key === "reminder") {
-      result = compareOptionalTime(a.reminderTime, b.reminderTime);
+      result = compareOptionalTime(taskAnchorTime(a), taskAnchorTime(b));
     } else if (key === "priority") {
-      result = priorityOf(b) - priorityOf(a) || compareOptionalTime(a.reminderTime, b.reminderTime);
+      result = priorityOf(b) - priorityOf(a) || compareOptionalTime(taskAnchorTime(a), taskAnchorTime(b));
+    } else if (key === "manual") {
+      result = compareOptionalOrder(a.sortOrder, b.sortOrder);
     }
     return result || a.createdAt.localeCompare(b.createdAt);
   });
