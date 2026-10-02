@@ -50,7 +50,7 @@ export const useSmartAdd = (text: Ref<string>) => {
     error.value = "";
     try {
       if (result?.recurring) {
-        const draft = { ...result.recurring, description };
+        const draft = { ...result.recurring, description, tags: result.tags };
         const invalid = validateRecurringDraft(draft);
         if (invalid) {
           error.value = invalid;

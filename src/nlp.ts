@@ -245,6 +245,17 @@ const parseRecurring = (scanner: Scanner): RecurringDraft | null => {
     }
   }
 
+  // “每月最后一个工作日”要在“每月最后一天”之前识别。
+  if (take(scanner, /每个?月(?:的)?(?:最后一个?|末(?:的)?|底(?:的)?)工作日/)) {
+    draft.mode = "MONTHLY_LAST_WORKDAY";
+    return draft;
+  }
+
+  if (take(scanner, /每个?月(?:的)?(?:最后一[天日]|月?末|月?底)/)) {
+    draft.mode = "MONTHLY_LAST_DAY";
+    return draft;
+  }
+
   if (take(scanner, /每个?工作日|(?:^|\s)工作日(?:每天)?/)) {
     draft.mode = "WORKDAY";
     return draft;
@@ -505,6 +516,10 @@ export const describeParsedSchedule = (parsed: ParsedInput, now: Date = new Date
         return `${formatWeekdayMask(draft.scheduleWeekdays)} ${draft.scheduleTime}`;
       case "MONTHLY":
         return `每月 ${draft.scheduleDay} 日 ${draft.scheduleTime}`;
+      case "MONTHLY_LAST_DAY":
+        return `每月最后一天 ${draft.scheduleTime}`;
+      case "MONTHLY_LAST_WORKDAY":
+        return `每月最后一个工作日 ${draft.scheduleTime}`;
       default:
         return "";
     }

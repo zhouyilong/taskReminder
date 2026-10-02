@@ -191,7 +191,7 @@ const submitRecurring = async (title: string) => {
   if (!draft) {
     return;
   }
-  const payload = { ...draft, description: title };
+  const payload = { ...draft, description: title, tags: parsed.value.tags };
   const invalid = validateRecurringDraft(payload);
   if (invalid) {
     errorMessage.value = invalid;

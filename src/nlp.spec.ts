@@ -190,3 +190,25 @@ describe("parseRescheduleTime", () => {
     expect(parseRescheduleTime("2026-10-01 09:00", now).error).toMatch("已经过去");
   });
 });
+
+describe("month-end recurring rules", () => {
+  const now = new Date(2026, 9, 2, 10, 0);
+  it("recognises last day and last workday of the month", () => {
+    const lastDay = parseQuickInput("每月最后一天晚上8点 交房租 #生活", now);
+    expect(lastDay.recurring?.mode).toBe("MONTHLY_LAST_DAY");
+    expect(lastDay.recurring?.scheduleTime).toBe("20:00");
+    expect(lastDay.title).toBe("交房租");
+    expect(lastDay.tags).toEqual(["生活"]);
+    expect(describeParsedSchedule(lastDay, now)).toBe("每月最后一天 20:00");
+
+    const lastWorkday = parseQuickInput("每月最后一个工作日 17:00 提交报销", now);
+    expect(lastWorkday.recurring?.mode).toBe("MONTHLY_LAST_WORKDAY");
+    expect(lastWorkday.recurring?.scheduleTime).toBe("17:00");
+    expect(lastWorkday.title).toBe("提交报销");
+
+    expect(parseQuickInput("每月月底 9点 对账", now).recurring?.mode).toBe("MONTHLY_LAST_DAY");
+    // 原有写法不受影响。
+    expect(parseQuickInput("每月15号 9点 还信用卡", now).recurring?.mode).toBe("MONTHLY");
+    expect(parseQuickInput("工作日 9点 站会", now).recurring?.mode).toBe("WORKDAY");
+  });
+});

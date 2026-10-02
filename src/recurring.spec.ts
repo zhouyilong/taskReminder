@@ -146,3 +146,19 @@ describe("canSkipRecurring", () => {
     expect(canSkipRecurring({ ...base, nextTrigger: "" })).toBe(false);
   });
 });
+
+describe("month-end modes and tags", () => {
+  it("builds payloads for month-end modes with normalized tags", () => {
+    const draft = { ...createRecurringDraft(), description: "交房租", mode: "MONTHLY_LAST_DAY" as const, scheduleTime: "20:00", tags: ["#生活", "生活", "账单"] };
+    expect(validateRecurringDraft(draft)).toBeNull();
+    const payload = buildRecurringPayload(draft);
+    expect(payload).toMatchObject({ repeatMode: "MONTHLY_LAST_DAY", scheduleTime: "20:00", scheduleDay: null, tags: ["生活", "账单"] });
+    expect(validateRecurringDraft({ ...draft, mode: "MONTHLY_LAST_WORKDAY", scheduleTime: "" })).not.toBeNull();
+  });
+
+  it("describes and warns for month-end workday reminders", () => {
+    const task = { repeatMode: "MONTHLY_LAST_WORKDAY", scheduleTime: "17:00", isPaused: false, nextTrigger: "2026-12-31T17:00:00" } as never;
+    expect(formatRecurringRule(task)).toBe("每月最后一个工作日 17:00");
+    expect(workdayHolidayWarning(task, [2025, 2026], new Date(2026, 11, 20))).toMatch("2027");
+  });
+});

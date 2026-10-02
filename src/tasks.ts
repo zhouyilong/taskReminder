@@ -33,7 +33,7 @@ export const normalizeTags = (tags: string[]) => {
 };
 
 /** 所有标签及使用次数，按次数降序、再按名称排序。 */
-export const collectTags = (tasks: Task[]) => {
+export const collectTags = (tasks: ReadonlyArray<Pick<Task, "tags">>) => {
   const counts = new Map<string, { tag: string; count: number }>();
   for (const task of tasks) {
     for (const tag of task.tags ?? []) {
