@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeStats, computeStreak, rangeDates } from "./stats";
+import { computeStats, computeStreak, rangeDates, filterHabitsByTag } from "./stats";
 import type { RecurringTask, ReminderRecord } from "./types";
 
 const NOW = new Date(2026, 8, 26, 12, 0, 0);
@@ -102,5 +102,15 @@ describe("computeStats", () => {
     const stats = computeStats({ now: NOW, days: 7, records: [], completedTasks: [], recurringTasks: [] });
     expect(stats.handledRate).toBeNull();
     expect(stats.daily.every(day => day.total === 0)).toBe(true);
+  });
+});
+
+describe("filterHabitsByTag", () => {
+  const habit = (id: string, tags: string[]) =>
+    ({ task: { id, tags }, current: 0, best: 0, checkedDays: 0, remindedDays: 1 }) as never;
+  it("keeps habits whose recurring task has the tag", () => {
+    const habits = [habit("a", ["健康"]), habit("b", ["工作"]), habit("c", [])];
+    expect(filterHabitsByTag(habits, "健康").map((item: { task: { id: string } }) => item.task.id)).toEqual(["a"]);
+    expect(filterHabitsByTag(habits, "")).toHaveLength(3);
   });
 });
