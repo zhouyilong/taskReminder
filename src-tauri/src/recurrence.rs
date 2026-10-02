@@ -121,9 +121,16 @@ pub fn sanitize_recurring_task(task: &mut RecurringTask) -> Result<(), AppError>
             task.schedule_weekdays = None;
             task.cron_expression = None;
         }
-        RepeatMode::Workday => {
+        RepeatMode::Workday | RepeatMode::MonthlyLastDay | RepeatMode::MonthlyLastWorkday => {
             if task.schedule_time.is_none() {
-                return Err(AppError::Invalid("工作日模式需要设置触发时间".to_string()));
+                return Err(AppError::Invalid(format!(
+                    "{}模式需要设置触发时间",
+                    match task.repeat_mode {
+                        RepeatMode::Workday => "工作日",
+                        RepeatMode::MonthlyLastDay => "每月最后一天",
+                        _ => "每月最后一个工作日",
+                    }
+                )));
             }
             task.start_time = None;
             task.end_time = None;
@@ -165,6 +172,8 @@ pub fn compute_next_trigger(
         RepeatMode::Monthly => compute_monthly_next(&normalized, base)?,
         RepeatMode::Cron => compute_cron_next(&normalized, base)?,
         RepeatMode::Workday => compute_workday_next(&normalized, base)?,
+        RepeatMode::MonthlyLastDay => compute_month_end_next(&normalized, base, false)?,
+        RepeatMode::MonthlyLastWorkday => compute_month_end_next(&normalized, base, true)?,
         RepeatMode::Unknown(mode) => return Err(unsupported_mode(mode)),
     };
     Ok(time::format_datetime(&next))
@@ -194,7 +203,11 @@ pub fn refreshed_workday_trigger(
     task: &RecurringTask,
     now: NaiveDateTime,
 ) -> Result<Option<String>, AppError> {
-    if task.is_paused || task.deleted_at.is_some() || task.repeat_mode != RepeatMode::Workday {
+    let depends_on_holidays = matches!(
+        task.repeat_mode,
+        RepeatMode::Workday | RepeatMode::MonthlyLastWorkday
+    );
+    if task.is_paused || task.deleted_at.is_some() || !depends_on_holidays {
         return Ok(None);
     }
     let pending = time::parse_datetime_any(&task.next_trigger);
@@ -370,6 +383,45 @@ fn compute_workday_next(
     }
     Err(AppError::Invalid(
         "工作日模式无法计算下次触发时间".to_string(),
+    ))
+}
+
+fn month_end_date(year: i32, month: u32) -> Option<NaiveDate> {
+    let (next_year, next_month) = next_month(year, month);
+    NaiveDate::from_ymd_opt(next_year, next_month, 1).and_then(|first| first.pred_opt())
+}
+
+/// 每月最后一天 / 最后一个法定工作日（遇节假日或周末向前找；没有节假日数据的年份按周一至周五）。
+fn compute_month_end_next(
+    task: &RecurringTask,
+    base: NaiveDateTime,
+    workday_only: bool,
+) -> Result<NaiveDateTime, AppError> {
+    let time = parse_time(
+        task.schedule_time
+            .as_deref()
+            .ok_or_else(|| AppError::Invalid("每月最后一天模式缺少触发时间".to_string()))?,
+    )?;
+    let (mut year, mut month) = (base.date().year(), base.date().month());
+    // 当月的已过去时看下个月；向前找工作日最多跨过一个长假，3 个月足够。
+    for _ in 0..3 {
+        let mut date = month_end_date(year, month)
+            .ok_or_else(|| AppError::Invalid("无法计算月末日期".to_string()))?;
+        if workday_only {
+            let mut steps = 0;
+            while !holidays::is_workday(date) && steps < 31 {
+                date = date.pred_opt().unwrap_or(date);
+                steps += 1;
+            }
+        }
+        let candidate = NaiveDateTime::new(date, time);
+        if candidate > base {
+            return Ok(candidate);
+        }
+        (year, month) = next_month(year, month);
+    }
+    Err(AppError::Invalid(
+        "每月最后一天模式无法计算下次触发时间".to_string(),
     ))
 }
 
@@ -1008,5 +1060,38 @@ mod tests {
         let mut unknown = task(RepeatMode::parse("BIWEEKLY"));
         unknown.next_trigger = "2026-09-22T09:00:00".to_string();
         assert!(skipped_trigger(&unknown, dt("2026-09-21T20:00")).is_err());
+    }
+
+    #[test]
+    fn monthly_last_day_handles_short_and_leap_months() {
+        let t = task(RepeatMode::MonthlyLastDay);
+        assert_eq!(next(&t, "2026-02-10T08:00"), "2026-02-28T09:00:00");
+        assert_eq!(next(&t, "2026-02-28T09:00"), "2026-03-31T09:00:00");
+        assert_eq!(next(&t, "2028-02-01T00:00"), "2028-02-29T09:00:00");
+        assert_eq!(next(&t, "2026-12-31T10:00"), "2027-01-31T09:00:00");
+    }
+
+    #[test]
+    fn monthly_last_workday_skips_weekends_and_holidays() {
+        let t = task(RepeatMode::MonthlyLastWorkday);
+        // 2026-10-31 是周六 → 10-30 周五。
+        assert_eq!(next(&t, "2026-10-01T08:00"), "2026-10-30T09:00:00");
+        // 2026-02-28 是周六，但为调休上班日。
+        assert_eq!(next(&t, "2026-02-01T08:00"), "2026-02-28T09:00:00");
+        // 2025-01-31 在春节假期中（1-28 至 2-4），向前到 1-27 周一。
+        assert_eq!(next(&t, "2025-01-02T08:00"), "2025-01-27T09:00:00");
+        // 当月最后一个工作日已过 → 下个月。
+        assert_eq!(next(&t, "2026-10-30T09:00"), "2026-11-30T09:00:00");
+    }
+
+    #[test]
+    fn month_end_modes_require_a_time_and_clear_other_fields() {
+        let mut t = task(RepeatMode::MonthlyLastDay);
+        t.schedule_day = Some(5);
+        t.cron_expression = Some("0 9 * * *".to_string());
+        sanitize_recurring_task(&mut t).unwrap();
+        assert_eq!((t.schedule_day, t.cron_expression.as_deref()), (None, None));
+        t.schedule_time = None;
+        assert!(sanitize_recurring_task(&mut t).is_err());
     }
 }

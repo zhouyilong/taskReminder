@@ -35,6 +35,28 @@ pub struct TaskUpdatePayload {
     tags: Option<Vec<String>>,
     #[serde(default)]
     priority: Option<i64>,
+    /// 截止时间：省略时保留原值，`null` 清除。
+    #[serde(default, deserialize_with = "present")]
+    due_at: Option<Option<String>>,
+}
+
+/// 区分“字段省略”（外层 `None`，由 `default` 提供）与“显式为 null”（`Some(None)`）。
+fn present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+/// 校验截止时间格式（`YYYY-MM-DDTHH:MM[:SS]`）并规范化，空字符串视为清除。
+fn normalize_due(value: Option<String>) -> Result<Option<String>, String> {
+    match normalize_reminder_time(value) {
+        None => Ok(None),
+        Some(raw) => crate::time::parse_datetime_any(&raw)
+            .map(|parsed| Some(crate::time::format_datetime(&parsed)))
+            .ok_or_else(|| "截止时间格式无效".to_string()),
+    }
 }
 
 impl TaskUpdatePayload {
@@ -61,6 +83,9 @@ pub struct CreateTaskPayload {
     /// 创建时一并设置提醒（自然语言输入识别出的时间）。
     #[serde(default)]
     reminder_time: Option<String>,
+    /// 截止时间（v2.1）。
+    #[serde(default)]
+    due_at: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -72,6 +97,8 @@ pub struct QuickAddPayload {
     tags: Vec<String>,
     #[serde(default)]
     priority: i64,
+    #[serde(default)]
+    due_at: Option<String>,
 }
 
 #[tauri::command]
@@ -95,6 +122,7 @@ pub fn create_task(state: State<AppState>, payload: CreateTaskPayload) -> ApiRes
         payload.description.trim(),
         payload.sticky_content.as_deref(),
         payload.reminder_time,
+        payload.due_at,
         &meta,
     )
 }
@@ -115,6 +143,7 @@ pub fn quick_add_task(
         payload.description.trim(),
         None,
         payload.reminder_time,
+        payload.due_at,
         &meta,
     )?;
     let _ = app.emit("data-updated", ());
@@ -126,11 +155,13 @@ fn create_task_with_reminder(
     description: &str,
     sticky_content: Option<&str>,
     reminder_time: Option<String>,
+    due_at: Option<String>,
     meta: &TaskMeta,
 ) -> ApiResult<Task> {
     if description.is_empty() {
         return Err("待办内容不能为空".to_string());
     }
+    let due_at = normalize_due(due_at)?;
     let reminder_time = normalize_reminder_time(reminder_time);
     if let Some(value) = reminder_time.as_deref() {
         if !into_api(scheduler::is_future(value))? {
@@ -151,6 +182,10 @@ fn create_task_with_reminder(
         task.reminder_time = Some(reminder_time);
         into_api(state.scheduler.schedule_task(task.clone()))?;
     }
+    if let Some(due) = due_at {
+        into_api(state.db.set_task_due(&task.id, Some(due.as_str())))?;
+        task.due_at = Some(due);
+    }
     into_api(state.sync.notify_local_change())?;
     Ok(task)
 }
@@ -163,6 +198,10 @@ pub fn update_task(
 ) -> ApiResult<()> {
     let reminder_time = task.reminder_time.clone();
     let meta = task.meta();
+    let due_at = match task.due_at.clone() {
+        Some(value) => Some(normalize_due(value)?),
+        None => None,
+    };
     into_api(state.db.update_task(
         &task.id,
         task.description.trim(),
@@ -170,6 +209,9 @@ pub fn update_task(
         reminder_time.clone(),
         meta.as_ref(),
     ))?;
+    if let Some(due) = due_at {
+        into_api(state.db.set_task_due(&task.id, due.as_deref()))?;
+    }
     state.scheduler.cancel_task(&task.id);
     if let Some(reminder_time) = reminder_time.clone() {
         if scheduler::is_future(&reminder_time).unwrap_or(false) {
@@ -330,6 +372,30 @@ mod tests {
     }
 
     #[test]
+    fn update_payload_distinguishes_missing_and_null_due() {
+        let parse = |json: &str| {
+            serde_json::from_str::<TaskUpdatePayload>(json)
+                .unwrap()
+                .due_at
+        };
+        let base = r#""id":"t","description":"d","stickyContent":null,"reminderTime":null"#;
+        assert_eq!(parse(&format!("{{{}}}", base)), None);
+        assert_eq!(parse(&format!(r#"{{{},"dueAt":null}}"#, base)), Some(None));
+        assert_eq!(
+            parse(&format!(r#"{{{},"dueAt":"2026-10-09T18:00"}}"#, base)),
+            Some(Some("2026-10-09T18:00".to_string()))
+        );
+        assert_eq!(
+            normalize_due(Some("2026-10-09T18:00".into()))
+                .unwrap()
+                .as_deref(),
+            Some("2026-10-09T18:00:00")
+        );
+        assert!(normalize_due(Some("明天".into())).is_err());
+        assert_eq!(normalize_due(Some("  ".into())).unwrap(), None);
+    }
+
+    #[test]
     fn batch_payload_matches_frontend_json() {
         assert_eq!(op(r#"{"action":"complete"}"#), TaskBatchOp::Complete);
         assert_eq!(op(r#"{"action":"delete"}"#), TaskBatchOp::Delete);
@@ -350,4 +416,25 @@ mod tests {
             TaskBatchOp::SetReminder(None)
         );
     }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskOrderPayload {
+    id: String,
+    sort_order: f64,
+}
+
+/// 拖拽排序：写入一条或多条（重新编号时）待办的手动排序位置。
+#[tauri::command]
+pub fn set_task_order(state: State<AppState>, orders: Vec<TaskOrderPayload>) -> ApiResult<usize> {
+    let orders: Vec<(String, f64)> = orders
+        .into_iter()
+        .map(|item| (item.id, item.sort_order))
+        .collect();
+    let changed = into_api(state.db.set_task_sort_orders(&orders))?;
+    if changed > 0 {
+        into_api(state.sync.notify_local_change())?;
+    }
+    Ok(changed)
 }

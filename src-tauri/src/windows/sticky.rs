@@ -109,6 +109,26 @@ pub fn emit_sticky_note_reminder(
     );
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StickyNoteColorPayload {
+    task_id: String,
+    color: String,
+}
+
+/// 通知便签窗口改用新颜色（在主窗口的便签列表中修改时）。
+pub fn emit_sticky_note_color(app: &tauri::AppHandle, task_id: &str, color: &str) {
+    if let Some(window) = app.get_webview_window(&sticky_note_item_label(task_id)) {
+        let _ = window.emit(
+            "sticky-note-color-updated",
+            StickyNoteColorPayload {
+                task_id: task_id.to_string(),
+                color: color.to_string(),
+            },
+        );
+    }
+}
+
 pub fn note_id_from_item_label(label: &str) -> Option<String> {
     label
         .strip_prefix(STICKY_NOTE_ITEM_PREFIX)

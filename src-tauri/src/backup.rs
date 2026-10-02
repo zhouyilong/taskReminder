@@ -185,6 +185,8 @@ pub fn describe_rule(task: &RecurringTask) -> String {
     match &task.repeat_mode {
         RepeatMode::Daily => format!("每天 {}", time),
         RepeatMode::Workday => format!("法定工作日 {}", time),
+        RepeatMode::MonthlyLastDay => format!("每月最后一天 {}", time),
+        RepeatMode::MonthlyLastWorkday => format!("每月最后一个工作日 {}", time),
         RepeatMode::Weekly => {
             format!("{} {}", weekday_text(weekday_mask(task).unwrap_or(0)), time)
         }
@@ -373,6 +375,11 @@ fn ics_rrule(task: &RecurringTask) -> Option<String> {
         RepeatMode::Daily => Some("FREQ=DAILY".to_string()),
         // 日历不认识调休，按周一至周五近似。
         RepeatMode::Workday => Some("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR".to_string()),
+        RepeatMode::MonthlyLastDay => Some("FREQ=MONTHLY;BYMONTHDAY=-1".to_string()),
+        // 同样不认识调休：取每月最后一个周一至周五。
+        RepeatMode::MonthlyLastWorkday => {
+            Some("FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1".to_string())
+        }
         RepeatMode::Weekly => {
             let mask = weekday_mask(task)?;
             let days: Vec<&str> = (0..7)
