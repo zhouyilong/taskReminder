@@ -39,6 +39,7 @@ const STARTUP_SYNC_DELAY_SECONDS: u64 = 15;
 mod merge;
 mod remote;
 mod service;
+mod watermark;
 mod webdav;
 
 pub(crate) use merge::merge_databases;

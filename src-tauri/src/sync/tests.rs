@@ -816,3 +816,232 @@ fn mismatch_pauses_auto_sync_until_passphrase_is_edited() {
 
     let _ = std::fs::remove_dir_all(a_dir);
 }
+
+// ---- 同步水位：长期未同步设备的删除复活 ----
+
+/// 在固定时间执行一步操作。
+fn at<T>(when: &str, step: impl FnOnce() -> T) -> T {
+    let _now = time::fix_now(when);
+    step()
+}
+
+fn plain_settings(db: &DbManager) -> AppSettings {
+    let mut settings = settings_for(db, false, "");
+    settings.webdav_url = "https://dav.example.com".to_string();
+    settings.webdav_root_path = "/taskreminder".to_string();
+    settings
+}
+
+fn all_task_titles(db: &DbManager) -> Vec<String> {
+    let mut titles = task_titles(db);
+    titles.extend(
+        db.list_completed_tasks()
+            .unwrap()
+            .into_iter()
+            .map(|task| format!("done:{}", task.description)),
+    );
+    titles.sort();
+    titles
+}
+
+/// A、B 两台设备在 1 月 1 日同步过；A 在 1 月 2 日删除“旧待办”，之后 A 照常同步，
+/// 3 月 15 日墓碑过了 60 天保留期被清理。B 直到 3 月 16 日才再次同步。
+fn long_offline_scenario(
+    store: &MemoryStore,
+) -> (DbManager, DbManager, String, Vec<std::path::PathBuf>) {
+    let (a, a_dir) = temp_db("a");
+    let (b, b_dir) = temp_db("b");
+    let sa = plain_settings(&a);
+    let sb = plain_settings(&b);
+    let old = at("2026-01-01T10:00", || {
+        let old = a.create_task("旧待办", None).unwrap();
+        a.create_task("保留的待办", None).unwrap();
+        sync(store, &a, &sa).unwrap();
+        sync(store, &b, &sb).unwrap();
+        old
+    });
+    at("2026-01-02T10:00", || {
+        a.delete_task(&old.id).unwrap();
+        sync(store, &a, &sa).unwrap();
+    });
+    at("2026-03-15T10:00", || {
+        sync(store, &a, &sa).unwrap();
+    });
+    assert!(deleted_at(&a.db_path(), &old.id).is_none(), "A 已清理墓碑");
+    (a, b, old.id, vec![a_dir, b_dir])
+}
+
+#[test]
+fn long_offline_device_does_not_resurrect_purged_rows() {
+    let store = MemoryStore::default();
+    let (a, b, old_id, dirs) = long_offline_scenario(&store);
+    let sb = plain_settings(&b);
+    let sa = plain_settings(&a);
+
+    at("2026-03-16T10:00", || {
+        sync(&store, &b, &sb).unwrap();
+    });
+    assert!(
+        deleted_at(&b.db_path(), &old_id).is_none(),
+        "B 删除本机的旧行"
+    );
+    assert_eq!(task_titles(&b), vec!["保留的待办"]);
+    at("2026-03-17T10:00", || {
+        sync(&store, &a, &sa).unwrap();
+    });
+    assert_eq!(task_titles(&a), vec!["保留的待办"], "旧行没有被重新上传");
+
+    for dir in dirs {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
+fn without_watermark_purged_rows_still_come_back() {
+    // 对照：升级前（没有水位）的行为，保证上一个测试确实依赖水位。
+    let store = MemoryStore::default();
+    let (_a, b, old_id, dirs) = long_offline_scenario(&store);
+    exec(
+        &b.db_path(),
+        "DELETE FROM sync_watermark; DELETE FROM sync_watermark_rows;",
+    );
+    at("2026-03-16T10:00", || {
+        sync(&store, &b, &plain_settings(&b)).unwrap();
+    });
+    assert_eq!(deleted_at(&b.db_path(), &old_id), Some(None));
+
+    for dir in dirs {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
+fn missing_rows_are_kept_within_retention_or_on_another_remote() {
+    let store = MemoryStore::default();
+    let (b, b_dir) = temp_db("b");
+    let (other, other_dir) = temp_db("other");
+    let sb = plain_settings(&b);
+    at("2026-01-01T10:00", || {
+        b.create_task("我的待办", None).unwrap();
+        sync(&store, &b, &sb).unwrap();
+    });
+    // 远端被另一份数据覆盖（例如用旧备份或另一台设备的首次上传）。
+    let foreign = at("2026-01-05T10:00", || {
+        other.create_task("别人的待办", None).unwrap();
+        export_local_snapshot_bytes(&other.db_path()).unwrap()
+    });
+    store
+        .files
+        .borrow_mut()
+        .insert(REMOTE_DB_NAME.to_string(), foreign.clone());
+
+    // 1. 60 天内：远端缺行只可能是被重置，保留本机数据。
+    at("2026-01-20T10:00", || {
+        sync(&store, &b, &sb).unwrap();
+    });
+    assert_eq!(task_titles(&b), vec!["别人的待办", "我的待办"]);
+
+    // 2. 超过 60 天但换了远端目录：水位属于旧远端，不据此删除。
+    store
+        .files
+        .borrow_mut()
+        .insert(REMOTE_DB_NAME.to_string(), foreign);
+    let mut moved = sb.clone();
+    moved.webdav_root_path = "/another".to_string();
+    at("2026-05-01T10:00", || {
+        sync(&store, &b, &moved).unwrap();
+    });
+    assert_eq!(task_titles(&b), vec!["别人的待办", "我的待办"]);
+
+    let _ = std::fs::remove_dir_all(b_dir);
+    let _ = std::fs::remove_dir_all(other_dir);
+}
+
+#[test]
+fn rows_created_imported_or_edited_after_watermark_are_kept() {
+    let store = MemoryStore::default();
+    let (b, b_dir) = temp_db("b");
+    let (empty, empty_dir) = temp_db("empty");
+    let sb = plain_settings(&b);
+    let (untouched, edited) = at("2026-01-01T10:00", || {
+        let untouched = b.create_task("未改动", None).unwrap();
+        let edited = b.create_task("之后改过", None).unwrap();
+        sync(&store, &b, &sb).unwrap();
+        (untouched, edited)
+    });
+    at("2026-02-01T10:00", || {
+        // 水位之后：新建一条、修改一条、导入一条更早的旧行（不在上次上传的集合中）。
+        b.create_task("之后新建", None).unwrap();
+        b.update_task(&edited.id, "之后改过（新）", None, None, None)
+            .unwrap();
+        let mut imported = b.get_task(&untouched.id).unwrap().unwrap();
+        imported.id = "imported-old-row".to_string();
+        imported.description = "导入的旧行".to_string();
+        imported.created_at = "2025-06-01T09:00:00".to_string();
+        imported.updated_at = Some("2025-06-01T09:00:00".to_string());
+        b.import_rows(&[imported], &[], &[]).unwrap();
+    });
+    // 远端此后只剩一份不含这些行的数据（其他设备删除并清理后）。
+    let remote = at("2026-03-01T10:00", || {
+        export_local_snapshot_bytes(&empty.db_path()).unwrap()
+    });
+    store
+        .files
+        .borrow_mut()
+        .insert(REMOTE_DB_NAME.to_string(), remote);
+
+    at("2026-03-10T10:00", || {
+        sync(&store, &b, &sb).unwrap();
+    });
+    assert_eq!(
+        all_task_titles(&b),
+        vec!["之后改过（新）", "之后新建", "导入的旧行"],
+        "只删除上次上传后没有改动过的“未改动”"
+    );
+
+    let _ = std::fs::remove_dir_all(b_dir);
+    let _ = std::fs::remove_dir_all(empty_dir);
+}
+
+#[test]
+fn watermark_is_saved_after_upload_and_scrubbed_from_snapshot() {
+    let store = MemoryStore::default();
+    let (b, b_dir) = temp_db("b");
+    let sb = plain_settings(&b);
+    at("2026-01-01T10:00", || {
+        b.create_task("一条", None).unwrap();
+        sync(&store, &b, &sb).unwrap();
+    });
+    let saved = watermark::load(&b.db_path()).unwrap().unwrap();
+    assert_eq!(saved.remote, "https://dav.example.com/taskreminder");
+    assert_eq!(
+        saved.uploaded_at,
+        time::parse_datetime_any("2026-01-01T10:00").unwrap()
+    );
+    assert!(!saved.applies(
+        &saved.remote,
+        time::parse_datetime_any("2026-02-28T10:00").unwrap()
+    ));
+    assert!(saved.applies(
+        &saved.remote,
+        time::parse_datetime_any("2026-03-02T10:00").unwrap()
+    ));
+    assert!(!saved.applies(
+        "https://other",
+        time::parse_datetime_any("2027-01-01T10:00").unwrap()
+    ));
+
+    // 上传的快照中不含水位。
+    let remote_path = b_dir.join("remote.db");
+    std::fs::write(&remote_path, store.file(REMOTE_DB_NAME).unwrap()).unwrap();
+    let conn = Connection::open(&remote_path).unwrap();
+    let rows: i64 = conn
+        .query_row("SELECT COUNT(*) FROM sync_watermark_rows", [], |r| r.get(0))
+        .unwrap();
+    let marks: i64 = conn
+        .query_row("SELECT COUNT(*) FROM sync_watermark", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!((rows, marks), (0, 0));
+
+    let _ = std::fs::remove_dir_all(b_dir);
+}

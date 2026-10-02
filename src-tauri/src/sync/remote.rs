@@ -129,13 +129,23 @@ pub(super) fn sync_with_remote_as(
     };
 
     let merged = remote_snapshot.is_some();
+    let remote_id = watermark::remote_identity(settings);
     if let Some(snapshot) = remote_snapshot {
-        merge_snapshot_bytes(&db.db_path(), &snapshot)?;
+        // 同一远端且长期未同步时，远端缺少的旧行是被其他设备删除并清理的，不能再上传（见 watermark）。
+        let watermark = watermark::load(&db.db_path())
+            .unwrap_or_else(|err| {
+                eprintln!("[sync] 读取同步水位失败: {}", err);
+                None
+            })
+            .filter(|w| w.applies(&remote_id, time::now()));
+        merge_snapshot_bytes_with(&db.db_path(), &snapshot, watermark.as_ref())?;
         // 合并后再清理过期墓碑，随后上传的快照中也不再包含它们。
         db.purge_expired_tombstones(TOMBSTONE_RETENTION_DAYS_SYNC)?;
     }
 
-    let local_snapshot = export_local_snapshot_bytes(&db.db_path())?;
+    // 水位取导出前的时间：之后才修改的行 updated_at 更晚，不会被当作“上次已上传且未改动”。
+    let uploaded_at = time::now();
+    let (local_snapshot, uploaded_ids) = export_local_snapshot(&db.db_path())?;
     if encrypt {
         let data = sync_crypto::encrypt(&local_snapshot, upload_passphrase, params)
             .map_err(crypto_error)?;
@@ -144,6 +154,10 @@ pub(super) fn sync_with_remote_as(
         store.put(REMOTE_DB_NAME, placeholder_content())?;
     } else {
         store.put(REMOTE_DB_NAME, local_snapshot)?;
+    }
+    if let Err(err) = watermark::save(&db.db_path(), &remote_id, uploaded_at, &uploaded_ids) {
+        // 水位只用于识别长期未同步期间的删除，保存失败不影响本次同步。
+        eprintln!("[sync] 保存同步水位失败: {}", err);
     }
 
     Ok(if merged {

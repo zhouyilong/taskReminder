@@ -135,6 +135,11 @@
 - 迁移中的 `ALTER TABLE ... ADD COLUMN` 遇到已存在的列会跳过（`db/migrations.rs` 的 `adds_existing_column`），因为同步可能已经提前补上了这一列。
 - 本机写同步表时不要用 `INSERT OR REPLACE` / `REPLACE`（会把不认识的列清成默认值），用 `UPDATE` 或 `ON CONFLICT DO UPDATE` 只改自己认识的列。
 
+### 同步水位（2.0.4 起）
+- 每次成功上传后，`sync/watermark.rs` 在本机表 `sync_watermark`（上传前取的时间、远端身份 = 规范化的地址 + 远端目录）与 `sync_watermark_rows`（上传快照中每一行的 id）记下水位；这两张表是本机专用的，`export_local_snapshot` 会在上传的快照中清空。
+- 合并时只有**同一远端**且距水位超过墓碑保留期（60 天），才把“本机有、远端没有、id 在上次上传集合中、`updated_at` 不晚于水位”的行视为已在其他设备删除并清理，在本机物理删除。保留期内远端缺行（远端被重置或用旧备份覆盖）、更换远端、水位之后新建 / 导入 / 修改的行都不受影响。
+- **规则**：不要放宽这些条件；新增同步表时它会自动纳入（按 `SYNC_TABLES` 遍历）。
+
 ### 循环模式的兼容性
 - 每周多天存于 `schedule_weekdays` 位掩码，`schedule_weekday` 始终写入掩码中最早的一天，供旧版本读取；读取时掩码为空则回退到 `schedule_weekday`。
 - 状态与模式字段用 `kinds.rs` 的枚举（`TaskStatus`、`TaskType`、`ReminderKind`、`ReminderAction`、`RepeatMode`）；库中文本与 JSON 不变，**不认识的值原样保留**（`Unknown`），不要回退成已知值再写回。

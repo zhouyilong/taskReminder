@@ -14,7 +14,12 @@ use crate::kinds::RepeatMode;
 use crate::sync_schema::{table_columns, SYNC_TABLES};
 
 /// （应用版本，发布时的库结构版本）。
-const RELEASES: &[(&str, &str)] = &[("2.0.0", "2.0.1"), ("2.0.1", "2.0.3"), ("2.0.2", "2.0.5")];
+const RELEASES: &[(&str, &str)] = &[
+    ("2.0.0", "2.0.1"),
+    ("2.0.1", "2.0.3"),
+    ("2.0.2", "2.0.5"),
+    ("2.0.3", "2.0.5"),
+];
 const SAMPLE: &str = include_str!("../../tests/fixtures/sync-sample-2.0.sql");
 
 struct TempDir(PathBuf);
