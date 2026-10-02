@@ -373,3 +373,35 @@ fn v2_1_fields_survive_edits_from_2_0_devices() {
     assert_eq!(weekly.description, "健身（旧设备改）");
     assert_eq!(weekly.tags, vec!["健康"]);
 }
+
+#[test]
+fn pre_2_0_device_edits_keep_tags_and_priority() {
+    // 1.x 的库没有 tags / priority 列（V2.0.0 加入）。
+    let dir = TempDir::new("pre20");
+    let old = dir.path("old.db");
+    {
+        let conn = Connection::open(&old).unwrap();
+        create_schema_up_to(&conn, "1.6.0").unwrap();
+        conn.execute(
+            "INSERT INTO tasks (id, description, type, status, created_at, updated_at)
+             VALUES ('shared', '旧设备改过', 'ONE_TIME', 'PENDING', '2026-01-01T00:00:00', '2999-01-01T00:00:00')",
+            [],
+        )
+        .unwrap();
+    }
+    let (current, _) = current_db(&dir.path("current.db"));
+    let conn = Connection::open(current.db_path()).unwrap();
+    conn.execute(
+        "INSERT INTO tasks (id, description, type, status, created_at, updated_at, tags, priority)
+         VALUES ('shared', '本机', 'ONE_TIME', 'PENDING', '2026-01-01T00:00:00', '2026-02-01T00:00:00', '工作', 3)",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    merge_databases(&current.db_path(), &old).unwrap();
+    let task = current.get_task("shared").unwrap().unwrap();
+    assert_eq!(task.description, "旧设备改过");
+    assert_eq!(task.tags, vec!["工作"]);
+    assert_eq!(task.priority, 3);
+}
