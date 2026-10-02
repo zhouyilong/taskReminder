@@ -71,6 +71,7 @@
         {{ selectionMode ? "退出多选" : "多选" }}
       </button>
     </div>
+    <div v-if="canReorder" class="reorder-hint">拖动行调整顺序；切换到其他排序方式时不影响手动顺序。</div>
     <TaskBatchBar v-if="selectionMode" :ids="selectedIds" @done="exitSelection" @cancel="exitSelection" />
     <div class="table-card">
       <div class="table-scroll table-scroll-no-x">
@@ -96,10 +97,21 @@
           </thead>
           <tbody>
             <tr
-              v-for="task in tasksPage"
+              v-for="(task, rowIndex) in tasksPage"
               :key="task.id"
               class="table-row"
-              :class="{ 'is-selected': selection.ids.has(task.id) }"
+              :class="{
+                'is-selected': selection.ids.has(task.id),
+                'is-draggable': canReorder,
+                'is-dragging': draggingId === task.id,
+                'is-drop-before': dropIndex === pageStart + rowIndex,
+                'is-drop-after': rowIndex === tasksPage.length - 1 && dropIndex === pageStart + rowIndex + 1
+              }"
+              :draggable="canReorder"
+              @dragstart="handleDragStart($event, task.id)"
+              @dragover.prevent="handleDragOver($event, rowIndex)"
+              @drop.prevent="handleDrop"
+              @dragend="resetDrag"
               @click="handleRowClick($event, task.id)"
               @dblclick="openTaskEditor(task)"
               @contextmenu.prevent.stop="openTaskMenu($event, task)"
@@ -187,6 +199,7 @@ import { VIEW_SHORTCUT_EVENT, type ShortcutAction } from "../keyboard";
 import { safeStorage } from "../safeStorage";
 import { api } from "../api";
 import { emptySelection, pruneSelection, selectRange, toggleAll, toggleSelected } from "../selection";
+import { planReorder } from "../reorder";
 import {
   PRIORITY_OPTIONS,
   TASK_SORT_OPTIONS,
@@ -245,6 +258,47 @@ const {
   totalPages: tasksTotalPages,
   page: tasksPage
 } = usePagination(visibleTasks, filterKey);
+
+// 拖拽排序（v2.1）：仅在“手动顺序”且不在多选时可用；dropIndex 为在完整列表中的插入位置。
+const canReorder = computed(() => sortKey.value === "manual" && !selectionMode.value);
+const pageStart = computed(() => (tasksPageIndex.value - 1) * tasksPageSize.value);
+const draggingId = ref("");
+const dropIndex = ref<number | null>(null);
+
+const resetDrag = () => {
+  draggingId.value = "";
+  dropIndex.value = null;
+};
+
+const handleDragStart = (event: DragEvent, id: string) => {
+  if (!canReorder.value) return;
+  draggingId.value = id;
+  event.dataTransfer?.setData("text/plain", id);
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+};
+
+const handleDragOver = (event: DragEvent, rowIndex: number) => {
+  if (!draggingId.value) return;
+  const row = event.currentTarget as HTMLElement;
+  const rect = row.getBoundingClientRect();
+  const after = event.clientY > rect.top + rect.height / 2;
+  dropIndex.value = pageStart.value + rowIndex + (after ? 1 : 0);
+};
+
+const handleDrop = async () => {
+  const id = draggingId.value;
+  const index = dropIndex.value;
+  resetDrag();
+  if (!id || index === null) return;
+  const updates = planReorder(visibleTasks.value, id, index);
+  if (!updates.length) return;
+  try {
+    await api.setTaskOrder(updates);
+  } catch (error) {
+    console.error("[tasks] 调整顺序失败", error);
+  }
+  await refreshAll();
+};
 
 // 多选：进入多选模式后点击行切换选择、Shift 连选；Ctrl / ⌘ 点击行可直接进入多选。
 const selectionMode = ref(false);

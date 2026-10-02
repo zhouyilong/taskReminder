@@ -1257,6 +1257,29 @@ label:has(> input[type="checkbox"]) {
   font-variant-numeric: tabular-nums;
 }
 
+/* 拖拽排序（v2.1） */
+.reorder-hint {
+  margin: -6px 0 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.table .table-row.is-draggable {
+  cursor: grab;
+}
+
+.table .table-row.is-dragging {
+  opacity: 0.45;
+}
+
+.table .table-row.is-drop-before td {
+  box-shadow: inset 0 2px 0 var(--primary);
+}
+
+.table .table-row.is-drop-after td {
+  box-shadow: inset 0 -2px 0 var(--primary);
+}
+
 /* 多选：避免 Shift 连选时浏览器选中文字 */
 .table.is-selecting {
   user-select: none;

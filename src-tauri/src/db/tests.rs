@@ -676,3 +676,35 @@ fn batch_update_tasks_changes_only_live_rows_that_differ() {
     assert!(db.list_completed_tasks().unwrap().is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn sort_orders_due_and_sticky_color_roundtrip() {
+    let (db, dir) = temp_db();
+    let a = db.create_task("a", None).unwrap();
+    let b = db.create_task("b", None).unwrap();
+    let orders = vec![(a.id.clone(), 2048.0), (b.id.clone(), 1024.0)];
+    assert_eq!(db.set_task_sort_orders(&orders).unwrap(), 2);
+    assert_eq!(db.set_task_sort_orders(&orders).unwrap(), 0, "不变不写");
+    assert!(db
+        .set_task_sort_orders(&[(a.id.clone(), f64::NAN)])
+        .is_err());
+    assert_eq!(
+        db.get_task(&b.id).unwrap().unwrap().sort_order,
+        Some(1024.0)
+    );
+
+    assert!(db.set_task_due(&a.id, Some("2026-10-09T18:00:00")).unwrap());
+    assert!(!db.set_task_due(&a.id, Some("2026-10-09T18:00:00")).unwrap());
+    assert!(db.set_task_due(&a.id, None).unwrap());
+    assert_eq!(db.get_task(&a.id).unwrap().unwrap().due_at, None);
+
+    assert!(db.set_sticky_note_color(&a.id, "blue").unwrap());
+    assert_eq!(db.get_sticky_note(&a.id).unwrap().unwrap().color, "blue");
+    assert_eq!(db.get_task(&a.id).unwrap().unwrap().sticky_color, "blue");
+    assert_eq!(
+        crate::models::normalize_sticky_color(" Blue "),
+        Some("blue".to_string())
+    );
+    assert_eq!(crate::models::normalize_sticky_color("teal"), None);
+    let _ = std::fs::remove_dir_all(dir);
+}
