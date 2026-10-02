@@ -26,7 +26,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import AppTitlebar from "./components/AppTitlebar.vue";
 import AppSidebar from "./components/AppSidebar.vue";
@@ -45,6 +45,8 @@ import StatsView from "./views/StatsView.vue";
 import TrashView from "./views/TrashView.vue";
 import { api } from "./api";
 import { errorMessage, isLinuxPlatform } from "./format";
+import { resolveShortcut, VIEW_SHORTCUT_EVENT, type ShortcutAction } from "./keyboard";
+import { closeTopModal, hasOpenModal } from "./modalStack";
 import { isTabKey, type TabKey } from "./navigation";
 import { safeStorage } from "./safeStorage";
 import { useAppData } from "./composables/useAppData";
@@ -108,6 +110,54 @@ const listenSafely = async <T>(event: string, handler: (payload: T) => void | Pr
   }
 };
 
+// 主窗口快捷键（见 keyboard.ts）：Esc 先关闭最上层弹窗；其余在有弹窗时不生效。
+const focusShortcutTarget = async (kind: "new" | "search") => {
+  const selector = `.content [data-shortcut="${kind}"]`;
+  let target = document.querySelector<HTMLInputElement>(selector);
+  if (!target && activeTab.value !== "tasks") {
+    activeTab.value = "tasks";
+    // 等视图切换（含过渡动画）完成后再聚焦。
+    for (let attempt = 0; attempt < 20 && !target; attempt += 1) {
+      await nextTick();
+      await new Promise(resolve => setTimeout(resolve, 25));
+      target = document.querySelector<HTMLInputElement>(selector);
+    }
+  }
+  target?.focus();
+  target?.select?.();
+};
+
+const handleShortcut = (event: KeyboardEvent) => {
+  const action = resolveShortcut(event);
+  if (!action) return;
+  if (action.type === "escape") {
+    if (closeTopModal()) {
+      event.preventDefault();
+      return;
+    }
+  } else if (hasOpenModal()) {
+    return;
+  }
+  switch (action.type) {
+    case "tab":
+      activeTab.value = action.tab;
+      break;
+    case "new":
+    case "search":
+      void focusShortcutTarget(action.type);
+      break;
+    case "escape":
+    case "delete":
+      // 交给当前视图（如待办列表退出多选、删除选中项）。
+      window.dispatchEvent(new CustomEvent<ShortcutAction>(VIEW_SHORTCUT_EVENT, { detail: action }));
+      if (action.type === "escape") return;
+      break;
+  }
+  event.preventDefault();
+};
+
+window.addEventListener("keydown", handleShortcut);
+
 onMounted(async () => {
   syncUpdatePreferencesDraft();
   try {
@@ -160,6 +210,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleShortcut);
   unlisteners.forEach(unlisten => unlisten());
   void releaseAvailableUpdateHandle();
 });

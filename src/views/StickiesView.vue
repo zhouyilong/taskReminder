@@ -24,7 +24,7 @@
           <circle cx="11" cy="11" r="6.5" />
           <path d="M16 16l4 4" />
         </svg>
-        <input class="input" v-model="keyword" placeholder="搜索便签标题或内容" />
+        <input data-shortcut="search" class="input" v-model="keyword" placeholder="搜索便签标题或内容" />
         <button v-if="keyword" class="search-clear" type="button" title="清空" @click="keyword = ''">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M7 7l10 10M17 7L7 17" />

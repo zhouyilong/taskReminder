@@ -12,6 +12,7 @@
           </svg>
         </span>
         <input
+          data-shortcut="new"
           class="composer-input"
           v-model="newTaskDescription"
           placeholder="添加新任务，如“明天下午3点 交周报 #工作 !高”，回车保存"
@@ -41,7 +42,7 @@
           <circle cx="11" cy="11" r="6.5" />
           <path d="M16 16l4 4" />
         </svg>
-        <input class="input" v-model="filter.query" placeholder="搜索标题、描述或 #标签" />
+        <input data-shortcut="search" class="input" v-model="filter.query" placeholder="搜索标题、描述或 #标签" />
         <button v-if="filter.query" class="search-clear" type="button" title="清空" @click="filter.query = ''">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M7 7l10 10M17 7L7 17" />
@@ -162,14 +163,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import MarkdownNoteEditor from "../components/MarkdownNoteEditor.vue";
 import Pagination from "../components/Pagination.vue";
 import SmartParseHint from "../components/SmartParseHint.vue";
 import TaskBatchBar from "../components/TaskBatchBar.vue";
 import TaskBadges from "../components/TaskBadges.vue";
 import { formatDateTime, reminderTone, taskStickyPreview } from "../format";
+import { VIEW_SHORTCUT_EVENT, type ShortcutAction } from "../keyboard";
 import { safeStorage } from "../safeStorage";
+import { api } from "../api";
 import { emptySelection, pruneSelection, selectRange, toggleAll, toggleSelected } from "../selection";
 import {
   PRIORITY_OPTIONS,
@@ -180,14 +183,16 @@ import {
   type TaskSortKey
 } from "../tasks";
 import { useAppData } from "../composables/useAppData";
+import { useDialogs } from "../composables/useDialogs";
 import { useItemActions } from "../composables/useItemActions";
 import { usePagination } from "../composables/usePagination";
 import { useSmartAdd } from "../composables/useSmartAdd";
 import { useUiPrefs } from "../composables/useUiPrefs";
 
-const { tasks } = useAppData();
+const { tasks, refreshAll } = useAppData();
 const { toggleTask, openTaskMenu, openTaskEditor } = useItemActions();
 const { isLightTheme } = useUiPrefs();
+const { confirmAction } = useDialogs();
 
 const filter = reactive<TaskFilter>({ query: "", tag: "", priority: -1 });
 const storedSort = safeStorage.getItem("tasksSort");
@@ -251,7 +256,25 @@ watch(visibleTasks, list => {
   selection.value = pruneSelection(selection.value, list.map(task => task.id));
 });
 
-defineExpose({ selectionMode, selectedIds, exitSelection });
+// 快捷键：Esc 退出多选；Delete 删除选中的待办（需确认）。
+const handleViewShortcut = (event: Event) => {
+  const action = (event as CustomEvent<ShortcutAction>).detail;
+  if (action.type === "escape" && selectionMode.value) {
+    exitSelection();
+  } else if (action.type === "delete" && selectedIds.value.length) {
+    const ids = [...selectedIds.value];
+    confirmAction({
+      message: `确定要删除选中的 ${ids.length} 项待办吗？删除后可在回收站中恢复。`,
+      action: async () => {
+        await api.batchUpdateTasks(ids, { action: "delete" });
+        exitSelection();
+        await refreshAll();
+      }
+    });
+  }
+};
+onMounted(() => window.addEventListener(VIEW_SHORTCUT_EVENT, handleViewShortcut));
+onBeforeUnmount(() => window.removeEventListener(VIEW_SHORTCUT_EVENT, handleViewShortcut));
 
 const newTaskDescription = ref("");
 const newTaskStickyContent = ref("");

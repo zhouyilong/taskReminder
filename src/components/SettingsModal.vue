@@ -116,6 +116,17 @@
       </div>
     </div>
     <div class="modal-section">
+      <div class="form-row compact shortcut-help-row">
+        <label>主窗口快捷键</label>
+        <dl class="shortcut-help">
+          <template v-for="item in SHORTCUT_HELP" :key="item.keys">
+            <dt><kbd>{{ item.keys }}</kbd></dt>
+            <dd>{{ item.label }}</dd>
+          </template>
+        </dl>
+      </div>
+    </div>
+    <div class="modal-section">
       <div class="form-row compact">
         <label>数据</label>
         <button class="button secondary" type="button" @click="openData">导入导出与备份…</button>
@@ -233,6 +244,7 @@ import { useSettings } from "../composables/useSettings";
 import { useUiPrefs } from "../composables/useUiPrefs";
 import { useUpdater } from "../composables/useUpdater";
 import { playChime } from "../notificationSound";
+import { SHORTCUT_HELP } from "../keyboard";
 
 const props = defineProps<{ appVersion: string }>();
 
@@ -346,3 +358,32 @@ const saveSettings = async () => {
   await refreshSyncStatus();
 };
 </script>
+
+<style scoped>
+.shortcut-help-row {
+  align-items: flex-start;
+}
+
+.shortcut-help {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.shortcut-help dd {
+  margin: 0;
+}
+
+.shortcut-help kbd {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-base);
+  background: var(--bg-surface);
+}
+</style>

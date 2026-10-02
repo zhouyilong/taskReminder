@@ -7,7 +7,7 @@
     <div class="form-card">
       <div class="form-row compact">
         <label class="field-label">描述</label>
-        <input class="input" v-model="newRecurring.description" placeholder="输入提醒描述" style="flex: 1" />
+        <input data-shortcut="new" class="input" v-model="newRecurring.description" placeholder="输入提醒描述" style="flex: 1" />
         <label class="field-label">模式</label>
         <select class="select" v-model="newRecurring.mode" style="width: 140px">
           <option v-for="mode in recurringModeOptions" :key="mode.value" :value="mode.value">{{ mode.label }}</option>

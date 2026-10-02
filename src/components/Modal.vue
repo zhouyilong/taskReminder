@@ -28,6 +28,8 @@
 </template>
 
 <script setup lang="ts">
+import { onBeforeUnmount, watch } from "vue";
+import { pushModal } from "../modalStack";
 const props = defineProps<{
   open: boolean;
   title: string;
@@ -39,4 +41,16 @@ const emit = defineEmits(["close", "confirm", "delete"]);
 const onClose = () => emit("close");
 const onConfirm = () => emit("confirm");
 const onDelete = () => emit("delete");
+
+// 打开时登记到弹窗栈，Esc（App.vue 的快捷键）关闭最上层的弹窗。
+let release: (() => void) | null = null;
+watch(
+  () => props.open,
+  open => {
+    release?.();
+    release = open ? pushModal(onClose) : null;
+  },
+  { immediate: true }
+);
+onBeforeUnmount(() => release?.());
 </script>

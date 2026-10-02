@@ -158,6 +158,7 @@
         </div>
         <div class="calendar-day-composer">
           <input
+            data-shortcut="new"
             v-model="newTitle"
             class="input"
             :placeholder="composerPlaceholder"
