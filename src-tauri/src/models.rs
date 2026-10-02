@@ -225,6 +225,9 @@ pub struct NotificationPayload {
     /// 本次提醒原定的触发时间；用于在弹窗中标识“错过的提醒”。
     #[serde(default)]
     pub scheduled_time: Option<String>,
+    /// 弹出时是否播放提示音：入队时按“提示音”设置决定，勿扰期间入队的为 false。
+    #[serde(default)]
+    pub sound: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

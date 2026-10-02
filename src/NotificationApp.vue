@@ -78,6 +78,7 @@ import { api } from "./api";
 import { markdownToPreviewText, stripLeadingListMarker } from "./markdown";
 import { safeStorage } from "./safeStorage";
 import type { NotificationPayload } from "./types";
+import { nextSoundState, playChime } from "./notificationSound";
 
 type NotificationThemeMode = "system" | "app" | "light" | "dark";
 
@@ -415,9 +416,16 @@ const hide = async () => {
 };
 
 // 应用后端下发的最新队列：队列为空则隐藏；队首变化时重新计时并展示新的一条。
+let soundSeen: ReadonlySet<string> = new Set();
+
 const applyQueue = async (items: NotificationPayload[] | null | undefined) => {
   const previousHead = payload.value?.recordId ?? null;
   queue.value = Array.isArray(items) ? items : [];
+  const sound = nextSoundState(soundSeen, queue.value);
+  soundSeen = sound.seen;
+  if (sound.play) {
+    void playChime();
+  }
   if (!payload.value) {
     await hide();
     return;

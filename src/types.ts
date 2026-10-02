@@ -147,6 +147,8 @@ export interface NotificationPayload {
   snoozeMinutes: number;
   /** 原定触发时间；明显早于弹出时间时视为“错过的提醒”。 */
   scheduledTime?: string | null;
+  /** 弹出时是否播放提示音（入队时按设置决定，勿扰期间为 false）。 */
+  sound?: boolean;
 }
 
 export interface TrashPayload {

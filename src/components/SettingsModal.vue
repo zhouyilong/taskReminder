@@ -8,6 +8,7 @@
         <label>
           <input type="checkbox" v-model="settingsDraft.soundEnabled" /> 提示音
         </label>
+        <button type="button" class="button secondary" title="播放提醒弹窗的提示音" @click="playChime">试听</button>
         <label title="全屏程序或游戏中也能看到提醒；勿扰时段内不发送">
           <input type="checkbox" v-model="settingsDraft.nativeNotificationEnabled" /> 同时发送系统通知
         </label>
@@ -231,6 +232,7 @@ import { useAppData } from "../composables/useAppData";
 import { useSettings } from "../composables/useSettings";
 import { useUiPrefs } from "../composables/useUiPrefs";
 import { useUpdater } from "../composables/useUpdater";
+import { playChime } from "../notificationSound";
 
 const props = defineProps<{ appVersion: string }>();
 

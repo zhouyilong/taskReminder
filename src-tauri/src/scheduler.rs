@@ -145,13 +145,15 @@ impl ReminderScheduler {
     /// 并按设置同时发送系统原生通知。
     fn present(
         &self,
-        payload: NotificationPayload,
+        mut payload: NotificationPayload,
         settings: &AppSettings,
     ) -> Result<(), AppError> {
         let title = native_notification_title(&payload, time::now());
         let body = payload.description.clone();
+        let quiet = quiet_hours::is_quiet_now(settings);
+        payload.sound = settings.sound_enabled && !quiet;
         let queue = self.queue.push(payload);
-        if quiet_hours::is_quiet_now(settings) {
+        if quiet {
             self.quiet_held.store(true, Ordering::SeqCst);
             publish_queue(&self.app, &queue);
             return Ok(());
@@ -308,6 +310,7 @@ impl ReminderScheduler {
             description: task.description.clone(),
             snooze_minutes: settings.snooze_minutes,
             scheduled_time: Some(scheduled_time),
+            sound: false,
         };
         self.present(payload, &settings)?;
 
@@ -351,6 +354,7 @@ impl ReminderScheduler {
             description: task.description.clone(),
             snooze_minutes: settings.snooze_minutes,
             scheduled_time: Some(reminder_time),
+            sound: false,
         };
         self.present(payload, &settings)?;
         Ok(())
@@ -484,6 +488,7 @@ mod tests {
             description: "开会".to_string(),
             snooze_minutes: 5,
             scheduled_time: scheduled.map(str::to_string),
+            sound: false,
         }
     }
 

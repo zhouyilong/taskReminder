@@ -75,6 +75,7 @@ mod tests {
             description: format!("task {}", reminder_id),
             snooze_minutes: 5,
             scheduled_time: None,
+            sound: false,
         }
     }
 
