@@ -1,4 +1,4 @@
-//! 循环提醒相关命令：新建、编辑、暂停/恢复、删除与触发预估。
+//! 循环提醒相关命令：新建、编辑、暂停/恢复、跳过本次、删除与触发预估。
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -115,6 +115,19 @@ pub fn resume_recurring_task(state: State<AppState>, id: String) -> ApiResult<()
     into_api(state.scheduler.schedule_recurring(task))?;
     into_api(state.sync.notify_local_change())?;
     Ok(())
+}
+
+/// 跳过本次：把下次触发改为即将到来的这一次之后的那一次，不写提醒记录。
+#[tauri::command]
+pub fn skip_recurring_occurrence(state: State<AppState>, id: String) -> ApiResult<RecurringTask> {
+    let Some(mut task) = into_api(state.db.get_recurring_task(&id))? else {
+        return Err("循环提醒不存在".to_string());
+    };
+    task.next_trigger = into_api(recurrence::skipped_trigger(&task, time::now()))?;
+    into_api(state.db.update_recurring_task(&task))?;
+    into_api(state.scheduler.schedule_recurring(task.clone()))?;
+    into_api(state.sync.notify_local_change())?;
+    Ok(task)
 }
 
 #[tauri::command]

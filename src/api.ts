@@ -82,6 +82,10 @@ export const api = {
   async resumeRecurringTask(id: string): Promise<void> {
     return invoke("resume_recurring_task", { id });
   },
+  /** 跳过本次：返回改好下次触发时间的循环提醒。 */
+  async skipRecurringOccurrence(id: string): Promise<RecurringTask> {
+    return invoke("skip_recurring_occurrence", { id });
+  },
   async deleteRecurringTask(id: string): Promise<void> {
     return invoke("delete_recurring_task", { id });
   },

@@ -63,6 +63,7 @@ fn main() {
             recurring::update_recurring_task,
             recurring::pause_recurring_task,
             recurring::resume_recurring_task,
+            recurring::skip_recurring_occurrence,
             recurring::delete_recurring_task,
             notification::delete_reminder_record,
             notification::delete_reminder_records,

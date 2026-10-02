@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatWorkdayHint,
   formatYearRange,
+  canSkipRecurring,
   isSupportedRecurringMode,
   buildRecurringPayload,
   createRecurringDraft,
@@ -131,5 +132,17 @@ describe("unsupported recurring modes", () => {
     expect(formatRecurringRule({ ...base, repeatMode: "INTERVAL_RANGE", startTime: "08:00", endTime: "18:00" })).toBe(
       "每 45 分钟（08:00 - 18:00）"
     );
+  });
+});
+
+describe("canSkipRecurring", () => {
+  const base = { isPaused: false, repeatMode: "DAILY" as const, nextTrigger: "2026-10-02T09:00:00" };
+  it("allows running tasks with a known mode", () => {
+    expect(canSkipRecurring(base)).toBe(true);
+  });
+  it("rejects paused, unknown-mode or unscheduled tasks", () => {
+    expect(canSkipRecurring({ ...base, isPaused: true })).toBe(false);
+    expect(canSkipRecurring({ ...base, repeatMode: "BIWEEKLY" as never })).toBe(false);
+    expect(canSkipRecurring({ ...base, nextTrigger: "" })).toBe(false);
   });
 });

@@ -2,6 +2,7 @@
 import { api } from "../api";
 import { markdownToPlainText } from "../markdown";
 import { errorMessage, formatAction, formatDateTime, recordDescription } from "../format";
+import { canSkipRecurring } from "../recurring";
 import { priorityLabel, priorityOf } from "../tasks";
 import type { RecurringTask, ReminderRecord, Task } from "../types";
 import { useAppData } from "./useAppData";
@@ -84,6 +85,15 @@ export const useItemActions = () => {
     await refreshAll();
   };
 
+  const skipRecurring = async (task: RecurringTask) => {
+    try {
+      await api.skipRecurringOccurrence(task.id);
+    } catch (error) {
+      console.error("[recurring] 跳过本次失败", error);
+    }
+    await refreshAll();
+  };
+
   const confirmDeleteRecurring = (task: RecurringTask, afterDelete?: () => void) => {
     confirmAction({
       message: "确定要删除此循环提醒吗？删除后可在回收站中恢复。",
@@ -98,6 +108,9 @@ export const useItemActions = () => {
   const openRecurringMenu = (event: MouseEvent, task: RecurringTask) => {
     showContextMenu(event, [
       { label: "编辑", action: () => openRecurringEditor(task) },
+      ...(canSkipRecurring(task)
+        ? [{ label: `跳过本次（${formatDateTime(task.nextTrigger)}）`, action: () => skipRecurring(task) }]
+        : []),
       { label: task.isPaused ? "恢复" : "暂停", action: () => toggleRecurring(task) },
       { label: "删除", action: () => confirmDeleteRecurring(task), danger: true },
     ]);

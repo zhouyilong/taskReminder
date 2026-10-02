@@ -24,6 +24,10 @@ export const recurringModeOptions: { value: RecurringMode; label: string }[] = [
 export const isSupportedRecurringMode = (mode?: string | null) =>
   recurringModeOptions.some(item => item.value === mode);
 
+/** 能否“跳过本次”：运行中、本机认识的模式，且有下次触发时间。 */
+export const canSkipRecurring = (task: Pick<RecurringTask, "isPaused" | "repeatMode" | "nextTrigger">) =>
+  !task.isPaused && isSupportedRecurringMode(task.repeatMode) && Boolean(task.nextTrigger);
+
 export const formatRecurringMode = (mode?: RecurringMode | string | null) => {
   // 空值按区间间隔（旧数据的默认值）；其他不认识的模式不能冒充区间间隔。
   if (!mode) {
