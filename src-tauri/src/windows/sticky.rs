@@ -587,6 +587,7 @@ mod tests {
             created_at: "2026-01-01T00:00:00".to_string(),
             updated_at: "2026-01-01T00:00:00".to_string(),
             reminder_time: Some("2026-09-22T16:30:00".to_string()),
+            color: String::new(),
         }
     }
 

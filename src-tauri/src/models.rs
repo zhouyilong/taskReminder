@@ -22,9 +22,27 @@ pub struct Task {
     /// 优先级：0 无、1 低、2 中、3 高。
     #[serde(default)]
     pub priority: i64,
+    /// 截止时间（v2.1）；提醒时间仍是 `reminder_time`（= 截止时间 - 提前量）。
+    #[serde(default)]
+    pub due_at: Option<String>,
+    /// 便签颜色（v2.1），空字符串为默认颜色。
+    #[serde(default)]
+    pub sticky_color: String,
+    /// 手动排序位置（v2.1），越小越靠前；空表示未手动排序。
+    #[serde(default)]
+    pub sort_order: Option<f64>,
 }
 
 pub const PRIORITY_MAX: i64 = 3;
+
+/// 便签可选颜色（空字符串为默认颜色）。不认识的值原样保存、按默认颜色显示。
+pub const STICKY_COLORS: &[&str] = &["yellow", "blue", "green", "pink", "purple", "gray"];
+
+/// 规范化便签颜色：认识的颜色或空字符串，其余返回 None（命令中拒绝写入）。
+pub fn normalize_sticky_color(value: &str) -> Option<String> {
+    let value = value.trim().to_ascii_lowercase();
+    (value.is_empty() || STICKY_COLORS.contains(&value.as_str())).then_some(value)
+}
 pub const MAX_TAGS_PER_TASK: usize = 10;
 pub const MAX_TAG_CHARS: usize = 24;
 
@@ -103,6 +121,9 @@ pub struct RecurringTask {
     pub schedule_weekdays: Option<i64>,
     pub schedule_day: Option<i64>,
     pub cron_expression: Option<String>,
+    /// 标签（v2.1），与待办相同的规范化。
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -136,6 +157,9 @@ pub struct StickyNote {
     pub created_at: String,
     pub updated_at: String,
     pub reminder_time: Option<String>,
+    /// 便签颜色（v2.1），空字符串为默认颜色。
+    #[serde(default)]
+    pub color: String,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]

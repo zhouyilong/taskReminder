@@ -32,7 +32,7 @@ impl DbManager {
     pub fn list_sticky_notes(&self) -> Result<Vec<StickyNote>, AppError> {
         let conn = self.get_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, description, sticky_content, sticky_pos_x, sticky_pos_y, sticky_width, sticky_height, sticky_is_open, sticky_is_pinned, created_at, updated_at, reminder_time
+            "SELECT id, description, sticky_content, sticky_pos_x, sticky_pos_y, sticky_width, sticky_height, sticky_is_open, sticky_is_pinned, created_at, updated_at, reminder_time, sticky_color
              FROM tasks
              WHERE deleted_at IS NULL AND status != 'COMPLETED'
              ORDER BY created_at ASC",
@@ -44,7 +44,7 @@ impl DbManager {
     pub fn get_sticky_note(&self, note_id: &str) -> Result<Option<StickyNote>, AppError> {
         let conn = self.get_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, description, sticky_content, sticky_pos_x, sticky_pos_y, sticky_width, sticky_height, sticky_is_open, sticky_is_pinned, created_at, updated_at, reminder_time
+            "SELECT id, description, sticky_content, sticky_pos_x, sticky_pos_y, sticky_width, sticky_height, sticky_is_open, sticky_is_pinned, created_at, updated_at, reminder_time, sticky_color
              FROM tasks
              WHERE id = ?",
         )?;
@@ -183,7 +183,19 @@ impl DbManager {
             created_at: now.clone(),
             updated_at: now,
             reminder_time: None,
+            color: String::new(),
         })
+    }
+
+    /// 设置便签颜色（调用方先用 `normalize_sticky_color` 校验）。颜色不变时不写库。
+    pub fn set_sticky_note_color(&self, task_id: &str, color: &str) -> Result<bool, AppError> {
+        let conn = self.get_conn()?;
+        let changed = conn.execute(
+            "UPDATE tasks SET sticky_color = ?1, updated_at = ?2
+             WHERE id = ?3 AND deleted_at IS NULL AND sticky_color IS NOT ?1",
+            params![color, now_string(), task_id],
+        )?;
+        Ok(changed > 0)
     }
 
     pub fn save_sticky_note_content(&self, task_id: &str, content: &str) -> Result<(), AppError> {
@@ -318,5 +330,6 @@ pub(super) fn sticky_note_from_task_row(
         created_at: row.get(9)?,
         updated_at: row.get::<_, Option<String>>(10)?.unwrap_or_else(now_string),
         reminder_time: row.get(11)?,
+        color: row.get::<_, Option<String>>(12)?.unwrap_or_default(),
     })
 }

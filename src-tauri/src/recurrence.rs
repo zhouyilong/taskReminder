@@ -608,6 +608,7 @@ mod tests {
             schedule_weekdays: None,
             schedule_day: None,
             cron_expression: None,
+            tags: Vec::new(),
         }
     }
 

@@ -140,9 +140,9 @@ fn has_table_column(path: &std::path::Path, table: &str, column: &str) -> bool {
         .any(|c| c.name == column)
 }
 
-/// 模拟更新版本（v2.1）的设备：多一个同步列 `due_at`。
+/// 模拟更新版本（v2.1）的设备：多一个同步列 `location`。
 fn add_future_column(path: &std::path::Path) {
-    exec(path, "ALTER TABLE tasks ADD COLUMN due_at TEXT");
+    exec(path, "ALTER TABLE tasks ADD COLUMN location TEXT");
 }
 
 #[test]
@@ -155,16 +155,16 @@ fn unknown_remote_column_is_adopted_with_its_values() {
     exec(
         &remote.db_path(),
         &format!(
-            "UPDATE tasks SET due_at = '2026-10-08T18:00:00', updated_at = '2999-01-01T00:00:00' WHERE id = '{}'",
+            "UPDATE tasks SET location = '会议室 A', updated_at = '2999-01-01T00:00:00' WHERE id = '{}'",
             task.id
         ),
     );
 
     merge_databases(&local.db_path(), &remote.db_path()).unwrap();
-    assert!(has_table_column(&local.db_path(), "tasks", "due_at"));
+    assert!(has_table_column(&local.db_path(), "tasks", "location"));
     assert_eq!(
-        text_column(&local.db_path(), "tasks", "due_at", &task.id).as_deref(),
-        Some("2026-10-08T18:00:00")
+        text_column(&local.db_path(), "tasks", "location", &task.id).as_deref(),
+        Some("会议室 A")
     );
     // 新列不影响本版本读取。
     assert_eq!(
@@ -186,23 +186,23 @@ fn local_edit_keeps_adopted_column_and_uploads_it() {
     exec(
         &remote.db_path(),
         &format!(
-            "UPDATE tasks SET due_at = '2026-10-08T18:00:00', updated_at = '2000-01-02T00:00:00' WHERE id = '{}'",
+            "UPDATE tasks SET location = '会议室 A', updated_at = '2000-01-02T00:00:00' WHERE id = '{}'",
             task.id
         ),
     );
     merge_databases(&local.db_path(), &remote.db_path()).unwrap();
 
-    // 本机（不认识 due_at 的版本）修改标题后再次同步：本机行胜出，due_at 仍在。
+    // 本机（不认识 location 的版本）修改标题后再次同步：本机行胜出，location 仍在。
     local
         .update_task(&task.id, "local edit", None, None, None)
         .unwrap();
     merge_databases(&local.db_path(), &remote.db_path()).unwrap();
     assert_eq!(
-        text_column(&local.db_path(), "tasks", "due_at", &task.id).as_deref(),
-        Some("2026-10-08T18:00:00")
+        text_column(&local.db_path(), "tasks", "location", &task.id).as_deref(),
+        Some("会议室 A")
     );
 
-    // 上传的快照由更新版本的设备合并：标题改动与 due_at 都在。
+    // 上传的快照由更新版本的设备合并：标题改动与 location 都在。
     let (newer, newer_dir) = temp_db("newer");
     add_future_column(&newer.db_path());
     let snapshot = export_local_snapshot_bytes(&local.db_path()).unwrap();
@@ -212,8 +212,8 @@ fn local_edit_keeps_adopted_column_and_uploads_it() {
         Some("local edit")
     );
     assert_eq!(
-        text_column(&newer.db_path(), "tasks", "due_at", &task.id).as_deref(),
-        Some("2026-10-08T18:00:00")
+        text_column(&newer.db_path(), "tasks", "location", &task.id).as_deref(),
+        Some("会议室 A")
     );
 
     let _ = std::fs::remove_dir_all(local_dir);
@@ -227,12 +227,12 @@ fn older_remote_without_column_keeps_local_value() {
     let (remote, remote_dir) = temp_db("remote");
     let task = local.create_task("shared", None).unwrap();
     copy_task(&local.db_path(), &remote.db_path(), &task.id);
-    // 本机是更新版本（有 due_at），远端来自不认识它的旧版本，并且旧版本改过这一行。
+    // 本机是更新版本（有 location），远端来自不认识它的旧版本，并且旧版本改过这一行。
     add_future_column(&local.db_path());
     exec(
         &local.db_path(),
         &format!(
-            "UPDATE tasks SET due_at = '2026-10-08T18:00:00' WHERE id = '{}'",
+            "UPDATE tasks SET location = '会议室 A' WHERE id = '{}'",
             task.id
         ),
     );
@@ -250,8 +250,8 @@ fn older_remote_without_column_keeps_local_value() {
         Some("old device edit")
     );
     assert_eq!(
-        text_column(&local.db_path(), "tasks", "due_at", &task.id).as_deref(),
-        Some("2026-10-08T18:00:00")
+        text_column(&local.db_path(), "tasks", "location", &task.id).as_deref(),
+        Some("会议室 A")
     );
 
     let _ = std::fs::remove_dir_all(local_dir);

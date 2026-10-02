@@ -89,7 +89,8 @@ fn merge_databases_with(
     let mut local = Connection::open(local_path)?;
     let remote = Connection::open(remote_path)?;
     ensure_sync_columns(&local)?;
-    ensure_sync_columns(&remote)?;
+    // 远端库不补列：合并只读它实际拥有的列，旧版本没有的列保留本机的值。
+    // 若给远端补上（值为默认值），远端行胜出时会把本机的新字段清空。
 
     let tx = local.transaction()?;
     if let Some(watermark) = watermark {

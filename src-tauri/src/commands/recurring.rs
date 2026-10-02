@@ -23,6 +23,8 @@ pub struct CreateRecurringPayload {
     schedule_weekdays: Option<i64>,
     schedule_day: Option<i64>,
     cron_expression: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -69,6 +71,7 @@ pub fn create_recurring_task(
         schedule_weekdays: payload.schedule_weekdays,
         schedule_day: payload.schedule_day,
         cron_expression: payload.cron_expression,
+        tags: crate::models::normalize_tags(&payload.tags),
     };
     into_api(recurrence::sanitize_recurring_task(&mut draft))?;
     draft.next_trigger = into_api(recurrence::compute_next_trigger(&draft, None))?;

@@ -670,6 +670,7 @@ mod tests {
             schedule_weekdays: Some(0b001_0101),
             schedule_day: Some(31),
             cron_expression: None,
+            tags: Vec::new(),
         }
     }
 
@@ -814,6 +815,9 @@ mod tests {
                 deleted_at: None,
                 tags: vec!["工作".to_string()],
                 priority: 3,
+                due_at: None,
+                sticky_color: String::new(),
+                sort_order: None,
             }],
             recurring_tasks: vec![weekly, monthly, interval, paused],
             reminder_records: Vec::new(),

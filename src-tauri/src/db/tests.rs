@@ -46,6 +46,7 @@ fn sample_recurring() -> RecurringTask {
         schedule_weekdays: None,
         schedule_day: None,
         cron_expression: None,
+        tags: Vec::new(),
     }
 }
 
@@ -564,8 +565,8 @@ fn import_keeps_columns_unknown_to_this_version() {
     {
         let conn = Connection::open(db.db_path()).unwrap();
         conn.execute_batch(&format!(
-            "ALTER TABLE recurring_tasks ADD COLUMN tags TEXT;
-             UPDATE recurring_tasks SET tags = '健身' WHERE id = '{}';",
+            "ALTER TABLE recurring_tasks ADD COLUMN category TEXT;
+             UPDATE recurring_tasks SET category = '健身' WHERE id = '{}';",
             recurring.id
         ))
         .unwrap();
@@ -576,15 +577,15 @@ fn import_keeps_columns_unknown_to_this_version() {
     db.import_rows(&[], &[imported], &[]).unwrap();
 
     let conn = Connection::open(db.db_path()).unwrap();
-    let (description, tags): (String, Option<String>) = conn
+    let (description, category): (String, Option<String>) = conn
         .query_row(
-            "SELECT description, tags FROM recurring_tasks WHERE id = ?",
+            "SELECT description, category FROM recurring_tasks WHERE id = ?",
             [&recurring.id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
     assert_eq!(description, "imported");
-    assert_eq!(tags.as_deref(), Some("健身"));
+    assert_eq!(category.as_deref(), Some("健身"));
     let _ = std::fs::remove_dir_all(dir);
 }
 

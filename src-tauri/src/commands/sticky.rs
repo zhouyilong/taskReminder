@@ -382,6 +382,7 @@ mod tests {
             created_at: String::new(),
             updated_at: String::new(),
             reminder_time: None,
+            color: String::new(),
         }
     }
 
