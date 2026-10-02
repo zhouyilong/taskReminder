@@ -1,12 +1,12 @@
-//! 待办相关命令：列表、新建（含快速添加）、编辑、完成与删除。
+//! 待办相关命令：列表、新建（含快速添加）、编辑、完成与删除、批量操作。
 
 use serde::Deserialize;
 use tauri::{Emitter, State};
 
 use crate::commands::{into_api, ApiResult};
-use crate::db::TaskMeta;
+use crate::db::{TaskBatchOp, TaskMeta};
 use crate::errors::AppError;
-use crate::kinds::ReminderAction;
+use crate::kinds::{ReminderAction, TaskStatus};
 use crate::models::Task;
 use crate::scheduler;
 use crate::state::AppState;
@@ -245,4 +245,109 @@ pub fn delete_task(app: tauri::AppHandle, state: State<AppState>, id: String) ->
     )?;
     into_api(state.sync.notify_local_change())?;
     Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "action"
+)]
+pub enum TaskBatchPayload {
+    Complete,
+    Delete,
+    AddTags { tags: Vec<String> },
+    SetPriority { priority: i64 },
+    SetReminder { reminder_time: Option<String> },
+}
+
+impl TaskBatchPayload {
+    fn into_op(self) -> TaskBatchOp {
+        match self {
+            TaskBatchPayload::Complete => TaskBatchOp::Complete,
+            TaskBatchPayload::Delete => TaskBatchOp::Delete,
+            TaskBatchPayload::AddTags { tags } => TaskBatchOp::AddTags(tags),
+            TaskBatchPayload::SetPriority { priority } => TaskBatchOp::SetPriority(priority),
+            TaskBatchPayload::SetReminder { reminder_time } => {
+                TaskBatchOp::SetReminder(normalize_reminder_time(reminder_time))
+            }
+        }
+    }
+}
+
+/// 批量操作待办：数据库改动在一个事务中完成，随后逐条处理计时器、弹窗与便签窗口，
+/// 只标记一次本地变更。返回实际改动的条数。
+#[tauri::command]
+pub fn batch_update_tasks(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    ids: Vec<String>,
+    payload: TaskBatchPayload,
+) -> ApiResult<usize> {
+    let op = payload.into_op();
+    let changed = into_api(state.db.batch_update_tasks(&ids, &op))?;
+    for id in &changed {
+        match &op {
+            TaskBatchOp::Complete | TaskBatchOp::Delete => {
+                let action = if op == TaskBatchOp::Complete {
+                    ReminderAction::Completed
+                } else {
+                    ReminderAction::Dismissed
+                };
+                hide_sticky_note_window(&app, id);
+                state.scheduler.cancel_task(id);
+                into_api(state.scheduler.withdraw_notifications(id, action))?;
+            }
+            TaskBatchOp::SetReminder(reminder) => {
+                state.scheduler.cancel_task(id);
+                if let Some(task) = into_api(state.db.get_task(id))? {
+                    let future = reminder
+                        .as_deref()
+                        .is_some_and(|value| scheduler::is_future(value).unwrap_or(false));
+                    if future && task.status == TaskStatus::Pending {
+                        into_api(state.scheduler.schedule_task(task))?;
+                    }
+                }
+                emit_sticky_note_reminder(&app, id, reminder.clone());
+            }
+            TaskBatchOp::AddTags(_) | TaskBatchOp::SetPriority(_) => {}
+        }
+    }
+    if !changed.is_empty() {
+        into_api(state.sync.notify_local_change())?;
+    }
+    Ok(changed.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn op(json: &str) -> TaskBatchOp {
+        serde_json::from_str::<TaskBatchPayload>(json)
+            .unwrap()
+            .into_op()
+    }
+
+    #[test]
+    fn batch_payload_matches_frontend_json() {
+        assert_eq!(op(r#"{"action":"complete"}"#), TaskBatchOp::Complete);
+        assert_eq!(op(r#"{"action":"delete"}"#), TaskBatchOp::Delete);
+        assert_eq!(
+            op(r#"{"action":"addTags","tags":["周报"]}"#),
+            TaskBatchOp::AddTags(vec!["周报".to_string()])
+        );
+        assert_eq!(
+            op(r#"{"action":"setPriority","priority":2}"#),
+            TaskBatchOp::SetPriority(2)
+        );
+        assert_eq!(
+            op(r#"{"action":"setReminder","reminderTime":"2026-10-03T15:00:00"}"#),
+            TaskBatchOp::SetReminder(Some("2026-10-03T15:00:00".to_string()))
+        );
+        assert_eq!(
+            op(r#"{"action":"setReminder","reminderTime":null}"#),
+            TaskBatchOp::SetReminder(None)
+        );
+    }
 }

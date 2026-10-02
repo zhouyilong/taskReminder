@@ -34,7 +34,7 @@ mod tombstones;
 pub(crate) use migrations::create_schema_up_to;
 #[cfg(test)]
 use migrations::execute_sql_script;
-pub use tasks::TaskMeta;
+pub use tasks::{TaskBatchOp, TaskMeta};
 
 /// 墓碑（软删除行）的保留天数。开启云同步时保留更久，
 /// 让较长时间未同步的设备也能收到删除，而不是把旧数据重新上传“复活”。

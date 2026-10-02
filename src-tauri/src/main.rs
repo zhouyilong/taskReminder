@@ -59,6 +59,7 @@ fn main() {
             tasks::complete_task,
             tasks::uncomplete_task,
             tasks::delete_task,
+            tasks::batch_update_tasks,
             recurring::create_recurring_task,
             recurring::update_recurring_task,
             recurring::pause_recurring_task,

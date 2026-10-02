@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeParsedSchedule, parseNumber, parseQuickInput } from "./nlp";
+import { describeParsedSchedule, parseNumber, parseQuickInput, parseRescheduleTime } from "./nlp";
 import { toLocalDateTimeString } from "./format";
 
 // 2026-09-27 是周日。
@@ -174,5 +174,19 @@ describe("describeParsedSchedule", () => {
     expect(describeParsedSchedule(parseQuickInput("10月1日 a", NOW), NOW)).toBe("10月1日 周四 09:00");
     expect(describeParsedSchedule(parseQuickInput("每周一三五 19:00 a", NOW), NOW)).toBe("周一、三、五 19:00");
     expect(describeParsedSchedule(parseQuickInput("a", NOW), NOW)).toBe("");
+  });
+});
+
+describe("parseRescheduleTime", () => {
+  const now = new Date(2026, 9, 2, 10, 0); // 2026-10-02 周五 10:00
+  it("returns a one-off time", () => {
+    expect(parseRescheduleTime("明天下午3点", now).time).toEqual(new Date(2026, 9, 3, 15, 0));
+    expect(parseRescheduleTime("30分钟后", now).time).toEqual(new Date(2026, 9, 2, 10, 30));
+    expect(parseRescheduleTime("", now)).toEqual({ time: null, error: null });
+  });
+  it("explains why an input cannot be used", () => {
+    expect(parseRescheduleTime("每天9点", now).error).toMatch("循环");
+    expect(parseRescheduleTime("随便", now).error).toMatch("没有识别出时间");
+    expect(parseRescheduleTime("2026-10-01 09:00", now).error).toMatch("已经过去");
   });
 });

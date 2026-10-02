@@ -186,3 +186,11 @@ export interface BackupListPayload {
   dir: string;
   backups: BackupInfo[];
 }
+
+/** 待办批量操作（与后端 `TaskBatchPayload` 对应）。 */
+export type TaskBatchPayload =
+  | { action: "complete" }
+  | { action: "delete" }
+  | { action: "addTags"; tags: string[] }
+  | { action: "setPriority"; priority: number }
+  | { action: "setReminder"; reminderTime: string | null };

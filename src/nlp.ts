@@ -532,3 +532,22 @@ export const describeParsedSchedule = (parsed: ParsedInput, now: Date = new Date
 /** 是否识别出了任何结构化信息（用于决定是否展示识别提示）。 */
 export const hasParsedMeta = (parsed: ParsedInput) =>
   Boolean(parsed.reminderTime || parsed.recurring || parsed.tags.length || parsed.priority);
+
+export interface RescheduleParse {
+  time: Date | null;
+  error: string | null;
+}
+
+/**
+ * 解析“改到什么时候”的输入（提醒弹窗自定义稍后提醒、批量改提醒时间）：
+ * 只取一次性时间，循环规则、没有时间或时间已过都给出原因。
+ */
+export const parseRescheduleTime = (input: string, now: Date = new Date()): RescheduleParse => {
+  const text = input.trim();
+  if (!text) return { time: null, error: null };
+  const parsed = parseQuickInput(text, now);
+  if (parsed.recurring) return { time: null, error: "请输入一个具体时间，而不是循环规则" };
+  if (!parsed.reminderTime) return { time: null, error: "没有识别出时间，可以试试“明天下午3点”“30分钟后”" };
+  if (parsed.reminderTime.getTime() <= now.getTime()) return { time: null, error: "这个时间已经过去了" };
+  return { time: parsed.reminderTime, error: null };
+};

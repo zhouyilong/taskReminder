@@ -9,6 +9,18 @@ pub struct TaskMeta {
     pub priority: i64,
 }
 
+/// 待办的批量操作（`batch_update_tasks`）。
+#[derive(Debug, Clone, PartialEq)]
+pub enum TaskBatchOp {
+    Complete,
+    Delete,
+    /// 在原有标签后追加（规范化、去重，最多 10 个）。
+    AddTags(Vec<String>),
+    SetPriority(i64),
+    /// `None` 表示清除提醒。
+    SetReminder(Option<String>),
+}
+
 impl DbManager {
     pub fn list_active_tasks(&self) -> Result<Vec<Task>, AppError> {
         let conn = self.get_conn()?;
@@ -189,6 +201,71 @@ impl DbManager {
             params![reminder_time, now, task_id],
         )?;
         Ok(())
+    }
+
+    /// 在一个事务中对多条待办执行同一操作，返回实际改动的 id（已删除、不存在的跳过；
+    /// 完成时跳过已完成的）。时间戳统一，只产生一次写入。
+    pub fn batch_update_tasks(
+        &self,
+        ids: &[String],
+        op: &TaskBatchOp,
+    ) -> Result<Vec<String>, AppError> {
+        let mut conn = self.get_conn()?;
+        let tx = conn.transaction()?;
+        let now = now_string();
+        let mut changed = Vec::new();
+        for id in ids {
+            let current: Option<(String, Option<String>)> = tx
+                .query_row(
+                    "SELECT status, tags FROM tasks WHERE id = ? AND deleted_at IS NULL",
+                    [id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            let Some((status, tags)) = current else {
+                continue;
+            };
+            let rows = match op {
+                TaskBatchOp::Complete if status == "COMPLETED" => 0,
+                TaskBatchOp::Complete => tx.execute(
+                    "UPDATE tasks SET status = 'COMPLETED', completed_at = ?1, sticky_is_open = 0, updated_at = ?1
+                     WHERE id = ?2",
+                    params![now, id],
+                )?,
+                TaskBatchOp::Delete => tx.execute(
+                    "UPDATE tasks SET deleted_at = ?1, sticky_is_open = 0, updated_at = ?1 WHERE id = ?2",
+                    params![now, id],
+                )?,
+                TaskBatchOp::AddTags(extra) => {
+                    let mut merged = tags_from_db(tags);
+                    let before = merged.clone();
+                    merged.extend(extra.iter().cloned());
+                    let merged = crate::models::normalize_tags(&merged);
+                    if merged == before {
+                        0
+                    } else {
+                        tx.execute(
+                            "UPDATE tasks SET tags = ?1, updated_at = ?2 WHERE id = ?3",
+                            params![merged.join(","), now, id],
+                        )?
+                    }
+                }
+                TaskBatchOp::SetPriority(priority) => tx.execute(
+                    "UPDATE tasks SET priority = ?1, updated_at = ?2 WHERE id = ?3 AND priority != ?1",
+                    params![normalize_priority(*priority), now, id],
+                )?,
+                TaskBatchOp::SetReminder(reminder) => tx.execute(
+                    "UPDATE tasks SET reminder_time = ?1, updated_at = ?2
+                     WHERE id = ?3 AND reminder_time IS NOT ?1",
+                    params![reminder, now, id],
+                )?,
+            };
+            if rows > 0 {
+                changed.push(id.clone());
+            }
+        }
+        tx.commit()?;
+        Ok(changed)
     }
 }
 

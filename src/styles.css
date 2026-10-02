@@ -1216,6 +1216,22 @@ label:has(> input[type="checkbox"]) {
   background: var(--bg-hover);
 }
 
+/* 多选：避免 Shift 连选时浏览器选中文字 */
+.table.is-selecting {
+  user-select: none;
+}
+
+/* 多选中的行 */
+.table .table-row.is-selected,
+.table .table-row.is-selected:hover {
+  background: var(--primary-soft);
+}
+
+.button.secondary.is-active {
+  border-color: var(--primary);
+  color: var(--primary-text);
+}
+
 .cell-title {
   color: var(--text-title) !important;
   font-weight: 600;

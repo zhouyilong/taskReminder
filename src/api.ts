@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  TaskBatchPayload,
   Task,
   RecurringTask,
   RecurringMode,
@@ -55,6 +56,10 @@ export const api = {
   },
   async uncompleteTask(id: string): Promise<void> {
     return invoke("uncomplete_task", { id });
+  },
+  /** 批量操作待办，返回实际改动的条数。 */
+  async batchUpdateTasks(ids: string[], payload: TaskBatchPayload): Promise<number> {
+    return invoke("batch_update_tasks", { ids, payload });
   },
   async deleteTask(id: string): Promise<void> {
     return invoke("delete_task", { id });

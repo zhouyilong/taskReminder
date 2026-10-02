@@ -61,13 +61,32 @@
       <select class="select" v-model="sortKey" title="排序">
         <option v-for="option in TASK_SORT_OPTIONS" :key="option.value" :value="option.value">按{{ option.label }}</option>
       </select>
+      <button
+        class="button secondary"
+        :class="{ 'is-active': selectionMode }"
+        title="多选后批量完成、删除、加标签、改优先级或提醒时间（也可按住 Ctrl 点击行）"
+        @click="selectionMode ? exitSelection() : (selectionMode = true)"
+      >
+        {{ selectionMode ? "退出多选" : "多选" }}
+      </button>
     </div>
+    <TaskBatchBar v-if="selectionMode" :ids="selectedIds" @done="exitSelection" @cancel="exitSelection" />
     <div class="table-card">
       <div class="table-scroll table-scroll-no-x">
-        <table class="table tasks-table">
+        <table class="table tasks-table" :class="{ 'is-selecting': selectionMode }">
           <thead>
             <tr>
-              <th class="col-select">完成</th>
+              <th class="col-select">
+                <input
+                  v-if="selectionMode"
+                  type="checkbox"
+                  title="全选本页"
+                  :checked="pageAllSelected"
+                  :indeterminate.prop="pageSomeSelected && !pageAllSelected"
+                  @change="selection = toggleAll(selection, pageIds)"
+                />
+                <template v-else>完成</template>
+              </th>
               <th class="col-desc">标题</th>
               <th class="col-note">描述</th>
               <th class="col-datetime">提醒时间</th>
@@ -79,11 +98,21 @@
               v-for="task in tasksPage"
               :key="task.id"
               class="table-row"
+              :class="{ 'is-selected': selection.ids.has(task.id) }"
+              @click="handleRowClick($event, task.id)"
               @dblclick="openTaskEditor(task)"
               @contextmenu.prevent.stop="openTaskMenu($event, task)"
             >
               <td class="col-select">
                 <input
+                  v-if="selectionMode"
+                  type="checkbox"
+                  title="选择（Shift 连选）"
+                  :checked="selection.ids.has(task.id)"
+                  @click.stop="handleRowClick($event, task.id, true)"
+                />
+                <input
+                  v-else
                   type="checkbox"
                   class="check-round"
                   title="标记完成"
@@ -137,9 +166,11 @@ import { computed, reactive, ref, watch } from "vue";
 import MarkdownNoteEditor from "../components/MarkdownNoteEditor.vue";
 import Pagination from "../components/Pagination.vue";
 import SmartParseHint from "../components/SmartParseHint.vue";
+import TaskBatchBar from "../components/TaskBatchBar.vue";
 import TaskBadges from "../components/TaskBadges.vue";
 import { formatDateTime, reminderTone, taskStickyPreview } from "../format";
 import { safeStorage } from "../safeStorage";
+import { emptySelection, pruneSelection, selectRange, toggleAll, toggleSelected } from "../selection";
 import {
   PRIORITY_OPTIONS,
   TASK_SORT_OPTIONS,
@@ -188,6 +219,39 @@ const {
   totalPages: tasksTotalPages,
   page: tasksPage
 } = usePagination(visibleTasks, filterKey);
+
+// 多选：进入多选模式后点击行切换选择、Shift 连选；Ctrl / ⌘ 点击行可直接进入多选。
+const selectionMode = ref(false);
+const selection = ref(emptySelection());
+const selectedIds = computed(() => [...selection.value.ids]);
+const pageIds = computed(() => tasksPage.value.map(task => task.id));
+const pageAllSelected = computed(
+  () => pageIds.value.length > 0 && pageIds.value.every(id => selection.value.ids.has(id))
+);
+const pageSomeSelected = computed(() => pageIds.value.some(id => selection.value.ids.has(id)));
+
+const exitSelection = () => {
+  selectionMode.value = false;
+  selection.value = emptySelection();
+};
+
+const handleRowClick = (event: MouseEvent, id: string, fromCheckbox = false) => {
+  if (!selectionMode.value) {
+    if (!(event.ctrlKey || event.metaKey)) return;
+    selectionMode.value = true;
+  } else if (!fromCheckbox && (event.target as HTMLElement | null)?.closest("a, button, .task-tag")) {
+    return;
+  }
+  selection.value = event.shiftKey
+    ? selectRange(selection.value, visibleTasks.value.map(task => task.id), id)
+    : toggleSelected(selection.value, id);
+};
+
+watch(visibleTasks, list => {
+  selection.value = pruneSelection(selection.value, list.map(task => task.id));
+});
+
+defineExpose({ selectionMode, selectedIds, exitSelection });
 
 const newTaskDescription = ref("");
 const newTaskStickyContent = ref("");
