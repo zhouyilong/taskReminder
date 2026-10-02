@@ -91,6 +91,30 @@
         @update:modelValue="handleContentInput"
       />
       <footer class="paper-note-footer">
+        <div class="paper-note-color">
+          <button
+            class="paper-note-color-trigger"
+            type="button"
+            title="便签颜色"
+            @mousedown.stop
+            @click.stop="colorMenuOpen = !colorMenuOpen"
+          >
+            <span class="sticky-color-dot" :class="dotClass(note.color)"></span>
+          </button>
+          <div v-if="colorMenuOpen" class="paper-note-color-menu" role="menu" @mousedown.stop>
+            <button
+              v-for="option in STICKY_COLOR_OPTIONS"
+              :key="option.value || 'default'"
+              class="paper-note-color-option"
+              :class="{ active: (note.color || '') === option.value }"
+              type="button"
+              :title="option.label"
+              @click.stop="chooseColor(option.value)"
+            >
+              <span class="sticky-color-dot" :class="dotClass(option.value)"></span>
+            </button>
+          </div>
+        </div>
         <span class="paper-note-time">{{ formattedCreatedAt }}</span>
         <div class="paper-note-footer-right">
           <span class="paper-note-save-hint">
@@ -147,13 +171,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import MarkdownNoteEditor from "./components/MarkdownNoteEditor.vue";
 import { safeStorage } from "./safeStorage";
 import { api } from "./api";
 import type { AppSettings, StickyNote, UiStatePayload } from "./types";
+import { STICKY_COLOR_OPTIONS, stickyColorClass, stickyDotClass as dotClass } from "./stickies";
 
 // @tauri-apps/api 未导出该类型，这里按 startResizeDragging 的参数定义同名联合类型。
 type ResizeDirection =
@@ -222,6 +247,39 @@ let unlistenThemeChangedLegacy: UnlistenFn | null = null;
 let unlistenScaleChangedLegacy: UnlistenFn | null = null;
 let unlistenWindowOpacityChangedLegacy: UnlistenFn | null = null;
 let unlistenReminderUpdated: UnlistenFn | null = null;
+let unlistenColorUpdated: UnlistenFn | null = null;
+
+// 便签颜色（v2.1）：在 html/body 上加 sticky-color-<颜色>，覆盖纸面颜色令牌（Linux 不透明窗口的底色也随之改变）。
+const colorMenuOpen = ref(false);
+const applyColorClass = (color?: string | null) => {
+  for (const element of [document.documentElement, document.body]) {
+    for (const option of STICKY_COLOR_OPTIONS) {
+      if (option.value) element.classList.remove(`sticky-color-${option.value}`);
+    }
+    const cls = stickyColorClass(color);
+    if (cls) element.classList.add(cls);
+  }
+};
+watch(() => note.value?.color, color => applyColorClass(color), { immediate: true });
+
+const chooseColor = async (color: string) => {
+  colorMenuOpen.value = false;
+  if (!note.value || (note.value.color || "") === color) {
+    return;
+  }
+  const previous = note.value.color ?? "";
+  note.value = { ...note.value, color };
+  try {
+    await api.setStickyNoteColor(note.value.taskId, color);
+  } catch (error) {
+    console.warn("[sticky-note-item] 设置便签颜色失败", error);
+    if (note.value) note.value = { ...note.value, color: previous };
+  }
+};
+
+const closeColorMenu = () => {
+  colorMenuOpen.value = false;
+};
 let windowUiStateHandler: ((event: Event) => void) | null = null;
 let stickyNoteHandler: ((event: Event) => void) | null = null;
 let uiStatePollInterval: number = 0;
@@ -793,6 +851,7 @@ const loadCurrentNoteWithRetry = async () => {
 };
 
 onMounted(async () => {
+  window.addEventListener("mousedown", closeColorMenu);
   applyThemeFromStorage();
   applyUiScale(Number(safeStorage.getItem("uiScale") ?? DEFAULT_UI_SCALE));
   applyWindowOpacity(Number(safeStorage.getItem("windowOpacity") ?? DEFAULT_WINDOW_OPACITY));
@@ -843,6 +902,11 @@ onMounted(async () => {
         };
       }
     );
+    unlistenColorUpdated = await listen<{ taskId: string; color: string }>("sticky-note-color-updated", event => {
+      if (note.value && event.payload.taskId === note.value.taskId) {
+        note.value = { ...note.value, color: event.payload.color };
+      }
+    });
   } catch (error) {
     console.warn("[sticky-note-item] 监听提醒时间变更失败", error);
   }
@@ -935,6 +999,8 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  unlistenColorUpdated?.();
+  window.removeEventListener("mousedown", closeColorMenu);
   if (reminderClockTimer) {
     window.clearInterval(reminderClockTimer);
     reminderClockTimer = 0;

@@ -65,6 +65,14 @@ export const api = {
   async batchUpdateTasks(ids: string[], payload: TaskBatchPayload): Promise<number> {
     return invoke("batch_update_tasks", { ids, payload });
   },
+  /** 设置便签颜色（空字符串为默认颜色）。 */
+  async setStickyNoteColor(taskId: string, color: string): Promise<void> {
+    return invoke("set_sticky_note_color", { taskId, color });
+  },
+  /** 拖拽排序：写入手动排序位置。 */
+  async setTaskOrder(orders: Array<{ id: string; sortOrder: number }>): Promise<number> {
+    return invoke("set_task_order", { orders });
+  },
   async deleteTask(id: string): Promise<void> {
     return invoke("delete_task", { id });
   },
