@@ -9,7 +9,7 @@
         <circle cx="11" cy="11" r="6.5" />
         <path d="M16 16l4 4" />
       </svg>
-      <input class="input" v-model="completedFilter" placeholder="按标题、描述或 #标签搜索已办事项" />
+      <input data-shortcut="search" class="input" v-model="completedFilter" placeholder="按标题、描述或 #标签搜索已办事项" />
       <button v-if="completedFilter" class="search-clear" type="button" title="清空" @click="completedFilter = ''">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M7 7l10 10M17 7L7 17" />

@@ -245,6 +245,25 @@ pub fn save_sticky_note_content(
     Ok(())
 }
 
+/// 设置便签颜色（空字符串为默认颜色）；不认识的颜色拒绝写入。
+#[tauri::command]
+pub fn set_sticky_note_color(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    task_id: String,
+    color: String,
+) -> ApiResult<()> {
+    let Some(color) = crate::models::normalize_sticky_color(&color) else {
+        return Err("不支持的便签颜色".to_string());
+    };
+    if into_api(state.db.set_sticky_note_color(&task_id, &color))? {
+        crate::windows::sticky::emit_sticky_note_color(&app, &task_id, &color);
+        let _ = app.emit("sticky-note-changed", task_id.clone());
+        into_api(state.sync.notify_local_change())?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn update_sticky_note_title(
     app: tauri::AppHandle,
@@ -382,6 +401,7 @@ mod tests {
             created_at: String::new(),
             updated_at: String::new(),
             reminder_time: None,
+            color: String::new(),
         }
     }
 

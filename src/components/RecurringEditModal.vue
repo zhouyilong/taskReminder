@@ -12,13 +12,19 @@
     <div class="form-row compact">
       <RecurringFields :draft="draft" />
     </div>
+    <div class="form-row compact">
+      <span class="form-row-label">标签</span>
+      <TagInput v-model="draft.tags" :suggestions="tagSuggestions" />
+    </div>
   </Modal>
 </template>
 
 <script setup lang="ts">
-import { reactive, watch } from "vue";
+import { computed, reactive, watch } from "vue";
 import Modal from "./Modal.vue";
 import RecurringFields from "./RecurringFields.vue";
+import TagInput from "./TagInput.vue";
+import { collectTags } from "../tasks";
 import { api } from "../api";
 import {
   buildRecurringPayload,
@@ -32,7 +38,10 @@ import { useDialogs } from "../composables/useDialogs";
 import { useItemActions } from "../composables/useItemActions";
 
 const { recurringEditor } = useDialogs();
-const { recurringTasks, refreshAll } = useAppData();
+const { tasks, completedTasks, recurringTasks, refreshAll } = useAppData();
+const tagSuggestions = computed(() =>
+  collectTags([...recurringTasks.value, ...tasks.value, ...completedTasks.value]).map(item => item.tag)
+);
 const { confirmDeleteRecurring } = useItemActions();
 
 const draft = reactive(createRecurringDraft());

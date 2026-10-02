@@ -46,6 +46,7 @@ fn sample_recurring() -> RecurringTask {
         schedule_weekdays: None,
         schedule_day: None,
         cron_expression: None,
+        tags: Vec::new(),
     }
 }
 
@@ -564,8 +565,8 @@ fn import_keeps_columns_unknown_to_this_version() {
     {
         let conn = Connection::open(db.db_path()).unwrap();
         conn.execute_batch(&format!(
-            "ALTER TABLE recurring_tasks ADD COLUMN tags TEXT;
-             UPDATE recurring_tasks SET tags = '健身' WHERE id = '{}';",
+            "ALTER TABLE recurring_tasks ADD COLUMN category TEXT;
+             UPDATE recurring_tasks SET category = '健身' WHERE id = '{}';",
             recurring.id
         ))
         .unwrap();
@@ -576,15 +577,15 @@ fn import_keeps_columns_unknown_to_this_version() {
     db.import_rows(&[], &[imported], &[]).unwrap();
 
     let conn = Connection::open(db.db_path()).unwrap();
-    let (description, tags): (String, Option<String>) = conn
+    let (description, category): (String, Option<String>) = conn
         .query_row(
-            "SELECT description, tags FROM recurring_tasks WHERE id = ?",
+            "SELECT description, category FROM recurring_tasks WHERE id = ?",
             [&recurring.id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
     assert_eq!(description, "imported");
-    assert_eq!(tags.as_deref(), Some("健身"));
+    assert_eq!(category.as_deref(), Some("健身"));
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -598,5 +599,112 @@ fn holiday_auto_update_defaults_on_and_roundtrips() {
     db.save_settings(&settings).unwrap();
     assert!(!db.load_settings().unwrap().holiday_auto_update);
     assert!(!db.holiday_auto_update_enabled().unwrap());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn batch_update_tasks_changes_only_live_rows_that_differ() {
+    let (db, dir) = temp_db();
+    let _now = time::fix_now("2026-10-02T10:00");
+    let a = db
+        .create_task_with_meta(
+            "a",
+            None,
+            &TaskMeta {
+                tags: vec!["工作".to_string()],
+                priority: 1,
+            },
+        )
+        .unwrap();
+    let b = db.create_task("b", None).unwrap();
+    let gone = db.create_task("gone", None).unwrap();
+    db.delete_task(&gone.id).unwrap();
+    let ids = vec![
+        a.id.clone(),
+        b.id.clone(),
+        gone.id.clone(),
+        "missing".to_string(),
+    ];
+
+    let changed = db
+        .batch_update_tasks(
+            &ids,
+            &TaskBatchOp::AddTags(vec!["#周报".into(), "工作".into()]),
+        )
+        .unwrap();
+    assert_eq!(changed, vec![a.id.clone(), b.id.clone()]);
+    assert_eq!(
+        db.get_task(&a.id).unwrap().unwrap().tags,
+        vec!["工作", "周报"]
+    );
+    assert_eq!(
+        db.get_task(&b.id).unwrap().unwrap().tags,
+        vec!["周报", "工作"]
+    );
+    // 再加一次相同的标签：没有变化，不写入。
+    assert!(db
+        .batch_update_tasks(&ids, &TaskBatchOp::AddTags(vec!["周报".into()]))
+        .unwrap()
+        .is_empty());
+
+    let changed = db
+        .batch_update_tasks(&ids, &TaskBatchOp::SetPriority(1))
+        .unwrap();
+    assert_eq!(changed, vec![b.id.clone()], "a 本来就是 1");
+    let changed = db
+        .batch_update_tasks(
+            &ids,
+            &TaskBatchOp::SetReminder(Some("2026-10-03T09:00:00".into())),
+        )
+        .unwrap();
+    assert_eq!(changed.len(), 2);
+    assert_eq!(
+        db.get_task(&b.id)
+            .unwrap()
+            .unwrap()
+            .reminder_time
+            .as_deref(),
+        Some("2026-10-03T09:00:00")
+    );
+
+    db.complete_task(&a.id).unwrap();
+    let changed = db.batch_update_tasks(&ids, &TaskBatchOp::Complete).unwrap();
+    assert_eq!(changed, vec![b.id.clone()], "已完成的跳过");
+    let changed = db.batch_update_tasks(&ids, &TaskBatchOp::Delete).unwrap();
+    assert_eq!(changed, vec![a.id.clone(), b.id.clone()]);
+    assert!(db.list_active_tasks().unwrap().is_empty());
+    assert!(db.list_completed_tasks().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn sort_orders_due_and_sticky_color_roundtrip() {
+    let (db, dir) = temp_db();
+    let a = db.create_task("a", None).unwrap();
+    let b = db.create_task("b", None).unwrap();
+    let orders = vec![(a.id.clone(), 2048.0), (b.id.clone(), 1024.0)];
+    assert_eq!(db.set_task_sort_orders(&orders).unwrap(), 2);
+    assert_eq!(db.set_task_sort_orders(&orders).unwrap(), 0, "不变不写");
+    assert!(db
+        .set_task_sort_orders(&[(a.id.clone(), f64::NAN)])
+        .is_err());
+    assert_eq!(
+        db.get_task(&b.id).unwrap().unwrap().sort_order,
+        Some(1024.0)
+    );
+
+    assert!(db.set_task_due(&a.id, Some("2026-10-09T18:00:00")).unwrap());
+    assert!(!db.set_task_due(&a.id, Some("2026-10-09T18:00:00")).unwrap());
+    assert!(db.set_task_due(&a.id, None).unwrap());
+    assert_eq!(db.get_task(&a.id).unwrap().unwrap().due_at, None);
+
+    assert!(db.set_sticky_note_color(&a.id, "blue").unwrap());
+    assert_eq!(db.get_sticky_note(&a.id).unwrap().unwrap().color, "blue");
+    assert_eq!(db.get_task(&a.id).unwrap().unwrap().sticky_color, "blue");
+    assert_eq!(
+        crate::models::normalize_sticky_color(" Blue "),
+        Some("blue".to_string())
+    );
+    assert_eq!(crate::models::normalize_sticky_color("teal"), None);
     let _ = std::fs::remove_dir_all(dir);
 }

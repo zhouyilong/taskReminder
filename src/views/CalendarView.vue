@@ -158,6 +158,7 @@
         </div>
         <div class="calendar-day-composer">
           <input
+            data-shortcut="new"
             v-model="newTitle"
             class="input"
             :placeholder="composerPlaceholder"
@@ -216,6 +217,7 @@
 </template>
 
 <script setup lang="ts">
+import { moveTaskTimes, taskAnchorTime } from "../due";
 import { computed, nextTick, ref, watch } from "vue";
 import SmartParseHint from "../components/SmartParseHint.vue";
 import TaskBadges from "../components/TaskBadges.vue";
@@ -463,12 +465,13 @@ const handleSlotDragLeave = (day: CalendarDay, hour: number) => {
   }
 };
 
+// 有截止时间的待办移动截止时间、提醒时间随之平移（保持提前量）；否则移动提醒时间。
 const handleDrop = (day: CalendarDay) =>
-  moveDraggedTask(day, task => moveReminderToDay(task.reminderTime, day.date));
+  moveDraggedTask(day, task => moveReminderToDay(taskAnchorTime(task), day.date));
 
 // 周视图：拖到某个时段，改到该天该钟点（保留分钟）。
 const handleSlotDrop = (day: CalendarDay, hour: number) =>
-  moveDraggedTask(day, task => moveReminderToSlot(task.reminderTime, day.date, hour));
+  moveDraggedTask(day, task => moveReminderToSlot(taskAnchorTime(task), day.date, hour));
 
 const moveDraggedTask = async (day: CalendarDay, target: (task: Task) => string) => {
   const taskId = draggingTaskId.value;
@@ -478,12 +481,14 @@ const moveDraggedTask = async (day: CalendarDay, target: (task: Task) => string)
   if (!task) {
     return;
   }
-  const reminderTime = target(task);
-  if (reminderTime === task.reminderTime) {
+  const anchor = target(task);
+  if (anchor === taskAnchorTime(task)) {
     return;
   }
-  if (new Date(reminderTime).getTime() <= Date.now()) {
-    alert("提醒时间需晚于当前时间");
+  const moved = moveTaskTimes(task, anchor);
+  const checked = moved.reminderTime ?? moved.dueAt ?? anchor;
+  if (new Date(checked).getTime() <= Date.now()) {
+    alert(moved.dueAt && moved.reminderTime ? "按提前量算出的提醒时间已过，请换一天" : "提醒时间需晚于当前时间");
     return;
   }
   try {
@@ -491,7 +496,7 @@ const moveDraggedTask = async (day: CalendarDay, target: (task: Task) => string)
       id: task.id,
       description: task.description,
       stickyContent: task.stickyContent ?? null,
-      reminderTime,
+      ...moved,
     });
     selectedDate.value = day.date;
     await refreshAll();

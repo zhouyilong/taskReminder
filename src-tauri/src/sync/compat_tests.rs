@@ -1,6 +1,6 @@
 //! 跨版本同步测试：按 2.0.0 / 2.0.1 / 2.0.2 发布时的迁移建库并写入示例数据
 //! （`tests/fixtures/sync-sample-2.0.sql`），检查与当前版本双向合并、从旧版本升级都不丢数据；
-//! 再用“模拟 v2.1”（多同步列、多一种循环模式）的库检查不认识的列与值原样保留。
+//! 再用“模拟更新的版本”（多同步列、多一种循环模式）的库检查不认识的列与值原样保留。
 //!
 //! 发布新版本时：把它的库结构版本加到 `RELEASES`；若新增了同步列，为它另写一份夹具。
 
@@ -14,8 +14,13 @@ use crate::kinds::RepeatMode;
 use crate::sync_schema::{table_columns, SYNC_TABLES};
 
 /// （应用版本，发布时的库结构版本）。
-const RELEASES: &[(&str, &str)] = &[("2.0.0", "2.0.1"), ("2.0.1", "2.0.3"), ("2.0.2", "2.0.5")];
-const SAMPLE: &str = include_str!("../tests/fixtures/sync-sample-2.0.sql");
+const RELEASES: &[(&str, &str)] = &[
+    ("2.0.0", "2.0.1"),
+    ("2.0.1", "2.0.3"),
+    ("2.0.2", "2.0.5"),
+    ("2.0.3", "2.0.5"),
+];
+const SAMPLE: &str = include_str!("../../tests/fixtures/sync-sample-2.0.sql");
 
 struct TempDir(PathBuf);
 
@@ -57,15 +62,27 @@ fn current_db(path: &Path) -> (DbManager, String) {
 
 type Rows = Vec<(String, Vec<(String, Value)>)>;
 
-/// 读出一张表中指定 id 的行（只取参与同步的列），用于比较合并前后是否一致。
+/// 示例数据所属版本（2.0.x）已有的列：之后版本新增的列旧数据里没有值，不参与比较。
+fn sample_columns(table: &str) -> Vec<String> {
+    let conn = Connection::open_in_memory().unwrap();
+    create_schema_up_to(&conn, "2.0.5").unwrap();
+    table_columns(&conn, table)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.name)
+        .collect()
+}
+
+/// 读出一张表中指定 id 的行（只取示例数据版本已有的同步列），用于比较合并前后是否一致。
 fn sync_rows(path: &Path, table: &str, ids: &[&str]) -> Rows {
     let spec = SYNC_TABLES.iter().find(|t| t.name == table).unwrap();
+    let known = sample_columns(table);
     let conn = Connection::open(path).unwrap();
     let columns: Vec<&str> = spec
         .columns
         .iter()
         .map(|c| c.name)
-        .filter(|name| *name != "updated_at")
+        .filter(|name| *name != "updated_at" && known.iter().any(|k| k == name))
         .collect();
     ids.iter()
         .map(|id| {
@@ -160,38 +177,40 @@ fn current_device_merges_release_snapshots_without_loss() {
 }
 
 #[test]
-fn release_device_receives_current_snapshot_without_column_diff() {
+fn release_database_receives_current_snapshot() {
     for (release, schema) in RELEASES {
         let dir = TempDir::new("push");
         let old = dir.path("old.db");
         release_db(&old, schema);
         let expected = all_rows(&old);
-        let old_columns: Vec<_> = SYNC_TABLES
-            .iter()
-            .map(|t| column_names(&old, t.name))
-            .collect();
 
-        // 当前版本上传的快照与旧版本的库合并：旧库的同步表不会多出列（当前版本没有新增同步列），
-        // 旧数据不变，当前版本新建的行到达。
+        // 当前版本上传的快照与旧版本建出的库合并：旧数据不变，当前版本新建的行（含 v2.1 新列的值）到达，
+        // 表结构补齐到与当前版本一致（合并时补上后来加入的同步列）。
         let (current, new_id) = current_db(&dir.path("current.db"));
+        current
+            .set_task_due(&new_id, Some("2026-10-09T18:00:00"))
+            .unwrap();
         let snapshot = export_local_snapshot_bytes(&current.db_path()).unwrap();
         merge_snapshot_bytes(&old, &snapshot).unwrap();
 
-        let merged_columns: Vec<_> = SYNC_TABLES
-            .iter()
-            .map(|t| column_names(&old, t.name))
-            .collect();
-        assert_eq!(merged_columns, old_columns, "{}", release);
+        let fresh = DbManager::new(dir.path("fresh.db")).unwrap();
+        for table in SYNC_TABLES {
+            assert_eq!(
+                column_names(&old, table.name),
+                column_names(&fresh.db_path(), table.name),
+                "{} {}",
+                release,
+                table.name
+            );
+        }
         assert_eq!(all_rows(&old), expected, "{}", release);
         let conn = Connection::open(&old).unwrap();
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM tasks WHERE id = ?",
-                [&new_id],
-                |row| row.get(0),
-            )
+        let due: Option<String> = conn
+            .query_row("SELECT due_at FROM tasks WHERE id = ?", [&new_id], |row| {
+                row.get(0)
+            })
             .unwrap();
-        assert_eq!(count, 1, "{}", release);
+        assert_eq!(due.as_deref(), Some("2026-10-09T18:00:00"), "{}", release);
     }
 }
 
@@ -220,18 +239,18 @@ fn upgrading_release_database_keeps_data() {
     }
 }
 
-/// “模拟 v2.1”：在 2.0.2 的库上多两个同步列，并把一条待办改得比本机新。
+/// “模拟更新的版本”：在 2.0.2 的库上多两个同步列，并把一条待办改得比本机新。
 fn future_db(path: &Path) {
     release_db(path, "2.0.5");
     let conn = Connection::open(path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE tasks ADD COLUMN due_at TEXT;
-         ALTER TABLE tasks ADD COLUMN color TEXT NOT NULL DEFAULT 'yellow';
-         ALTER TABLE recurring_tasks ADD COLUMN tags TEXT NOT NULL DEFAULT '';
-         UPDATE tasks SET due_at = '2026-10-10T18:00:00', color = 'blue',
+        "ALTER TABLE tasks ADD COLUMN location TEXT;
+         ALTER TABLE tasks ADD COLUMN accent TEXT NOT NULL DEFAULT 'yellow';
+         ALTER TABLE recurring_tasks ADD COLUMN category TEXT NOT NULL DEFAULT '';
+         UPDATE tasks SET location = '会议室 A', accent = 'blue',
                           updated_at = '2026-10-01T08:00:00'
           WHERE id = 'old-task-pending';
-         UPDATE recurring_tasks SET tags = '健康' WHERE id = 'old-rec-weekly';",
+         UPDATE recurring_tasks SET category = '健康' WHERE id = 'old-rec-weekly';",
     )
     .unwrap();
 }
@@ -250,16 +269,16 @@ fn future_columns_survive_a_round_trip_through_this_version() {
     let future = dir.path("future.db");
     future_db(&future);
 
-    // 1. 当前版本拉取 v2.1 的快照：新列补到本机并带上值。
+    // 1. 当前版本拉取更新版本 的快照：新列补到本机并带上值。
     let (current, _) = current_db(&dir.path("current.db"));
     merge_databases(&current.db_path(), &future).unwrap();
     assert_eq!(
         text(
             &current.db_path(),
-            "SELECT due_at || '|' || color FROM tasks WHERE id = 'old-task-pending'"
+            "SELECT location || '|' || accent FROM tasks WHERE id = 'old-task-pending'"
         )
         .as_deref(),
-        Some("2026-10-10T18:00:00|blue")
+        Some("会议室 A|blue")
     );
 
     // 2. 在当前版本修改这条待办（标题、提醒时间）与这条循环提醒（暂停）。
@@ -275,22 +294,22 @@ fn future_columns_survive_a_round_trip_through_this_version() {
     current.pause_recurring_task("old-rec-weekly").unwrap();
     assert_unknown_mode_untouched(&current);
 
-    // 3. v2.1 设备合并当前版本上传的快照：本机的修改胜出，新列的值仍在。
+    // 3. 更新版本的设备合并当前版本上传的快照：本机的修改胜出，新列的值仍在。
     let snapshot = export_local_snapshot_bytes(&current.db_path()).unwrap();
     merge_snapshot_bytes(&future, &snapshot).unwrap();
     assert_eq!(
         text(
             &future,
-            "SELECT description || '|' || reminder_time || '|' || due_at || '|' || color
+            "SELECT description || '|' || reminder_time || '|' || location || '|' || accent
                FROM tasks WHERE id = 'old-task-pending'"
         )
         .as_deref(),
-        Some("写周报（改）|2026-10-09T18:00:00|2026-10-10T18:00:00|blue")
+        Some("写周报（改）|2026-10-09T18:00:00|会议室 A|blue")
     );
     assert_eq!(
         text(
             &future,
-            "SELECT is_paused || '|' || tags FROM recurring_tasks WHERE id = 'old-rec-weekly'"
+            "SELECT is_paused || '|' || category FROM recurring_tasks WHERE id = 'old-rec-weekly'"
         )
         .as_deref(),
         Some("1|健康")
@@ -303,4 +322,86 @@ fn future_columns_survive_a_round_trip_through_this_version() {
         .as_deref(),
         Some("BIWEEKLY")
     );
+}
+
+#[test]
+fn v2_1_fields_survive_edits_from_2_0_devices() {
+    let dir = TempDir::new("v21");
+    let (current, _) = current_db(&dir.path("current.db"));
+    let old = dir.path("old.db");
+    release_db(&old, "2.0.5");
+    merge_databases(&current.db_path(), &old).unwrap();
+
+    // 本机（v2.1）给旧待办设置截止时间、便签颜色、排序，给循环提醒加标签。
+    current
+        .set_task_due("old-task-pending", Some("2026-10-09T18:00:00"))
+        .unwrap();
+    current
+        .set_sticky_note_color("old-task-pending", "blue")
+        .unwrap();
+    current
+        .set_task_sort_orders(&[("old-task-pending".to_string(), 1.5)])
+        .unwrap();
+    let mut weekly = current
+        .get_recurring_task("old-rec-weekly")
+        .unwrap()
+        .unwrap();
+    weekly.tags = vec!["健康".to_string()];
+    current.update_recurring_task(&weekly).unwrap();
+
+    // 2.0.x 设备随后修改了同一条待办与循环提醒（它的库没有这些列），并上传。
+    let conn = Connection::open(&old).unwrap();
+    conn.execute_batch(
+        "UPDATE tasks SET description = '写周报（旧设备改）', updated_at = '2999-01-01T00:00:00'
+          WHERE id = 'old-task-pending';
+         UPDATE recurring_tasks SET description = '健身（旧设备改）', updated_at = '2999-01-01T00:00:00'
+          WHERE id = 'old-rec-weekly';",
+    )
+    .unwrap();
+    drop(conn);
+    merge_databases(&current.db_path(), &old).unwrap();
+
+    let task = current.get_task("old-task-pending").unwrap().unwrap();
+    assert_eq!(task.description, "写周报（旧设备改）");
+    assert_eq!(task.due_at.as_deref(), Some("2026-10-09T18:00:00"));
+    assert_eq!(task.sticky_color, "blue");
+    assert_eq!(task.sort_order, Some(1.5));
+    let weekly = current
+        .get_recurring_task("old-rec-weekly")
+        .unwrap()
+        .unwrap();
+    assert_eq!(weekly.description, "健身（旧设备改）");
+    assert_eq!(weekly.tags, vec!["健康"]);
+}
+
+#[test]
+fn pre_2_0_device_edits_keep_tags_and_priority() {
+    // 1.x 的库没有 tags / priority 列（V2.0.0 加入）。
+    let dir = TempDir::new("pre20");
+    let old = dir.path("old.db");
+    {
+        let conn = Connection::open(&old).unwrap();
+        create_schema_up_to(&conn, "1.6.0").unwrap();
+        conn.execute(
+            "INSERT INTO tasks (id, description, type, status, created_at, updated_at)
+             VALUES ('shared', '旧设备改过', 'ONE_TIME', 'PENDING', '2026-01-01T00:00:00', '2999-01-01T00:00:00')",
+            [],
+        )
+        .unwrap();
+    }
+    let (current, _) = current_db(&dir.path("current.db"));
+    let conn = Connection::open(current.db_path()).unwrap();
+    conn.execute(
+        "INSERT INTO tasks (id, description, type, status, created_at, updated_at, tags, priority)
+         VALUES ('shared', '本机', 'ONE_TIME', 'PENDING', '2026-01-01T00:00:00', '2026-02-01T00:00:00', '工作', 3)",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    merge_databases(&current.db_path(), &old).unwrap();
+    let task = current.get_task("shared").unwrap().unwrap();
+    assert_eq!(task.description, "旧设备改过");
+    assert_eq!(task.tags, vec!["工作"]);
+    assert_eq!(task.priority, 3);
 }

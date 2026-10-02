@@ -155,6 +155,10 @@ string_enum! {
         Cron => "CRON",
         /// 中国法定工作日：跳过法定节假日，调休上班日照常提醒。
         Workday => "WORKDAY",
+        /// 每月最后一天（v2.1）。
+        MonthlyLastDay => "MONTHLY_LAST_DAY",
+        /// 每月最后一个法定工作日（v2.1）。
+        MonthlyLastWorkday => "MONTHLY_LAST_WORKDAY",
     }
 }
 

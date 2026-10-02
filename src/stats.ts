@@ -161,3 +161,9 @@ export const computeStats = (input: {
     habits,
   };
 };
+
+/** 习惯打卡按循环提醒的标签筛选（v2.1）；tag 为空时不筛选，不区分大小写。 */
+export const filterHabitsByTag = (habits: HabitStreak[], tag: string) => {
+  const value = tag.trim().toLowerCase();
+  return value ? habits.filter(habit => (habit.task.tags ?? []).some(item => item.toLowerCase() === value)) : habits;
+};

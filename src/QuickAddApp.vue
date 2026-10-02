@@ -143,6 +143,9 @@ const reminderSummary = computed(() => {
     if (parsed.value.recurring) {
       return `识别为循环提醒：${describeParsedSchedule(parsed.value)}`;
     }
+    if (parsed.value.dueTime) {
+      return `识别：${describeParsedSchedule(parsed.value)}${metaSummary.value}`;
+    }
     if (parsed.value.reminderTime) {
       return `识别：${describeParsedSchedule(parsed.value)} 提醒${metaSummary.value}`;
     }
@@ -191,7 +194,7 @@ const submitRecurring = async (title: string) => {
   if (!draft) {
     return;
   }
-  const payload = { ...draft, description: title };
+  const payload = { ...draft, description: title, tags: parsed.value.tags };
   const invalid = validateRecurringDraft(payload);
   if (invalid) {
     errorMessage.value = invalid;
@@ -223,7 +226,12 @@ const submit = async () => {
     await submitRecurring(text);
     return;
   }
-  const target = resolveReminder();
+  let target = resolveReminder();
+  // 识别出截止时间时一并保存；提前量算出的提醒时间已过时只记截止时间、不提醒。
+  const due = selectedKey.value === "none" ? parsed.value.dueTime : null;
+  if (due && target && target.getTime() <= Date.now() && due.getTime() > Date.now()) {
+    target = null;
+  }
   if (selectedKey.value !== "none" && !target) {
     errorMessage.value = "请选择有效的提醒时间";
     return;
@@ -239,7 +247,8 @@ const submit = async () => {
       description: text,
       reminderTime: target ? `${formatLocal(target)}:00` : null,
       tags: parsed.value.tags,
-      priority: parsed.value.priority
+      priority: parsed.value.priority,
+      dueAt: due ? `${formatLocal(due)}:00` : null
     });
     savedMessage.value = target ? `已添加，${formatDisplay(target)} 提醒` : "已添加";
     description.value = "";

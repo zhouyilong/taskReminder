@@ -387,6 +387,9 @@ mod tests {
             sticky_content: None,
             tags: Vec::new(),
             priority: 0,
+            due_at: None,
+            sticky_color: String::new(),
+            sort_order: None,
         }
     }
 
@@ -413,6 +416,7 @@ mod tests {
             schedule_weekdays: None,
             schedule_day: None,
             cron_expression: None,
+            tags: Vec::new(),
         }
     }
 

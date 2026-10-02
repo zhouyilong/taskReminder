@@ -8,6 +8,7 @@
         <label>
           <input type="checkbox" v-model="settingsDraft.soundEnabled" /> 提示音
         </label>
+        <button type="button" class="button secondary" title="播放提醒弹窗的提示音" @click="playChime">试听</button>
         <label title="全屏程序或游戏中也能看到提醒；勿扰时段内不发送">
           <input type="checkbox" v-model="settingsDraft.nativeNotificationEnabled" /> 同时发送系统通知
         </label>
@@ -112,6 +113,17 @@
         <label>整体透明度</label>
         <input class="settings-range" type="range" min="0.3" max="1" step="0.05" v-model.number="windowOpacity" style="flex: 1" />
         <span class="tag">{{ windowOpacityPercent }}%</span>
+      </div>
+    </div>
+    <div class="modal-section">
+      <div class="form-row compact shortcut-help-row">
+        <label>主窗口快捷键</label>
+        <dl class="shortcut-help">
+          <template v-for="item in SHORTCUT_HELP" :key="item.keys">
+            <dt><kbd>{{ item.keys }}</kbd></dt>
+            <dd>{{ item.label }}</dd>
+          </template>
+        </dl>
       </div>
     </div>
     <div class="modal-section">
@@ -231,6 +243,8 @@ import { useAppData } from "../composables/useAppData";
 import { useSettings } from "../composables/useSettings";
 import { useUiPrefs } from "../composables/useUiPrefs";
 import { useUpdater } from "../composables/useUpdater";
+import { playChime } from "../notificationSound";
+import { SHORTCUT_HELP } from "../keyboard";
 
 const props = defineProps<{ appVersion: string }>();
 
@@ -344,3 +358,32 @@ const saveSettings = async () => {
   await refreshSyncStatus();
 };
 </script>
+
+<style scoped>
+.shortcut-help-row {
+  align-items: flex-start;
+}
+
+.shortcut-help {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.shortcut-help dd {
+  margin: 0;
+}
+
+.shortcut-help kbd {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-base);
+  background: var(--bg-surface);
+}
+</style>

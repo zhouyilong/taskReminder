@@ -2,7 +2,15 @@ export type TaskStatus = "PENDING" | "COMPLETED";
 export type TaskType = "ONE_TIME" | "RECURRING";
 export type ReminderType = "TASK" | "RECURRING";
 export type UserAction = "DISMISSED" | "SNOOZED" | "COMPLETED" | "PENDING";
-export type RecurringMode = "INTERVAL_RANGE" | "DAILY" | "WORKDAY" | "WEEKLY" | "MONTHLY" | "CRON";
+export type RecurringMode =
+  | "INTERVAL_RANGE"
+  | "DAILY"
+  | "WORKDAY"
+  | "WEEKLY"
+  | "MONTHLY"
+  | "MONTHLY_LAST_DAY"
+  | "MONTHLY_LAST_WORKDAY"
+  | "CRON";
 
 export interface Task {
   id: string;
@@ -19,6 +27,12 @@ export interface Task {
   tags?: string[];
   /** 优先级：0 无、1 低、2 中、3 高。 */
   priority?: number;
+  /** 截止时间（v2.1）；提醒时间仍是 reminderTime（= 截止时间 - 提前量）。 */
+  dueAt?: string | null;
+  /** 便签颜色（v2.1），空为默认颜色。 */
+  stickyColor?: string;
+  /** 手动排序位置（v2.1），越小越靠前。 */
+  sortOrder?: number | null;
 }
 
 export interface RecurringTask {
@@ -44,6 +58,8 @@ export interface RecurringTask {
   scheduleWeekdays?: number | null;
   scheduleDay?: number | null;
   cronExpression?: string | null;
+  /** 标签（v2.1），与待办相同的规范化。 */
+  tags?: string[];
 }
 
 export interface ReminderRecord {
@@ -72,6 +88,8 @@ export interface StickyNote {
   createdAt: string;
   updatedAt: string;
   reminderTime?: string | null;
+  /** 便签颜色（v2.1），空为默认颜色。 */
+  color?: string;
 }
 
 /** 便签管理列表的一行：便签加上窗口此刻是否可见。 */
@@ -147,6 +165,8 @@ export interface NotificationPayload {
   snoozeMinutes: number;
   /** 原定触发时间；明显早于弹出时间时视为“错过的提醒”。 */
   scheduledTime?: string | null;
+  /** 弹出时是否播放提示音（入队时按设置决定，勿扰期间为 false）。 */
+  sound?: boolean;
 }
 
 export interface TrashPayload {
@@ -184,3 +204,11 @@ export interface BackupListPayload {
   dir: string;
   backups: BackupInfo[];
 }
+
+/** 待办批量操作（与后端 `TaskBatchPayload` 对应）。 */
+export type TaskBatchPayload =
+  | { action: "complete" }
+  | { action: "delete" }
+  | { action: "addTags"; tags: string[] }
+  | { action: "setPriority"; priority: number }
+  | { action: "setReminder"; reminderTime: string | null };

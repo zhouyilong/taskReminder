@@ -201,3 +201,25 @@ describe("周视图", () => {
     expect(moveReminderToSlot("2026-09-27T09:30", day, 0)).toBe("2026-10-02T00:30:00");
   });
 });
+
+describe("due time placement (v2.1)", () => {
+  it("places tasks on their due day and judges overdue by due time", () => {
+    const buckets = bucketCalendarItems({
+      now: NOW,
+      startKey: "2026-09-01",
+      endKey: "2026-09-30",
+      tasks: [
+        // 提醒在 26 日（已过），截止在 28 日：放在 28 日，尚未逾期。
+        task("due-later", { reminderTime: "2026-09-26T18:00:00", dueAt: "2026-09-28T18:00:00" }),
+        task("due-past", { dueAt: "2026-09-25T09:00:00" }),
+      ],
+      completedTasks: [],
+      recurringTasks: [],
+      records: [],
+      previews: [],
+    });
+    expect(buckets.get("2026-09-26")).toBeUndefined();
+    expect(buckets.get("2026-09-28")?.map(item => [item.key, item.state])).toEqual([["task-due-later", "upcoming"]]);
+    expect(buckets.get("2026-09-25")?.map(item => item.state)).toEqual(["overdue"]);
+  });
+});

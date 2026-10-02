@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  TaskBatchPayload,
   Task,
   RecurringTask,
   RecurringMode,
@@ -36,6 +37,8 @@ export const api = {
     tags?: string[];
     priority?: number;
     reminderTime?: string | null;
+    /** 截止时间（v2.1）。 */
+    dueAt?: string | null;
   }): Promise<Task> {
     return invoke("create_task", { payload });
   },
@@ -47,6 +50,8 @@ export const api = {
     /** 省略时保留原有标签与优先级。 */
     tags?: string[];
     priority?: number;
+    /** 截止时间：省略时保留，null 清除。 */
+    dueAt?: string | null;
   }): Promise<void> {
     return invoke("update_task", { task });
   },
@@ -55,6 +60,18 @@ export const api = {
   },
   async uncompleteTask(id: string): Promise<void> {
     return invoke("uncomplete_task", { id });
+  },
+  /** 批量操作待办，返回实际改动的条数。 */
+  async batchUpdateTasks(ids: string[], payload: TaskBatchPayload): Promise<number> {
+    return invoke("batch_update_tasks", { ids, payload });
+  },
+  /** 设置便签颜色（空字符串为默认颜色）。 */
+  async setStickyNoteColor(taskId: string, color: string): Promise<void> {
+    return invoke("set_sticky_note_color", { taskId, color });
+  },
+  /** 拖拽排序：写入手动排序位置。 */
+  async setTaskOrder(orders: Array<{ id: string; sortOrder: number }>): Promise<number> {
+    return invoke("set_task_order", { orders });
   },
   async deleteTask(id: string): Promise<void> {
     return invoke("delete_task", { id });
@@ -81,6 +98,10 @@ export const api = {
   },
   async resumeRecurringTask(id: string): Promise<void> {
     return invoke("resume_recurring_task", { id });
+  },
+  /** 跳过本次：返回改好下次触发时间的循环提醒。 */
+  async skipRecurringOccurrence(id: string): Promise<RecurringTask> {
+    return invoke("skip_recurring_occurrence", { id });
   },
   async deleteRecurringTask(id: string): Promise<void> {
     return invoke("delete_recurring_task", { id });
@@ -250,6 +271,7 @@ export const api = {
     reminderTime?: string | null;
     tags?: string[];
     priority?: number;
+    dueAt?: string | null;
   }): Promise<Task> {
     return invoke("quick_add_task", { payload });
   },

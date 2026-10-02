@@ -7,7 +7,7 @@
     <div class="form-card">
       <div class="form-row compact">
         <label class="field-label">描述</label>
-        <input class="input" v-model="newRecurring.description" placeholder="输入提醒描述" style="flex: 1" />
+        <input data-shortcut="new" class="input" v-model="newRecurring.description" placeholder="输入提醒描述" style="flex: 1" />
         <label class="field-label">模式</label>
         <select class="select" v-model="newRecurring.mode" style="width: 140px">
           <option v-for="mode in recurringModeOptions" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
@@ -17,6 +17,17 @@
       <div class="form-row compact">
         <RecurringFields :draft="newRecurring" />
       </div>
+      <div class="form-row compact">
+        <label class="field-label">标签</label>
+        <TagInput v-model="newRecurring.tags" :suggestions="tagSuggestions" />
+      </div>
+    </div>
+    <div v-if="recurringTagOptions.length" class="task-toolbar">
+      <select class="select" v-model="tagFilter" title="按标签筛选">
+        <option value="">全部标签</option>
+        <option v-for="item in recurringTagOptions" :key="item.tag" :value="item.tag">#{{ item.tag }}（{{ item.count }}）</option>
+      </select>
+      <span v-if="tagFilter" class="section-meta">筛选后 {{ visibleRecurring.length }} / {{ recurringTasks.length }} 条</span>
     </div>
     <div class="table-card">
       <div class="table-scroll">
@@ -38,7 +49,12 @@
               @dblclick="openRecurringEditor(task)"
               @contextmenu.prevent.stop="openRecurringMenu($event, task)"
             >
-              <td class="col-desc cell-title" :title="task.description">{{ task.description }}</td>
+              <td class="col-desc cell-title" :title="task.description">
+                <div class="task-title-cell">
+                  <span class="task-title-text">{{ task.description }}</span>
+                  <TaskBadges :task="task" clickable :active-tag="tagFilter" @select-tag="toggleTagFilter" />
+                </div>
+              </td>
               <td class="col-mode" :title="formatRecurringMode(task.repeatMode)">
                 <span class="chip">{{ formatRecurringMode(task.repeatMode) }}</span>
               </td>
@@ -67,15 +83,18 @@
           </tbody>
         </table>
       </div>
-      <Pagination :total="recurringTasks.length" :total-pages="recurringTotalPages" v-model:page-index="recurringPageIndex" v-model:page-size="recurringPageSize" />
+      <Pagination :total="visibleRecurring.length" :total-pages="recurringTotalPages" v-model:page-index="recurringPageIndex" v-model:page-size="recurringPageSize" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import Pagination from "../components/Pagination.vue";
 import RecurringFields from "../components/RecurringFields.vue";
+import TagInput from "../components/TagInput.vue";
+import TaskBadges from "../components/TaskBadges.vue";
+import { collectTags } from "../tasks";
 import { api } from "../api";
 import { formatDateTime } from "../format";
 import {
@@ -92,14 +111,35 @@ import { useAppData } from "../composables/useAppData";
 import { useItemActions } from "../composables/useItemActions";
 import { usePagination } from "../composables/usePagination";
 
-const { recurringTasks, holidayYears, refreshAll } = useAppData();
+const { tasks, completedTasks, recurringTasks, holidayYears, refreshAll } = useAppData();
+
+// 标签（v2.1）：筛选与新建时的建议（同时包含待办的标签）。
+const tagFilter = ref("");
+const recurringTagOptions = computed(() => collectTags(recurringTasks.value));
+const tagSuggestions = computed(() =>
+  collectTags([...recurringTasks.value, ...tasks.value, ...completedTasks.value]).map(item => item.tag)
+);
+const visibleRecurring = computed(() => {
+  const tag = tagFilter.value.toLowerCase();
+  return tag
+    ? recurringTasks.value.filter(task => (task.tags ?? []).some(item => item.toLowerCase() === tag))
+    : recurringTasks.value;
+});
+const toggleTagFilter = (tag: string) => {
+  tagFilter.value = tagFilter.value.toLowerCase() === tag.toLowerCase() ? "" : tag;
+};
+watch(recurringTagOptions, list => {
+  if (tagFilter.value && !list.some(item => item.tag.toLowerCase() === tagFilter.value.toLowerCase())) {
+    tagFilter.value = "";
+  }
+});
 const { openRecurringMenu, openRecurringEditor } = useItemActions();
 const {
   pageIndex: recurringPageIndex,
   pageSize: recurringPageSize,
   totalPages: recurringTotalPages,
   page: recurringPage
-} = usePagination(recurringTasks);
+} = usePagination(visibleRecurring, tagFilter);
 
 const newRecurring = reactive(createRecurringDraft());
 

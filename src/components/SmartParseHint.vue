@@ -10,9 +10,9 @@
         </svg>
         {{ scheduleText }}
       </span>
-      <TaskBadges :task="{ tags: parsed.recurring ? [] : parsed.tags, priority: parsed.recurring ? 0 : parsed.priority }" />
-      <span v-if="parsed.recurring && (parsed.tags.length || parsed.priority || hasNote)" class="composer-parse-hint">
-        循环提醒不保存标签、优先级与描述
+      <TaskBadges :task="{ tags: parsed.tags, priority: parsed.recurring ? 0 : parsed.priority }" />
+      <span v-if="parsed.recurring && (parsed.priority || hasNote)" class="composer-parse-hint">
+        循环提醒不保存优先级与描述
       </span>
     </template>
     <span v-else-if="!enabled" class="composer-parse-hint">已关闭识别，按原文添加</span>

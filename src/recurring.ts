@@ -1,4 +1,5 @@
 // 循环提醒的规则展示、表单草稿、校验与提交载荷，新建与编辑共用。
+import { normalizeTags } from "./tasks";
 import type { RecurringMode, RecurringTask } from "./types";
 import {
   WEEKDAY_MASK_ALL,
@@ -14,6 +15,8 @@ export const recurringModeOptions: { value: RecurringMode; label: string }[] = [
   { value: "WORKDAY", label: "法定工作日" },
   { value: "WEEKLY", label: "每周固定时间" },
   { value: "MONTHLY", label: "每月固定时间" },
+  { value: "MONTHLY_LAST_DAY", label: "每月最后一天" },
+  { value: "MONTHLY_LAST_WORKDAY", label: "每月最后一个工作日" },
   { value: "CRON", label: "Cron 表达式" },
 ];
 
@@ -23,6 +26,10 @@ export const recurringModeOptions: { value: RecurringMode; label: string }[] = [
  */
 export const isSupportedRecurringMode = (mode?: string | null) =>
   recurringModeOptions.some(item => item.value === mode);
+
+/** 能否“跳过本次”：运行中、本机认识的模式，且有下次触发时间。 */
+export const canSkipRecurring = (task: Pick<RecurringTask, "isPaused" | "repeatMode" | "nextTrigger">) =>
+  !task.isPaused && isSupportedRecurringMode(task.repeatMode) && Boolean(task.nextTrigger);
 
 export const formatRecurringMode = (mode?: RecurringMode | string | null) => {
   // 空值按区间间隔（旧数据的默认值）；其他不认识的模式不能冒充区间间隔。
@@ -43,6 +50,10 @@ export const formatRecurringRule = (task: RecurringTask) => {
       return `法定工作日 ${task.scheduleTime || "-"}`;
     case "MONTHLY":
       return `每月 ${task.scheduleDay || "-"} 日 ${task.scheduleTime || "-"}`;
+    case "MONTHLY_LAST_DAY":
+      return `每月最后一天 ${task.scheduleTime || "-"}`;
+    case "MONTHLY_LAST_WORKDAY":
+      return `每月最后一个工作日 ${task.scheduleTime || "-"}`;
     case "CRON":
       return task.cronExpression || "-";
     case "INTERVAL_RANGE": {
@@ -54,6 +65,9 @@ export const formatRecurringRule = (task: RecurringTask) => {
       return `不支持的循环模式（${task.repeatMode}），请升级应用`;
   }
 };
+
+/** 依赖法定节假日数据的模式（法定工作日、每月最后一个工作日）。 */
+export const dependsOnHolidays = (mode?: string | null) => mode === "WORKDAY" || mode === "MONTHLY_LAST_WORKDAY";
 
 /** 节假日数据覆盖的年份范围，如“2025–2027 年”；为空时返回“暂无”。 */
 export const formatYearRange = (years: number[]) => {
@@ -70,6 +84,11 @@ export const formatWorkdayHint = (years: number[]) => {
     ? `已有 ${formatYearRange(years)}安排，其他年份按周一至周五`
     : "暂无节假日数据，按周一至周五";
   return `跳过法定节假日，调休上班日照常提醒（${coverage}）`;
+};
+
+export const formatMonthEndWorkdayHint = (years: number[]) => {
+  const coverage = years.length ? `已有 ${formatYearRange(years)}安排` : "暂无节假日数据，按周一至周五";
+  return `月末遇周末或法定节假日时提前到之前最近的工作日（${coverage}）`;
 };
 
 /** 法定工作日提醒提前多少天提示节假日数据缺失。 */
@@ -105,7 +124,7 @@ export const workdayHolidayWarning = (
   years: number[],
   now = new Date()
 ): string | null => {
-  if (task.repeatMode !== "WORKDAY" || task.isPaused) {
+  if (!dependsOnHolidays(task.repeatMode) || task.isPaused) {
     return null;
   }
   const next = task.nextTrigger ? new Date(task.nextTrigger) : now;
@@ -130,6 +149,8 @@ export interface RecurringDraft {
   scheduleWeekdays: number;
   scheduleDay: number;
   cronExpression: string;
+  /** 标签（v2.1）。 */
+  tags: string[];
 }
 
 export const createRecurringDraft = (): RecurringDraft => ({
@@ -142,6 +163,7 @@ export const createRecurringDraft = (): RecurringDraft => ({
   scheduleWeekdays: WEEKDAY_MASK_WORKDAYS,
   scheduleDay: 1,
   cronExpression: "0 9 * * *",
+  tags: [],
 });
 
 export const draftFromRecurringTask = (task: RecurringTask): RecurringDraft => ({
@@ -155,6 +177,7 @@ export const draftFromRecurringTask = (task: RecurringTask): RecurringDraft => (
     resolveWeekdayMask(task.scheduleWeekdays, task.scheduleWeekday) || WEEKDAY_MASK_WORKDAYS,
   scheduleDay: task.scheduleDay ?? 1,
   cronExpression: task.cronExpression ?? "",
+  tags: [...(task.tags ?? [])],
 });
 
 /** 返回错误提示；通过校验时返回 null。 */
@@ -180,6 +203,9 @@ export const validateRecurringDraft = (draft: RecurringDraft): string | null => 
       return null;
     case "WORKDAY":
       return draft.scheduleTime ? null : "工作日模式需要选择触发时间";
+    case "MONTHLY_LAST_DAY":
+    case "MONTHLY_LAST_WORKDAY":
+      return draft.scheduleTime ? null : "每月最后一天模式需要选择触发时间";
     case "MONTHLY":
       if (!draft.scheduleTime) {
         return "每月模式需要选择触发时间";
@@ -207,6 +233,7 @@ export const buildRecurringPayload = (draft: RecurringDraft) => {
     scheduleWeekdays: null as number | null,
     scheduleDay: null as number | null,
     cronExpression: null as string | null,
+    tags: normalizeTags(draft.tags ?? []),
   };
   switch (draft.mode) {
     case "INTERVAL_RANGE":
@@ -215,6 +242,8 @@ export const buildRecurringPayload = (draft: RecurringDraft) => {
       break;
     case "DAILY":
     case "WORKDAY":
+    case "MONTHLY_LAST_DAY":
+    case "MONTHLY_LAST_WORKDAY":
       payload.scheduleTime = draft.scheduleTime || null;
       break;
     case "WEEKLY":

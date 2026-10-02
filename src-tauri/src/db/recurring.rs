@@ -9,7 +9,7 @@ impl DbManager {
             "SELECT id, description, type, status, created_at, completed_at,
                     interval_minutes, last_triggered, next_trigger, is_paused, start_time, end_time,
                     repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
-                    updated_at, deleted_at, schedule_weekdays
+                    updated_at, deleted_at, schedule_weekdays, tags
              FROM recurring_tasks
              WHERE deleted_at IS NULL
              ORDER BY created_at ASC",
@@ -24,7 +24,7 @@ impl DbManager {
             "SELECT id, description, type, status, created_at, completed_at,
                     interval_minutes, last_triggered, next_trigger, is_paused, start_time, end_time,
                     repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
-                    updated_at, deleted_at, schedule_weekdays
+                    updated_at, deleted_at, schedule_weekdays, tags
              FROM recurring_tasks WHERE id = ?",
         )?;
         let task = stmt.query_row([task_id], recurring_from_row).optional()?;
@@ -40,10 +40,10 @@ impl DbManager {
                 id, description, type, status, created_at, completed_at, interval_minutes,
                 last_triggered, next_trigger, is_paused, start_time, end_time,
                 repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
-                updated_at, deleted_at, schedule_weekdays
+                updated_at, deleted_at, schedule_weekdays, tags
             )
              VALUES (?, ?, 'RECURRING', 'PENDING', ?, NULL, ?, NULL, ?, 0, ?, ?,
-                     ?, ?, ?, ?, ?, ?, NULL, ?)",
+                     ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
             params![
                 id,
                 task.description.as_str(),
@@ -58,7 +58,8 @@ impl DbManager {
                 task.schedule_day,
                 task.cron_expression.as_deref(),
                 now,
-                task.schedule_weekdays
+                task.schedule_weekdays,
+                tags_to_db(&task.tags)
             ],
         )?;
         Ok(RecurringTask {
@@ -83,6 +84,7 @@ impl DbManager {
             schedule_weekdays: task.schedule_weekdays,
             schedule_day: task.schedule_day,
             cron_expression: task.cron_expression.clone(),
+            tags: crate::models::normalize_tags(&task.tags),
         })
     }
 
@@ -93,7 +95,7 @@ impl DbManager {
             "UPDATE recurring_tasks
              SET description = ?, interval_minutes = ?, start_time = ?, end_time = ?,
                  repeat_mode = ?, schedule_time = ?, schedule_weekday = ?, schedule_weekdays = ?,
-                 schedule_day = ?, cron_expression = ?,
+                 schedule_day = ?, cron_expression = ?, tags = ?,
                  is_paused = ?, next_trigger = ?, last_triggered = ?, updated_at = ?
              WHERE id = ?",
             params![
@@ -107,6 +109,7 @@ impl DbManager {
                 task.schedule_weekdays,
                 task.schedule_day,
                 task.cron_expression.as_deref(),
+                tags_to_db(&task.tags),
                 if task.is_paused { 1 } else { 0 },
                 task.next_trigger.as_str(),
                 task.last_triggered.as_deref(),
@@ -146,7 +149,7 @@ impl DbManager {
             "SELECT id, description, type, status, created_at, completed_at,
                     interval_minutes, last_triggered, next_trigger, is_paused, start_time, end_time,
                     repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
-                    updated_at, deleted_at, schedule_weekdays
+                    updated_at, deleted_at, schedule_weekdays, tags
              FROM recurring_tasks
              WHERE deleted_at IS NOT NULL AND deleted_at >= ?
              ORDER BY deleted_at DESC",
@@ -196,5 +199,6 @@ pub(super) fn recurring_from_row(
         cron_expression: row.get(16)?,
         updated_at: row.get(17)?,
         deleted_at: row.get(18)?,
+        tags: tags_from_db(row.get::<_, Option<String>>(20)?),
     })
 }

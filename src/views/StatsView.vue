@@ -154,8 +154,12 @@
               <div class="stats-card-title">习惯打卡</div>
               <div class="stats-card-subtitle">循环提醒被完成或关闭即算打卡，推迟或未处理会中断连续天数</div>
             </div>
+            <select v-if="habitTagOptions.length" class="select habit-tag-filter" v-model="habitTag" title="按标签筛选">
+              <option value="">全部标签</option>
+              <option v-for="item in habitTagOptions" :key="item.tag" :value="item.tag">#{{ item.tag }}</option>
+            </select>
           </header>
-          <table v-if="stats.habits.length" class="table habit-table">
+          <table v-if="habits.length" class="table habit-table">
             <thead>
               <tr>
                 <th>循环提醒</th>
@@ -165,7 +169,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="habit in stats.habits" :key="habit.task.id">
+              <tr v-for="habit in habits" :key="habit.task.id">
                 <td class="cell-title" :title="habit.task.description">{{ habit.task.description }}</td>
                 <td class="is-number">
                   <span class="streak" :class="{ 'is-active': habit.current > 0 }">{{ habit.current }} 天</span>
@@ -175,7 +179,7 @@
               </tr>
             </tbody>
           </table>
-          <div v-else class="stats-empty">这段时间没有循环提醒的记录</div>
+          <div v-else class="stats-empty">{{ habitTag ? "这个标签下没有循环提醒的记录" : "这段时间没有循环提醒的记录" }}</div>
         </section>
       </div>
     </div>
@@ -185,7 +189,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { recordDescription } from "../format";
-import { computeStats, type DailyBucket } from "../stats";
+import { computeStats, filterHabitsByTag, type DailyBucket } from "../stats";
+import { collectTags } from "../tasks";
 import type { UserAction } from "../types";
 import { useAppData } from "../composables/useAppData";
 import { useNow } from "../composables/useNow";
@@ -218,6 +223,10 @@ const hovered = ref<number | null>(null);
 watch(rangeDays, days => {
   safeStorage.setItem("statsRangeDays", String(days));
 });
+
+const habitTag = ref("");
+const habitTagOptions = computed(() => collectTags(recurringTasks.value));
+const habits = computed(() => filterHabitsByTag(stats.value.habits, habitTag.value));
 
 const stats = computed(() =>
   computeStats({
@@ -284,3 +293,10 @@ const columnLabel = (day: DailyBucket) =>
   `${formatDayLabel(day.date)}：共 ${day.total} 次，` +
   SERIES.map(series => `${series.label} ${day.counts[series.action]}`).join("，");
 </script>
+
+<style scoped>
+.habit-tag-filter {
+  height: 32px;
+  min-width: 112px;
+}
+</style>

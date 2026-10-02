@@ -19,6 +19,7 @@
   - `WeekdayPicker.vue`：每周多天选择（位掩码 `v-model`，含工作日/周末/每天预设）。
   - `TaskBadges.vue`（优先级与标签徽标）、`TagInput.vue`（标签输入）、`PriorityPicker.vue`（优先级分段选择）、`SmartParseHint.vue`（自然语言识别结果提示）。
   - `DataModal.vue`：导入导出与本地备份（从设置打开）。
+  - `TaskBatchBar.vue`：待办多选后的批量操作栏（完成、删除、加标签、优先级、改提醒时间）。
 - `src/api.ts` 封装所有 Tauri `invoke` 命令；`src/types.ts` 为前后端共享的数据类型。
 - `src/markdown.ts` Markdown 转纯文本/预览文本工具（列表描述、提醒记录去掉前导列表标记）。
 - `src/format.ts` 主窗口共用的时间与文案格式化；`src/recurring.ts` 循环规则展示、表单草稿、校验与提交载荷。
@@ -27,9 +28,10 @@
 - `src/safeStorage.ts` 带异常保护的 `localStorage` 封装；`src/startupError.ts` 启动失败时渲染错误页。
 - `src/styles.css` 为三个窗口共用的全局样式表（设计令牌、主窗口、提醒弹窗、便签）；组件私有样式放在 `.vue` 文件内。
 - `src/update.ts` 自动更新逻辑模块（检查更新、安装更新、偏好管理）。
+- `src/due.ts`（截止时间与提前提醒、`taskAnchorTime`、拖动改期时平移提醒）、`src/reorder.ts`（拖拽排序的位置计算）、`src/selection.ts`（列表多选）、`src/keyboard.ts`（主窗口快捷键映射）、`src/modalStack.ts`（Esc 关闭最上层弹窗）、`src/notificationSound.ts`（提醒弹窗提示音）为纯函数或小工具，测试在同名 `*.spec.ts`。
 - `src/weekdays.ts` 每周位掩码工具（与后端一致：周一 = bit0 … 周日 = bit6）；`src/shortcut.ts` 全局快捷键录制与展示。
 - `src-tauri/` 存放 Tauri 应用的 Rust 后端。
-  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（插件、命令注册与启动流程）、`commands/`（前端 `invoke` 的命令，按业务分为 `tasks`、`recurring`、`notification`、`trash`、`settings`、`sticky`、`system`、`data`，公共的 `ApiResult` / `into_api` 在 `commands/mod.rs`）、`windows/`（窗口事件；`windows/sticky.rs` 为便签窗口的标签编码、创建显示、层级与 UI 状态注入，以及 Windows 上的贴边吸附；`windows/placement.rs` 为便签位置的纯几何计算：越界校正、吸附）、`db/`（SQLite 读写：`mod.rs` 为连接池、初始化与凭据库，业务表按 `tasks`、`recurring`、`records`、`sticky`、`settings`、`tombstones`、`import`、`migrations` 拆分，测试在 `db/tests.rs`）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync.rs`（WebDAV 同步）、`sync_schema.rs`（参与同步的表与列的唯一定义、合并时保留不认识的列）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（时间的唯一入口：`now()`、数据库时间格式与各固定格式的解析与格式化）、`holidays.rs`（中国法定节假日与调休：内置数据、在线更新缓存与用户覆盖文件的合并与校验）、`holiday_update.rs`（每天从仓库拉取节假日数据）、`quick_add.rs`（快速添加窗口）、`shortcuts.rs`（全局快捷键统一注册：快速添加、显示/隐藏全部便签）、`quiet_hours.rs`（勿扰时段判断）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单与提示：下一条提醒、完成/推迟、显示/隐藏全部便签）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`kinds.rs`（状态、类型、处理结果、循环模式的强类型枚举，未知值原样保留）、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
+  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（插件、命令注册与启动流程）、`commands/`（前端 `invoke` 的命令，按业务分为 `tasks`、`recurring`、`notification`、`trash`、`settings`、`sticky`、`system`、`data`，公共的 `ApiResult` / `into_api` 在 `commands/mod.rs`）、`windows/`（窗口事件；`windows/sticky.rs` 为便签窗口的标签编码、创建显示、层级与 UI 状态注入，以及 Windows 上的贴边吸附；`windows/placement.rs` 为便签位置的纯几何计算：越界校正、吸附）、`db/`（SQLite 读写：`mod.rs` 为连接池、初始化与凭据库，业务表按 `tasks`、`recurring`、`records`、`sticky`、`settings`、`tombstones`、`import`、`migrations` 拆分，测试在 `db/tests.rs`）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync/`（WebDAV 同步：`service.rs` 调度与入口、`remote.rs` 同步主流程与加密、`merge.rs` 快照导出与按行合并、`webdav.rs` 客户端与同步锁，测试在 `sync/tests.rs`）、`sync_schema.rs`（参与同步的表与列的唯一定义、合并时保留不认识的列）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（时间的唯一入口：`now()`、数据库时间格式与各固定格式的解析与格式化）、`holidays.rs`（中国法定节假日与调休：内置数据、在线更新缓存与用户覆盖文件的合并与校验）、`holiday_update.rs`（每天从仓库拉取节假日数据）、`quick_add.rs`（快速添加窗口）、`shortcuts.rs`（全局快捷键统一注册：快速添加、显示/隐藏全部便签）、`quiet_hours.rs`（勿扰时段判断）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单与提示：下一条提醒、完成/推迟、显示/隐藏全部便签）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`kinds.rs`（状态、类型、处理结果、循环模式的强类型枚举，未知值原样保留）、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
   - `src-tauri/migrations/` 存放数据库迁移文件；新增迁移后需在 `db/migrations.rs` 的 `migration_scripts()` 中登记；新增同步列还要登记到 `sync_schema.rs` 的 `SYNC_TABLES`（测试会检查迁移结果与登记一致）。
   - `src-tauri/data/holidays-cn.json` 为内置法定节假日数据（`off` 放假日、`work` 调休上班日，支持 `[开始, 结束]` 区间），每年国务院发布次年安排后追加，并补充 `holidays.rs` 中的测试。
   - **该文件同时是在线更新的数据源**：客户端每天从 `main` 分支拉取（jsDelivr / GitHub raw），推送到 `main` 后已发布的应用即可获得新年份。客户端只采用内置数据没有的年份，且拒绝删减已下载年份的文件，因此**只能追加年份**；已发布年份的更正需随应用版本发布（内置数据优先）。CI 的 `holidays` 任务用 `scripts/check-holidays.mjs` 与基准版本比较：删除年份或日期一律失败；已有年份新增日期视为更正，需在提交信息或 PR 标题中加入 `holidays-correction`。
@@ -130,14 +132,27 @@
 - 回收站的“永久删除”（`purge_trash` → `expire_tombstones`）不能直接 `DELETE`：把 `deleted_at` 改为 `EXPIRED_TOMBSTONE_TIME` 并刷新 `updated_at`，让本地行在合并中胜出，再由清理物理删除（未开启同步时立即清理）。
 
 ### 同步列的前向兼容（2.0.3 起）
+- 合并前只给**本机库**补齐登记的同步列（`ensure_sync_columns`），**不要给远端快照补列**：补上的默认值会在远端行胜出时清空本机较新版本才有的字段。
 - 合并时参与同步的列 = `SYNC_TABLES` 中登记的列 ∪ 远端库中本版本不认识的列：`sync_schema::adopt_remote_columns` 把远端新增的列按其定义 `ALTER TABLE ADD COLUMN` 补到本机，值随合并保存、随上传带回。胜出的行只写它所在库实际拥有的列（`INSERT ... ON CONFLICT DO UPDATE`），远端来自不认识某列的旧版本时，该列保留本机的值。
 - **规则**：新增同步列必须可空或带字面量 `DEFAULT`（`NOT NULL` 无默认值的列旧版本补不上，会被跳过）；同步表中不要再加只在本机使用的列（放到 `settings` 或单独的表），已有的 `tasks.sticky_is_pinned` 登记在 `local_only`。
 - 迁移中的 `ALTER TABLE ... ADD COLUMN` 遇到已存在的列会跳过（`db/migrations.rs` 的 `adds_existing_column`），因为同步可能已经提前补上了这一列。
 - 本机写同步表时不要用 `INSERT OR REPLACE` / `REPLACE`（会把不认识的列清成默认值），用 `UPDATE` 或 `ON CONFLICT DO UPDATE` 只改自己认识的列。
 
+### 同步水位（2.0.4 起）
+- 每次成功上传后，`sync/watermark.rs` 在本机表 `sync_watermark`（上传前取的时间、远端身份 = 规范化的地址 + 远端目录）与 `sync_watermark_rows`（上传快照中每一行的 id）记下水位；这两张表是本机专用的，`export_local_snapshot` 会在上传的快照中清空。
+- 合并时只有**同一远端**且距水位超过墓碑保留期（60 天），才把“本机有、远端没有、id 在上次上传集合中、`updated_at` 不晚于水位”的行视为已在其他设备删除并清理，在本机物理删除。保留期内远端缺行（远端被重置或用旧备份覆盖）、更换远端、水位之后新建 / 导入 / 修改的行都不受影响。
+- **规则**：不要放宽这些条件；新增同步表时它会自动纳入（按 `SYNC_TABLES` 遍历）。
+
+### 截止时间、便签颜色与手动排序（v2.1）
+- 待办的提醒时间仍是 `reminder_time`（调度、托盘、稍后提醒都只看它）；`due_at` 是截止时间，提醒时间 = 截止时间 - 提前量，提前量不单独存储（`src/due.ts` 的 `leadOf` 反推）。只改时间的调用（稍后提醒、托盘推迟）不要传 `dueAt`，`update_task` 省略时保留、`null` 清除。
+- 列表、日历、今天时间线、按时间排序一律用 `taskAnchorTime`（截止时间优先，没有时用提醒时间）；日历拖动改期用 `moveTaskTimes`，保持提前量。
+- 便签颜色只接受 `models::STICKY_COLORS`（与 `src/stickies.ts` 的 `STICKY_COLOR_OPTIONS` 一致），不认识的值按默认显示、原样保存。颜色令牌 `--sticky-<颜色>-top/bottom/border/accent` 在 `:root` 与 `.light-theme` 中各一套，`.sticky-color-<颜色>` 映射到纸面令牌，放在样式表末尾。
+- `sort_order` 越小越靠前，空值排在后面；只在“手动顺序”下可拖动。
+
 ### 循环模式的兼容性
 - 每周多天存于 `schedule_weekdays` 位掩码，`schedule_weekday` 始终写入掩码中最早的一天，供旧版本读取；读取时掩码为空则回退到 `schedule_weekday`。
 - 状态与模式字段用 `kinds.rs` 的枚举（`TaskStatus`、`TaskType`、`ReminderKind`、`ReminderAction`、`RepeatMode`）；库中文本与 JSON 不变，**不认识的值原样保留**（`Unknown`），不要回退成已知值再写回。
+- v2.1 新增 `MONTHLY_LAST_DAY`、`MONTHLY_LAST_WORKDAY`；依赖节假日数据的模式（`WORKDAY`、`MONTHLY_LAST_WORKDAY`）在节假日数据更新后都会重新计算（`refreshed_workday_trigger`），前端用 `dependsOnHolidays` 判断是否提示“节假日待更新”。
 - 2.0.2 起不认识的循环模式本机不调度、不触发、不改写（`sanitize_recurring_task` 报错，调度器、巡检、托盘、预估都跳过），界面显示“需升级”且不能编辑。2.0.1 及更早的版本仍会把未知模式改成区间间隔并同步回来，新增循环模式时需在发布说明中提示多设备同时升级。
 
 ### 标签与优先级
@@ -168,7 +183,7 @@
 ### 同步端到端加密
 - 远端文件：明文为 `taskreminder.db`；开启加密后为 `taskreminder.db.enc`，同时把 `taskreminder.db` 换成以 `TaskReminder-Encrypted-Placeholder` 开头的占位说明（旧版本把它当数据库合并会失败，从而不会上传明文）。
 - `sync_with_remote` 的顺序不能随意调整：先判断远端是否加密（未开启加密却遇到加密文件、或解密失败都直接报错，**绝不上传**），合并后先传 `.enc` 再替换明文文件。
-- 远端存储经 `RemoteStore` 接口访问，测试用内存实现（`sync.rs` 测试中的 `MemoryStore`）覆盖首次同步、明文转加密、密码错误等流程；测试使用 `sync_crypto::TEST_PARAMS` 的小 KDF 参数。
+- 远端存储经 `RemoteStore` 接口访问，测试用内存实现（`sync/tests.rs` 中的 `MemoryStore`）覆盖首次同步、明文转加密、密码错误等流程；测试使用 `sync_crypto::TEST_PARAMS` 的小 KDF 参数。
 - 上传的快照由 `export_local_snapshot_bytes` 生成并清空 `webdav_password` 与 `sync_passphrase`；新增敏感设置时要一并清空。
 - 同步密码存于本机 `settings.sync_passphrase`（settings 表不参与合并）；`save_settings` 广播给其他窗口的设置会清空两个密码。
 - 更换同步密码走 `CloudSyncService::change_passphrase`：用当前密码合并远端后以新密码上传（`sync_with_remote_as`），上传成功后才保存新密码；前端成功后只刷新同步相关字段，不要整体 `loadSettings` 覆盖草稿，也不要让旧草稿再次保存旧密码。
@@ -196,7 +211,7 @@
 ## 测试指南
 - 前端使用 Vitest：测试与被测模块同目录，命名为 `*.spec.ts`（`scripts/` 下的脚本为 `*.spec.mjs`），运行 `pnpm test`。前端改动至少执行 `pnpm build`（含 `vue-tsc` 类型检查）与 `pnpm test`。
 - 视图里的计算逻辑（如时间线、统计）优先抽成 `src/` 下的纯函数再写测试，组件只做展示。
-- Rust 测试位于 `src-tauri/src/` 各模块的 `#[cfg(test)]` 中（便签窗口标签/URL、提醒队列、墓碑清理、同步合并、时间解析、节假日、循环规则）；跨版本同步测试在 `sync_compat_tests.rs`，按各发布版本的迁移建库（`db::create_schema_up_to`，仅测试）并写入 `src-tauri/tests/fixtures/` 中的示例数据，发布新版本时把它的库结构版本加到 `RELEASES`，通过 `cargo test` 运行；需要数据库的测试用临时目录创建 `DbManager`，会自动执行迁移。
+- Rust 测试位于 `src-tauri/src/` 各模块的 `#[cfg(test)]` 中（便签窗口标签/URL、提醒队列、墓碑清理、同步合并、时间解析、节假日、循环规则）；跨版本同步测试在 `sync/compat_tests.rs`，按各发布版本的迁移建库（`db::create_schema_up_to`，仅测试）并写入 `src-tauri/tests/fixtures/` 中的示例数据，发布新版本时把它的库结构版本加到 `RELEASES`，通过 `cargo test` 运行；需要数据库的测试用临时目录创建 `DbManager`，会自动执行迁移。
 - 提交前运行 `cargo fmt` 与 `cargo clippy --all-targets -- -D warnings`，CI 会执行 `cargo fmt --check` 并在 clippy 有告警时失败。只在 Windows 编译的代码（`#[cfg(target_os = "windows")]`）在 Linux 上检查不到，可用 `rustup target add x86_64-pc-windows-gnu`（需 `mingw-w64`）后执行 `cargo clippy --target x86_64-pc-windows-gnu --all-targets` 预检。
 - 在 Linux 上构建会改写 `src-tauri/gen/schemas/`，这些生成文件的无关变动不要提交。
 - 仅调整前端 UI 时，可用 `pnpm dev` 在浏览器中预览；浏览器中没有 Tauri 运行时，需要在页面加载前注入 `window.__TAURI_INTERNALS__`（模拟 `invoke`、`transformCallback`、`metadata.currentWindow`）并返回示例数据，否则列表为空。

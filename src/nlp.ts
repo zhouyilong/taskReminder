@@ -8,8 +8,12 @@ export type Priority = 0 | 1 | 2 | 3;
 export interface ParsedInput {
   /** 去掉识别出的时间、标签、优先级后的标题。 */
   title: string;
-  /** 一次性提醒时间；识别出循环规则时为 null。 */
+  /** 一次性提醒时间；识别出循环规则时为 null。有截止时间时 = 截止时间 - 提前量。 */
   reminderTime: Date | null;
+  /** 截止时间（“周五下午3点前”“截止明天”“提前1小时”）；没有时为 null。 */
+  dueTime: Date | null;
+  /** “提前 N 分钟 / 小时 / 天”的分钟数；没有说时为 null。 */
+  leadMinutes: number | null;
   /** 循环规则（描述取 title）；为 null 表示一次性待办。 */
   recurring: RecurringDraft | null;
   tags: string[];
@@ -119,7 +123,7 @@ const applyPeriod = (hour: number, period: Period | null): number => {
 
 interface Scanner {
   text: string;
-  matches: { index: number; value: string }[];
+  matches: { index: number; end: number; value: string }[];
 }
 
 /** 找到第一处匹配后从文本中抹掉（替换为空格，保持其他位置不变）。 */
@@ -129,7 +133,7 @@ const take = (scanner: Scanner, pattern: RegExp): RegExpExecArray | null => {
     return null;
   }
   const value = match[0];
-  scanner.matches.push({ index: match.index, value: value.trim() });
+  scanner.matches.push({ index: match.index, end: match.index + value.length, value: value.trim() });
   scanner.text =
     scanner.text.slice(0, match.index) + " ".repeat(value.length) + scanner.text.slice(match.index + value.length);
   return match;
@@ -243,6 +247,17 @@ const parseRecurring = (scanner: Scanner): RecurringDraft | null => {
       draft.intervalMinutes = Math.round(interval[2] === "分钟" ? amount : amount * 60);
       return draft;
     }
+  }
+
+  // “每月最后一个工作日”要在“每月最后一天”之前识别。
+  if (take(scanner, /每个?月(?:的)?(?:最后一个?|末(?:的)?|底(?:的)?)工作日/)) {
+    draft.mode = "MONTHLY_LAST_WORKDAY";
+    return draft;
+  }
+
+  if (take(scanner, /每个?月(?:的)?(?:最后一[天日]|月?末|月?底)/)) {
+    draft.mode = "MONTHLY_LAST_DAY";
+    return draft;
   }
 
   if (take(scanner, /每个?工作日|(?:^|\s)工作日(?:每天)?/)) {
@@ -444,6 +459,20 @@ export const parseQuickInput = (input: string, now: Date = new Date()): ParsedIn
 
   const recurring = parseRecurring(scanner);
   let reminderTime: Date | null = null;
+  let dueTime: Date | null = null;
+  let leadMinutes: number | null = null;
+  // 截止时间：显式的“截止 / DDL”，或时间后紧跟“前 / 之前”；“提前 N 分钟”同样表示前面的时间是截止时间。
+  const dueKeyword = recurring ? null : take(scanner, /(?:截止(?:时间|日期)?(?:到|于|是)?|[Dd][Dd][Ll])[:：]?/);
+  const lead = recurring
+    ? null
+    : take(scanner, new RegExp(`提前\\s*(${NUM}|半)?\\s*(?:个)?\\s*(分钟|小时|钟头|天)(?:提醒(?:我)?)?`));
+  if (lead) {
+    const amount = lead[1] === "半" ? 0.5 : lead[1] ? parseNumber(lead[1]) : 1;
+    if (amount !== null && amount >= 0) {
+      leadMinutes = Math.round(amount * (lead[2] === "分钟" ? 1 : lead[2] === "天" ? 1440 : 60));
+    }
+  }
+  const timeMatchStart = scanner.matches.length;
 
   if (recurring) {
     const { time } = parseClock(scanner);
@@ -472,6 +501,20 @@ export const parseQuickInput = (input: string, now: Date = new Date()): ParsedIn
         }
       }
     }
+    if (reminderTime) {
+      const timeEnd = Math.max(...scanner.matches.slice(timeMatchStart).map(item => item.end));
+      // 时间后紧跟“前 / 之前”（排除“前台”“前面”等词）。
+      const before = /^\s*(?:之前|以前|前)(?![台端面门夕线排])/.exec(scanner.text.slice(timeEnd));
+      if (before) {
+        scanner.text =
+          scanner.text.slice(0, timeEnd) + " ".repeat(before[0].length) + scanner.text.slice(timeEnd + before[0].length);
+        scanner.matches.push({ index: timeEnd, end: timeEnd + before[0].length, value: before[0].trim() });
+      }
+      if (before || dueKeyword || leadMinutes !== null) {
+        dueTime = reminderTime;
+        reminderTime = new Date(dueTime.getTime() - (leadMinutes ?? 0) * 60_000);
+      }
+    }
   }
 
   const title = cleanTitle(scanner.text);
@@ -481,6 +524,8 @@ export const parseQuickInput = (input: string, now: Date = new Date()): ParsedIn
   return {
     title,
     reminderTime,
+    dueTime,
+    leadMinutes,
     recurring,
     tags,
     priority,
@@ -505,14 +550,27 @@ export const describeParsedSchedule = (parsed: ParsedInput, now: Date = new Date
         return `${formatWeekdayMask(draft.scheduleWeekdays)} ${draft.scheduleTime}`;
       case "MONTHLY":
         return `每月 ${draft.scheduleDay} 日 ${draft.scheduleTime}`;
+      case "MONTHLY_LAST_DAY":
+        return `每月最后一天 ${draft.scheduleTime}`;
+      case "MONTHLY_LAST_WORKDAY":
+        return `每月最后一个工作日 ${draft.scheduleTime}`;
       default:
         return "";
     }
   }
-  const target = parsed.reminderTime;
-  if (!target) {
-    return "";
+  if (parsed.dueTime) {
+    const due = `截止 ${describeMoment(parsed.dueTime, now)}`;
+    const lead = parsed.leadMinutes ?? 0;
+    return lead > 0 ? `${due} · 提前 ${describeLead(lead)}提醒` : due;
   }
+  const target = parsed.reminderTime;
+  return target ? describeMoment(target, now) : "";
+};
+
+const describeLead = (minutes: number) =>
+  minutes % 1440 === 0 ? `${minutes / 1440} 天` : minutes % 60 === 0 ? `${minutes / 60} 小时` : `${minutes} 分钟`;
+
+const describeMoment = (target: Date, now: Date) => {
   const time = `${pad(target.getHours())}:${pad(target.getMinutes())}`;
   const diff = Math.round((startOfDay(target).getTime() - startOfDay(now).getTime()) / 86400000);
   if (diff === 0) {
@@ -532,3 +590,22 @@ export const describeParsedSchedule = (parsed: ParsedInput, now: Date = new Date
 /** 是否识别出了任何结构化信息（用于决定是否展示识别提示）。 */
 export const hasParsedMeta = (parsed: ParsedInput) =>
   Boolean(parsed.reminderTime || parsed.recurring || parsed.tags.length || parsed.priority);
+
+export interface RescheduleParse {
+  time: Date | null;
+  error: string | null;
+}
+
+/**
+ * 解析“改到什么时候”的输入（提醒弹窗自定义稍后提醒、批量改提醒时间）：
+ * 只取一次性时间，循环规则、没有时间或时间已过都给出原因。
+ */
+export const parseRescheduleTime = (input: string, now: Date = new Date()): RescheduleParse => {
+  const text = input.trim();
+  if (!text) return { time: null, error: null };
+  const parsed = parseQuickInput(text, now);
+  if (parsed.recurring) return { time: null, error: "请输入一个具体时间，而不是循环规则" };
+  if (!parsed.reminderTime) return { time: null, error: "没有识别出时间，可以试试“明天下午3点”“30分钟后”" };
+  if (parsed.reminderTime.getTime() <= now.getTime()) return { time: null, error: "这个时间已经过去了" };
+  return { time: parsed.reminderTime, error: null };
+};

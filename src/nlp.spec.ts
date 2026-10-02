@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeParsedSchedule, parseNumber, parseQuickInput } from "./nlp";
+import { describeParsedSchedule, parseNumber, parseQuickInput, parseRescheduleTime } from "./nlp";
 import { toLocalDateTimeString } from "./format";
 
 // 2026-09-27 是周日。
@@ -174,5 +174,71 @@ describe("describeParsedSchedule", () => {
     expect(describeParsedSchedule(parseQuickInput("10月1日 a", NOW), NOW)).toBe("10月1日 周四 09:00");
     expect(describeParsedSchedule(parseQuickInput("每周一三五 19:00 a", NOW), NOW)).toBe("周一、三、五 19:00");
     expect(describeParsedSchedule(parseQuickInput("a", NOW), NOW)).toBe("");
+  });
+});
+
+describe("parseRescheduleTime", () => {
+  const now = new Date(2026, 9, 2, 10, 0); // 2026-10-02 周五 10:00
+  it("returns a one-off time", () => {
+    expect(parseRescheduleTime("明天下午3点", now).time).toEqual(new Date(2026, 9, 3, 15, 0));
+    expect(parseRescheduleTime("30分钟后", now).time).toEqual(new Date(2026, 9, 2, 10, 30));
+    expect(parseRescheduleTime("", now)).toEqual({ time: null, error: null });
+  });
+  it("explains why an input cannot be used", () => {
+    expect(parseRescheduleTime("每天9点", now).error).toMatch("循环");
+    expect(parseRescheduleTime("随便", now).error).toMatch("没有识别出时间");
+    expect(parseRescheduleTime("2026-10-01 09:00", now).error).toMatch("已经过去");
+  });
+});
+
+describe("month-end recurring rules", () => {
+  const now = new Date(2026, 9, 2, 10, 0);
+  it("recognises last day and last workday of the month", () => {
+    const lastDay = parseQuickInput("每月最后一天晚上8点 交房租 #生活", now);
+    expect(lastDay.recurring?.mode).toBe("MONTHLY_LAST_DAY");
+    expect(lastDay.recurring?.scheduleTime).toBe("20:00");
+    expect(lastDay.title).toBe("交房租");
+    expect(lastDay.tags).toEqual(["生活"]);
+    expect(describeParsedSchedule(lastDay, now)).toBe("每月最后一天 20:00");
+
+    const lastWorkday = parseQuickInput("每月最后一个工作日 17:00 提交报销", now);
+    expect(lastWorkday.recurring?.mode).toBe("MONTHLY_LAST_WORKDAY");
+    expect(lastWorkday.recurring?.scheduleTime).toBe("17:00");
+    expect(lastWorkday.title).toBe("提交报销");
+
+    expect(parseQuickInput("每月月底 9点 对账", now).recurring?.mode).toBe("MONTHLY_LAST_DAY");
+    // 原有写法不受影响。
+    expect(parseQuickInput("每月15号 9点 还信用卡", now).recurring?.mode).toBe("MONTHLY");
+    expect(parseQuickInput("工作日 9点 站会", now).recurring?.mode).toBe("WORKDAY");
+  });
+});
+
+describe("due time and lead", () => {
+  const now = new Date(2026, 9, 2, 10, 0); // 周五
+  it("treats a time followed by 前 as the due time", () => {
+    const parsed = parseQuickInput("下周三下午3点前交周报 #工作", now);
+    expect(parsed.dueTime).toEqual(new Date(2026, 9, 7, 15, 0));
+    expect(parsed.reminderTime).toEqual(new Date(2026, 9, 7, 15, 0));
+    expect(parsed.title).toBe("交周报");
+    expect(describeParsedSchedule(parsed, now)).toBe("截止 10月7日 周三 15:00");
+  });
+
+  it("applies 提前 N to the reminder", () => {
+    const parsed = parseQuickInput("明天18:00截止 提交报销 提前1小时提醒", now);
+    expect(parsed.dueTime).toEqual(new Date(2026, 9, 3, 18, 0));
+    expect(parsed.reminderTime).toEqual(new Date(2026, 9, 3, 17, 0));
+    expect(parsed.leadMinutes).toBe(60);
+    expect(parsed.title).toBe("提交报销");
+    expect(describeParsedSchedule(parsed, now)).toBe("截止 明天 18:00 · 提前 1 小时提醒");
+    expect(parseQuickInput("截止 10月8日 9点 交材料 提前1天", now).reminderTime).toEqual(new Date(2026, 9, 7, 9, 0));
+  });
+
+  it("keeps plain reminders and words like 前台 unchanged", () => {
+    const plain = parseQuickInput("明天下午3点 交周报", now);
+    expect(plain.dueTime).toBeNull();
+    expect(plain.reminderTime).toEqual(new Date(2026, 9, 3, 15, 0));
+    const desk = parseQuickInput("下午3点前台取快递", now);
+    expect(desk.dueTime).toBeNull();
+    expect(desk.title).toBe("前台取快递");
   });
 });

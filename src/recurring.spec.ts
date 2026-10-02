@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatWorkdayHint,
   formatYearRange,
+  canSkipRecurring,
   isSupportedRecurringMode,
   buildRecurringPayload,
   createRecurringDraft,
@@ -131,5 +132,33 @@ describe("unsupported recurring modes", () => {
     expect(formatRecurringRule({ ...base, repeatMode: "INTERVAL_RANGE", startTime: "08:00", endTime: "18:00" })).toBe(
       "每 45 分钟（08:00 - 18:00）"
     );
+  });
+});
+
+describe("canSkipRecurring", () => {
+  const base = { isPaused: false, repeatMode: "DAILY" as const, nextTrigger: "2026-10-02T09:00:00" };
+  it("allows running tasks with a known mode", () => {
+    expect(canSkipRecurring(base)).toBe(true);
+  });
+  it("rejects paused, unknown-mode or unscheduled tasks", () => {
+    expect(canSkipRecurring({ ...base, isPaused: true })).toBe(false);
+    expect(canSkipRecurring({ ...base, repeatMode: "BIWEEKLY" as never })).toBe(false);
+    expect(canSkipRecurring({ ...base, nextTrigger: "" })).toBe(false);
+  });
+});
+
+describe("month-end modes and tags", () => {
+  it("builds payloads for month-end modes with normalized tags", () => {
+    const draft = { ...createRecurringDraft(), description: "交房租", mode: "MONTHLY_LAST_DAY" as const, scheduleTime: "20:00", tags: ["#生活", "生活", "账单"] };
+    expect(validateRecurringDraft(draft)).toBeNull();
+    const payload = buildRecurringPayload(draft);
+    expect(payload).toMatchObject({ repeatMode: "MONTHLY_LAST_DAY", scheduleTime: "20:00", scheduleDay: null, tags: ["生活", "账单"] });
+    expect(validateRecurringDraft({ ...draft, mode: "MONTHLY_LAST_WORKDAY", scheduleTime: "" })).not.toBeNull();
+  });
+
+  it("describes and warns for month-end workday reminders", () => {
+    const task = { repeatMode: "MONTHLY_LAST_WORKDAY", scheduleTime: "17:00", isPaused: false, nextTrigger: "2026-12-31T17:00:00" } as never;
+    expect(formatRecurringRule(task)).toBe("每月最后一个工作日 17:00");
+    expect(workdayHolidayWarning(task, [2025, 2026], new Date(2026, 11, 20))).toMatch("2027");
   });
 });

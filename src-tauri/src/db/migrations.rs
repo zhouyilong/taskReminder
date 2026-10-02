@@ -167,6 +167,16 @@ pub(super) fn migration_scripts() -> Vec<MigrationScript> {
             description: "add holiday auto update".to_string(),
             sql: include_str!("../../migrations/V2.0.5__add_holiday_auto_update.sql"),
         },
+        MigrationScript {
+            version: "2.0.6".to_string(),
+            description: "add sync watermark".to_string(),
+            sql: include_str!("../../migrations/V2.0.6__add_sync_watermark.sql"),
+        },
+        MigrationScript {
+            version: "2.1.0".to_string(),
+            description: "add due time, sticky color, sort order and recurring tags".to_string(),
+            sql: include_str!("../../migrations/V2.1.0__add_due_color_order_recurring_tags.sql"),
+        },
     ]
 }
 

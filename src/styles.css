@@ -56,6 +56,8 @@
   --sticky-border: rgba(148, 170, 214, 0.16);
   --sticky-highlight: rgba(255, 255, 255, 0.04);
   --sticky-accent: rgba(245, 165, 36, 0.7);
+  /* 默认颜色的顶边色：便签换了颜色后，颜色选择中的“默认”仍显示它。 */
+  --sticky-default-accent: rgba(245, 165, 36, 0.7);
   --sticky-divider: rgba(148, 170, 214, 0.08);
   --sticky-control-hover: rgba(148, 170, 214, 0.12);
   --sticky-scrollbar: rgba(148, 170, 214, 0.22);
@@ -63,6 +65,31 @@
   --sticky-text: var(--text-base);
   --sticky-text-muted: var(--text-muted);
   --sticky-text-faint: var(--text-faint);
+  /* 便签颜色（v2.1）：纸面上下渐变、边框、顶边色（也用作列表中的色点） */
+  --sticky-yellow-top: #2a2618;
+  --sticky-yellow-bottom: #221f14;
+  --sticky-yellow-border: rgba(240, 196, 90, 0.24);
+  --sticky-yellow-accent: rgba(245, 190, 60, 0.85);
+  --sticky-blue-top: #18243a;
+  --sticky-blue-bottom: #131d30;
+  --sticky-blue-border: rgba(110, 160, 255, 0.24);
+  --sticky-blue-accent: rgba(96, 150, 255, 0.9);
+  --sticky-green-top: #172a22;
+  --sticky-green-bottom: #12221b;
+  --sticky-green-border: rgba(90, 200, 140, 0.24);
+  --sticky-green-accent: rgba(70, 190, 120, 0.9);
+  --sticky-pink-top: #2c1a24;
+  --sticky-pink-bottom: #24141d;
+  --sticky-pink-border: rgba(240, 120, 170, 0.24);
+  --sticky-pink-accent: rgba(236, 110, 160, 0.9);
+  --sticky-purple-top: #231c35;
+  --sticky-purple-bottom: #1c162c;
+  --sticky-purple-border: rgba(160, 130, 240, 0.24);
+  --sticky-purple-accent: rgba(150, 120, 240, 0.9);
+  --sticky-gray-top: #212530;
+  --sticky-gray-bottom: #1a1d26;
+  --sticky-gray-border: rgba(160, 170, 190, 0.22);
+  --sticky-gray-accent: rgba(150, 160, 180, 0.8);
   --font-sans: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", "Source Han Sans SC", "Noto Sans SC", sans-serif;
   font-family: var(--font-sans);
 }
@@ -1216,6 +1243,59 @@ label:has(> input[type="checkbox"]) {
   background: var(--bg-hover);
 }
 
+/* 截止时间（v2.1）：截止标签下方附注提前的提醒时间 */
+.due-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.due-reminder-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 拖拽排序（v2.1） */
+.reorder-hint {
+  margin: -6px 0 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.table .table-row.is-draggable {
+  cursor: grab;
+}
+
+.table .table-row.is-dragging {
+  opacity: 0.45;
+}
+
+.table .table-row.is-drop-before td {
+  box-shadow: inset 0 2px 0 var(--primary);
+}
+
+.table .table-row.is-drop-after td {
+  box-shadow: inset 0 -2px 0 var(--primary);
+}
+
+/* 多选：避免 Shift 连选时浏览器选中文字 */
+.table.is-selecting {
+  user-select: none;
+}
+
+/* 多选中的行 */
+.table .table-row.is-selected,
+.table .table-row.is-selected:hover {
+  background: var(--primary-soft);
+}
+
+.button.secondary.is-active {
+  border-color: var(--primary);
+  color: var(--primary-text);
+}
+
 .cell-title {
   color: var(--text-title) !important;
   font-weight: 600;
@@ -2135,6 +2215,28 @@ label:has(> input[type="checkbox"]) {
 
 .notification-actions.is-snooze {
   gap: 6px;
+}
+
+.notification-custom-snooze {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.notification-custom-snooze .input {
+  height: 32px;
+  font-size: 13px;
+}
+
+.notification-custom-hint {
+  min-height: 16px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.notification-custom-hint.is-error {
+  color: var(--danger-text);
 }
 
 .notification-actions.is-snooze .button {
@@ -3327,6 +3429,7 @@ html.sticky-note-mode.is-linux .paper-note {
   --sticky-border: #e9e0ca;
   --sticky-highlight: rgba(255, 255, 255, 0.85);
   --sticky-accent: #f2b441;
+  --sticky-default-accent: #f2b441;
   --sticky-divider: rgba(120, 100, 60, 0.12);
   --sticky-control-hover: rgba(120, 100, 60, 0.09);
   --sticky-scrollbar: rgba(120, 100, 60, 0.26);
@@ -3334,6 +3437,31 @@ html.sticky-note-mode.is-linux .paper-note {
   --sticky-text: #3a3427;
   --sticky-text-muted: #6b6456;
   --sticky-text-faint: #8f8778;
+  /* 便签颜色（v2.1）：纸面上下渐变、边框、顶边色（也用作列表中的色点） */
+  --sticky-yellow-top: #fff9db;
+  --sticky-yellow-bottom: #fff3c4;
+  --sticky-yellow-border: #efe0a6;
+  --sticky-yellow-accent: #f2b441;
+  --sticky-blue-top: #f2f7ff;
+  --sticky-blue-bottom: #e6efff;
+  --sticky-blue-border: #cddcf7;
+  --sticky-blue-accent: #4f7cff;
+  --sticky-green-top: #f1fbf4;
+  --sticky-green-bottom: #e3f5e9;
+  --sticky-green-border: #c8e6d2;
+  --sticky-green-accent: #2fa36b;
+  --sticky-pink-top: #fff3f7;
+  --sticky-pink-bottom: #ffe6ef;
+  --sticky-pink-border: #f3cbd9;
+  --sticky-pink-accent: #e0598f;
+  --sticky-purple-top: #f6f2ff;
+  --sticky-purple-bottom: #ece5ff;
+  --sticky-purple-border: #d9cdf5;
+  --sticky-purple-accent: #7c5ce0;
+  --sticky-gray-top: #f7f7f8;
+  --sticky-gray-bottom: #eeeff2;
+  --sticky-gray-border: #dcdfe5;
+  --sticky-gray-accent: #8a93a5;
 }
 
 .light-theme .select {
@@ -4831,4 +4959,167 @@ button.task-tag:disabled {
   .calendar-pill-time {
     display: none;
   }
+}
+
+/* 便签颜色：在便签窗口的 html/body 上加 sticky-color-<颜色>，放在主题令牌之后以便覆盖。 */
+.sticky-color-yellow {
+  --sticky-paper-top: var(--sticky-yellow-top);
+  --sticky-paper-bottom: var(--sticky-yellow-bottom);
+  --sticky-border: var(--sticky-yellow-border);
+  --sticky-accent: var(--sticky-yellow-accent);
+}
+
+.sticky-color-blue {
+  --sticky-paper-top: var(--sticky-blue-top);
+  --sticky-paper-bottom: var(--sticky-blue-bottom);
+  --sticky-border: var(--sticky-blue-border);
+  --sticky-accent: var(--sticky-blue-accent);
+}
+
+.sticky-color-green {
+  --sticky-paper-top: var(--sticky-green-top);
+  --sticky-paper-bottom: var(--sticky-green-bottom);
+  --sticky-border: var(--sticky-green-border);
+  --sticky-accent: var(--sticky-green-accent);
+}
+
+.sticky-color-pink {
+  --sticky-paper-top: var(--sticky-pink-top);
+  --sticky-paper-bottom: var(--sticky-pink-bottom);
+  --sticky-border: var(--sticky-pink-border);
+  --sticky-accent: var(--sticky-pink-accent);
+}
+
+.sticky-color-purple {
+  --sticky-paper-top: var(--sticky-purple-top);
+  --sticky-paper-bottom: var(--sticky-purple-bottom);
+  --sticky-border: var(--sticky-purple-border);
+  --sticky-accent: var(--sticky-purple-accent);
+}
+
+.sticky-color-gray {
+  --sticky-paper-top: var(--sticky-gray-top);
+  --sticky-paper-bottom: var(--sticky-gray-bottom);
+  --sticky-border: var(--sticky-gray-border);
+  --sticky-accent: var(--sticky-gray-accent);
+}
+
+/* 颜色选择与列表中的色点；默认颜色沿用当前主题的便签顶边色。 */
+.sticky-color-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--sticky-default-accent);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* 默认颜色画成空心圆，与黄色区分。 */
+.sticky-color-dot.is-default {
+  background: transparent;
+  border: 2px solid var(--sticky-default-accent);
+}
+
+.sticky-color-dot.is-yellow {
+  background: var(--sticky-yellow-accent);
+}
+
+.sticky-color-dot.is-blue {
+  background: var(--sticky-blue-accent);
+}
+
+.sticky-color-dot.is-green {
+  background: var(--sticky-green-accent);
+}
+
+.sticky-color-dot.is-pink {
+  background: var(--sticky-pink-accent);
+}
+
+.sticky-color-dot.is-purple {
+  background: var(--sticky-purple-accent);
+}
+
+.sticky-color-dot.is-gray {
+  background: var(--sticky-gray-accent);
+}
+
+/* 便签管理列表：标题前的色点、颜色筛选 */
+.sticky-title-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.sticky-color-filter {
+  height: 38px;
+  min-width: 112px;
+}
+
+/* 便签窗口页脚：颜色选择 */
+.paper-note-color {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-right: calc(6px * var(--sticky-ui-scale, 1));
+}
+
+.paper-note-color-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(22px * var(--sticky-ui-scale, 1));
+  height: calc(22px * var(--sticky-ui-scale, 1));
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.paper-note-color-trigger:hover {
+  background: var(--sticky-control-hover);
+}
+
+.paper-note-color-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--sticky-border);
+  border-radius: 10px;
+  background: var(--sticky-paper-top);
+  box-shadow: var(--shadow-float);
+}
+
+.paper-note-color-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.paper-note-color-option:hover {
+  background: var(--sticky-control-hover);
+}
+
+.paper-note-color-option.active {
+  border-color: var(--sticky-text-muted);
+}
+
+.paper-note-color-option .sticky-color-dot,
+.paper-note-color-trigger .sticky-color-dot {
+  width: 12px;
+  height: 12px;
 }

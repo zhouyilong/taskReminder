@@ -24,13 +24,19 @@
           <circle cx="11" cy="11" r="6.5" />
           <path d="M16 16l4 4" />
         </svg>
-        <input class="input" v-model="keyword" placeholder="搜索便签标题或内容" />
+        <input data-shortcut="search" class="input" v-model="keyword" placeholder="搜索便签标题或内容" />
         <button v-if="keyword" class="search-clear" type="button" title="清空" @click="keyword = ''">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M7 7l10 10M17 7L7 17" />
           </svg>
         </button>
       </div>
+      <select class="select sticky-color-filter" v-model="colorFilter" title="按颜色筛选">
+        <option value="all">全部颜色</option>
+        <option v-for="option in STICKY_COLOR_OPTIONS" :key="option.value || 'default'" :value="option.value">
+          {{ option.value ? option.label : "默认颜色" }}
+        </option>
+      </select>
       <button class="button" type="button" :disabled="busy" @click="createNote">新建便签</button>
     </div>
     <div class="table-card">
@@ -57,9 +63,16 @@
                 <span class="status-pill" :class="`sticky-${item.state}`">{{ STICKY_STATE_LABELS[item.state] }}</span>
               </td>
               <td class="col-desc cell-title" :title="item.note.title">
-                <button class="sticky-title-link" type="button" :disabled="busy" @click="bringToFront(item)">
-                  {{ item.note.title || "（无标题）" }}
-                </button>
+                <span class="sticky-title-cell">
+                  <span
+                    class="sticky-color-dot"
+                    :class="stickyDotClass(item.note.color)"
+                    :title="stickyColorLabel(item.note.color)"
+                  ></span>
+                  <button class="sticky-title-link" type="button" :disabled="busy" @click="bringToFront(item)">
+                    {{ item.note.title || "（无标题）" }}
+                  </button>
+                </span>
               </td>
               <td class="col-note cell-muted" :class="{ 'cell-empty': !item.preview }" :title="item.preview">
                 {{ item.preview || "-" }}
@@ -119,7 +132,10 @@ import { errorMessage, formatDateTime, reminderTone } from "../format";
 import {
   STICKY_FILTER_OPTIONS,
   STICKY_STATE_LABELS,
+  STICKY_COLOR_OPTIONS,
   buildStickyList,
+  stickyDotClass,
+  type StickyColorFilter,
   countStickyStates,
   type StickyFilter,
   type StickyListItem,
@@ -140,8 +156,11 @@ const filter = ref<StickyFilter>("all");
 const busy = ref(false);
 
 const counts = computed(() => countStickyStates(notes.value));
-const list = computed(() => buildStickyList(notes.value, keyword.value, filter.value));
-const listKey = computed(() => `${keyword.value}|${filter.value}`);
+const colorFilter = ref<StickyColorFilter>("all");
+const list = computed(() => buildStickyList(notes.value, keyword.value, filter.value, colorFilter.value));
+const listKey = computed(() => `${keyword.value}|${filter.value}|${colorFilter.value}`);
+const stickyColorLabel = (color?: string | null) =>
+  STICKY_COLOR_OPTIONS.find(option => option.value && option.value === color)?.label ?? "默认颜色";
 const { pageIndex, pageSize, totalPages, page: stickyPage } = usePagination(list, listKey);
 
 const emptyTitle = computed(() => {

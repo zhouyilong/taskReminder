@@ -9,37 +9,63 @@ pub struct TaskMeta {
     pub priority: i64,
 }
 
+/// 待办的批量操作（`batch_update_tasks`）。
+#[derive(Debug, Clone, PartialEq)]
+pub enum TaskBatchOp {
+    Complete,
+    Delete,
+    /// 在原有标签后追加（规范化、去重，最多 10 个）。
+    AddTags(Vec<String>),
+    SetPriority(i64),
+    /// `None` 表示清除提醒。
+    SetReminder(Option<String>),
+}
+
+/// `task_from_row` 读取的列（顺序与下标一致）。
+macro_rules! task_columns {
+    () => {
+        "id, description, sticky_content, type, status, created_at, completed_at, reminder_time,
+         updated_at, deleted_at, tags, priority, due_at, sticky_color, sort_order"
+    };
+}
+
 impl DbManager {
     pub fn list_active_tasks(&self) -> Result<Vec<Task>, AppError> {
         let conn = self.get_conn()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, description, sticky_content, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at, tags, priority
+        let mut stmt = conn.prepare(concat!(
+            "SELECT ",
+            task_columns!(),
+            "
              FROM tasks
              WHERE deleted_at IS NULL AND status != 'COMPLETED'
-             ORDER BY created_at ASC",
-        )?;
+             ORDER BY created_at ASC"
+        ))?;
         let rows = stmt.query_map([], task_from_row)?;
         Ok(rows.filter_map(Result::ok).collect())
     }
 
     pub fn list_completed_tasks(&self) -> Result<Vec<Task>, AppError> {
         let conn = self.get_conn()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, description, sticky_content, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at, tags, priority
+        let mut stmt = conn.prepare(concat!(
+            "SELECT ",
+            task_columns!(),
+            "
              FROM tasks
              WHERE deleted_at IS NULL AND status = 'COMPLETED'
-             ORDER BY completed_at DESC",
-        )?;
+             ORDER BY completed_at DESC"
+        ))?;
         let rows = stmt.query_map([], task_from_row)?;
         Ok(rows.filter_map(Result::ok).collect())
     }
 
     pub fn get_task(&self, task_id: &str) -> Result<Option<Task>, AppError> {
         let conn = self.get_conn()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, description, sticky_content, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at, tags, priority
-             FROM tasks WHERE id = ?",
-        )?;
+        let mut stmt = conn.prepare(concat!(
+            "SELECT ",
+            task_columns!(),
+            "
+             FROM tasks WHERE id = ?"
+        ))?;
         let task = stmt.query_row([task_id], task_from_row).optional()?;
         Ok(task)
     }
@@ -83,6 +109,9 @@ impl DbManager {
             deleted_at: None,
             tags: tags_from_db(Some(tags)),
             priority,
+            due_at: None,
+            sticky_color: String::new(),
+            sort_order: None,
         })
     }
 
@@ -155,12 +184,14 @@ impl DbManager {
     /// 回收站中的待办：已软删除且仍在墓碑保留期内的行，按删除时间倒序。
     pub fn list_deleted_tasks(&self, retention_days: i64) -> Result<Vec<Task>, AppError> {
         let conn = self.get_conn()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, description, sticky_content, type, status, created_at, completed_at, reminder_time, updated_at, deleted_at, tags, priority
+        let mut stmt = conn.prepare(concat!(
+            "SELECT ",
+            task_columns!(),
+            "
              FROM tasks
              WHERE deleted_at IS NOT NULL AND deleted_at >= ?
-             ORDER BY deleted_at DESC",
-        )?;
+             ORDER BY deleted_at DESC"
+        ))?;
         let cutoff = tombstone_cutoff(retention_days);
         let rows = stmt.query_map([cutoff.as_str()], task_from_row)?;
         Ok(rows.filter_map(Result::ok).collect())
@@ -190,6 +221,102 @@ impl DbManager {
         )?;
         Ok(())
     }
+
+    /// 设置截止时间（`None` 清除）。时间不变时不写库。
+    pub fn set_task_due(&self, task_id: &str, due_at: Option<&str>) -> Result<bool, AppError> {
+        let conn = self.get_conn()?;
+        let changed = conn.execute(
+            "UPDATE tasks SET due_at = ?1, updated_at = ?2
+             WHERE id = ?3 AND deleted_at IS NULL AND due_at IS NOT ?1",
+            params![due_at, now_string(), task_id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// 写入手动排序位置（拖拽排序，可能同时给多条重新编号），只写确实变化的行。
+    pub fn set_task_sort_orders(&self, orders: &[(String, f64)]) -> Result<usize, AppError> {
+        let mut conn = self.get_conn()?;
+        let tx = conn.transaction()?;
+        let now = now_string();
+        let mut changed = 0;
+        for (id, order) in orders {
+            if !order.is_finite() {
+                return Err(AppError::Invalid("排序位置无效".to_string()));
+            }
+            changed += tx.execute(
+                "UPDATE tasks SET sort_order = ?1, updated_at = ?2
+                 WHERE id = ?3 AND deleted_at IS NULL AND sort_order IS NOT ?1",
+                params![order, now, id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
+
+    /// 在一个事务中对多条待办执行同一操作，返回实际改动的 id（已删除、不存在的跳过；
+    /// 完成时跳过已完成的）。时间戳统一，只产生一次写入。
+    pub fn batch_update_tasks(
+        &self,
+        ids: &[String],
+        op: &TaskBatchOp,
+    ) -> Result<Vec<String>, AppError> {
+        let mut conn = self.get_conn()?;
+        let tx = conn.transaction()?;
+        let now = now_string();
+        let mut changed = Vec::new();
+        for id in ids {
+            let current: Option<(String, Option<String>)> = tx
+                .query_row(
+                    "SELECT status, tags FROM tasks WHERE id = ? AND deleted_at IS NULL",
+                    [id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            let Some((status, tags)) = current else {
+                continue;
+            };
+            let rows = match op {
+                TaskBatchOp::Complete if status == "COMPLETED" => 0,
+                TaskBatchOp::Complete => tx.execute(
+                    "UPDATE tasks SET status = 'COMPLETED', completed_at = ?1, sticky_is_open = 0, updated_at = ?1
+                     WHERE id = ?2",
+                    params![now, id],
+                )?,
+                TaskBatchOp::Delete => tx.execute(
+                    "UPDATE tasks SET deleted_at = ?1, sticky_is_open = 0, updated_at = ?1 WHERE id = ?2",
+                    params![now, id],
+                )?,
+                TaskBatchOp::AddTags(extra) => {
+                    let mut merged = tags_from_db(tags);
+                    let before = merged.clone();
+                    merged.extend(extra.iter().cloned());
+                    let merged = crate::models::normalize_tags(&merged);
+                    if merged == before {
+                        0
+                    } else {
+                        tx.execute(
+                            "UPDATE tasks SET tags = ?1, updated_at = ?2 WHERE id = ?3",
+                            params![merged.join(","), now, id],
+                        )?
+                    }
+                }
+                TaskBatchOp::SetPriority(priority) => tx.execute(
+                    "UPDATE tasks SET priority = ?1, updated_at = ?2 WHERE id = ?3 AND priority != ?1",
+                    params![normalize_priority(*priority), now, id],
+                )?,
+                TaskBatchOp::SetReminder(reminder) => tx.execute(
+                    "UPDATE tasks SET reminder_time = ?1, updated_at = ?2
+                     WHERE id = ?3 AND reminder_time IS NOT ?1",
+                    params![reminder, now, id],
+                )?,
+            };
+            if rows > 0 {
+                changed.push(id.clone());
+            }
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
 }
 
 pub(super) fn task_from_row(row: &rusqlite::Row<'_>) -> Result<Task, rusqlite::Error> {
@@ -206,5 +333,8 @@ pub(super) fn task_from_row(row: &rusqlite::Row<'_>) -> Result<Task, rusqlite::E
         deleted_at: row.get(9)?,
         tags: tags_from_db(row.get::<_, Option<String>>(10)?),
         priority: normalize_priority(row.get::<_, Option<i64>>(11)?.unwrap_or(0)),
+        due_at: row.get(12)?,
+        sticky_color: row.get::<_, Option<String>>(13)?.unwrap_or_default(),
+        sort_order: row.get(14)?,
     })
 }

@@ -185,6 +185,8 @@ pub fn describe_rule(task: &RecurringTask) -> String {
     match &task.repeat_mode {
         RepeatMode::Daily => format!("每天 {}", time),
         RepeatMode::Workday => format!("法定工作日 {}", time),
+        RepeatMode::MonthlyLastDay => format!("每月最后一天 {}", time),
+        RepeatMode::MonthlyLastWorkday => format!("每月最后一个工作日 {}", time),
         RepeatMode::Weekly => {
             format!("{} {}", weekday_text(weekday_mask(task).unwrap_or(0)), time)
         }
@@ -236,6 +238,9 @@ fn markdown_task_line(task: &Task) -> String {
         if done { "x" } else { " " },
         task.description.trim()
     )];
+    if let Some(due) = task.due_at.as_deref() {
+        parts.push(format!("📅 截止 {}", short_time(due)));
+    }
     if let Some(reminder) = task.reminder_time.as_deref() {
         parts.push(format!("⏰ {}", short_time(reminder)));
     }
@@ -373,6 +378,11 @@ fn ics_rrule(task: &RecurringTask) -> Option<String> {
         RepeatMode::Daily => Some("FREQ=DAILY".to_string()),
         // 日历不认识调休，按周一至周五近似。
         RepeatMode::Workday => Some("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR".to_string()),
+        RepeatMode::MonthlyLastDay => Some("FREQ=MONTHLY;BYMONTHDAY=-1".to_string()),
+        // 同样不认识调休：取每月最后一个周一至周五。
+        RepeatMode::MonthlyLastWorkday => {
+            Some("FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1".to_string())
+        }
         RepeatMode::Weekly => {
             let mask = weekday_mask(task)?;
             let days: Vec<&str> = (0..7)
@@ -406,6 +416,8 @@ struct IcsEvent<'a> {
     rrule: Option<String>,
     categories: &'a [String],
     priority: i64,
+    /// 提醒相对开始时间提前的分钟数；None 表示不提醒（只有截止时间）。
+    alarm_minutes_before: Option<i64>,
 }
 
 fn push_event(out: &mut String, event: &IcsEvent, dtstamp: &str) {
@@ -440,14 +452,20 @@ fn push_event(out: &mut String, event: &IcsEvent, dtstamp: &str) {
         1 => lines.push("PRIORITY:9".to_string()),
         _ => {}
     }
-    lines.extend([
-        "BEGIN:VALARM".to_string(),
-        "ACTION:DISPLAY".to_string(),
-        format!("DESCRIPTION:{}", ics_escape(event.summary.trim())),
-        "TRIGGER:PT0S".to_string(),
-        "END:VALARM".to_string(),
-        "END:VEVENT".to_string(),
-    ]);
+    if let Some(minutes) = event.alarm_minutes_before {
+        lines.extend([
+            "BEGIN:VALARM".to_string(),
+            "ACTION:DISPLAY".to_string(),
+            format!("DESCRIPTION:{}", ics_escape(event.summary.trim())),
+            if minutes > 0 {
+                format!("TRIGGER:-PT{}M", minutes)
+            } else {
+                "TRIGGER:PT0S".to_string()
+            },
+            "END:VALARM".to_string(),
+        ]);
+    }
+    lines.push("END:VEVENT".to_string());
     for line in lines {
         out.push_str(&ics_fold(&line));
     }
@@ -472,9 +490,13 @@ pub fn render_ics(backup: &BackupFile, dtstamp: &str) -> (String, usize) {
         if task.status == TaskStatus::Completed {
             continue;
         }
-        let Some(start) = task.reminder_time.as_deref().and_then(parse_datetime_any) else {
+        // 有截止时间（v2.1）时事件放在截止时间，提醒按提前量设置；否则放在提醒时间。
+        let reminder = task.reminder_time.as_deref().and_then(parse_datetime_any);
+        let due = task.due_at.as_deref().and_then(parse_datetime_any);
+        let Some(start) = due.or(reminder) else {
             continue;
         };
+        let alarm_minutes_before = reminder.map(|at| (start - at).num_minutes().max(0));
         push_event(
             &mut out,
             &IcsEvent {
@@ -485,6 +507,7 @@ pub fn render_ics(backup: &BackupFile, dtstamp: &str) -> (String, usize) {
                 rrule: None,
                 categories: &task.tags,
                 priority: task.priority,
+                alarm_minutes_before,
             },
             dtstamp,
         );
@@ -510,8 +533,9 @@ pub fn render_ics(backup: &BackupFile, dtstamp: &str) -> (String, usize) {
                 summary: &task.description,
                 description: describe_rule(task),
                 rrule: Some(rrule),
-                categories: &[],
+                categories: &task.tags,
                 priority: 0,
+                alarm_minutes_before: Some(0),
             },
             dtstamp,
         );
@@ -670,6 +694,7 @@ mod tests {
             schedule_weekdays: Some(0b001_0101),
             schedule_day: Some(31),
             cron_expression: None,
+            tags: Vec::new(),
         }
     }
 
@@ -814,6 +839,9 @@ mod tests {
                 deleted_at: None,
                 tags: vec!["工作".to_string()],
                 priority: 3,
+                due_at: None,
+                sticky_color: String::new(),
+                sort_order: None,
             }],
             recurring_tasks: vec![weekly, monthly, interval, paused],
             reminder_records: Vec::new(),
@@ -836,6 +864,55 @@ mod tests {
         for line in ics.split("\r\n") {
             assert!(line.len() <= 75, "line too long: {}", line);
         }
+    }
+
+    #[test]
+    fn ics_uses_due_time_and_lead_for_alarm() {
+        let task = |id: &str, due: Option<&str>, reminder: Option<&str>| Task {
+            id: id.to_string(),
+            description: id.to_string(),
+            sticky_content: None,
+            task_type: TaskType::OneTime,
+            status: TaskStatus::Pending,
+            created_at: "2026-09-27T09:00:00".to_string(),
+            completed_at: None,
+            reminder_time: reminder.map(str::to_string),
+            updated_at: None,
+            deleted_at: None,
+            tags: Vec::new(),
+            priority: 0,
+            due_at: due.map(str::to_string),
+            sticky_color: String::new(),
+            sort_order: None,
+        };
+        let backup = BackupFile {
+            app: BACKUP_APP_ID.to_string(),
+            format_version: 1,
+            app_version: String::new(),
+            exported_at: String::new(),
+            tasks: vec![
+                task(
+                    "lead",
+                    Some("2026-10-09T18:00:00"),
+                    Some("2026-10-09T17:00:00"),
+                ),
+                task("silent", Some("2026-10-10T09:00:00"), None),
+            ],
+            recurring_tasks: Vec::new(),
+            reminder_records: Vec::new(),
+        };
+        let (ics, _) = render_ics(&backup, "20260927T020000Z");
+        let event = |uid: &str| {
+            let start = ics.find(&format!("UID:{}@taskreminder", uid)).unwrap();
+            let end = ics[start..].find("END:VEVENT").unwrap();
+            ics[start..start + end].to_string()
+        };
+        let lead = event("lead");
+        assert!(lead.contains("DTSTART:20261009T180000"));
+        assert!(lead.contains("TRIGGER:-PT60M"));
+        let silent = event("silent");
+        assert!(silent.contains("DTSTART:20261010T090000"));
+        assert!(!silent.contains("BEGIN:VALARM"));
     }
 
     #[test]
