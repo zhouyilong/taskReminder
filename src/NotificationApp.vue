@@ -27,7 +27,18 @@
         </div>
       </div>
       <div class="notification-body">{{ notificationDescription }}</div>
-      <div class="notification-meta">
+      <div v-if="snoozePickerOpen" class="notification-custom-snooze">
+        <input
+          ref="customSnoozeInput"
+          v-model="customSnoozeText"
+          class="input"
+          placeholder="或输入时间：明天下午3点、30分钟后…"
+          @keydown.enter.prevent="handleCustomSnooze"
+          @keydown.esc.prevent="snoozePickerOpen = false"
+        />
+        <span class="notification-custom-hint" :class="{ 'is-error': customSnooze.error }">{{ customSnoozeHint }}</span>
+      </div>
+      <div v-else class="notification-meta">
         <div class="notification-meta-item">
           <span class="notification-meta-label">已停留</span>
           <strong class="notification-meta-value">{{ elapsedLabel }}</strong>
@@ -37,7 +48,7 @@
           <strong class="notification-meta-value">{{ remainingLabel }}</strong>
         </div>
       </div>
-      <div class="notification-progress" aria-hidden="true">
+      <div v-if="!snoozePickerOpen" class="notification-progress" aria-hidden="true">
         <div class="notification-progress-bar" :style="{ width: `${progressPercent}%` }"></div>
       </div>
       <div v-if="snoozePickerOpen" class="notification-actions is-snooze">
@@ -63,14 +74,14 @@
           完成
         </button>
         <button class="button secondary" @click="handleAcknowledge">知道了</button>
-        <button class="button" title="选择推迟时长" @click="snoozePickerOpen = true">稍后提醒</button>
+        <button class="button" title="选择推迟时长" @click="openSnoozePicker">稍后提醒</button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { listen, TauriEvent } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
@@ -79,6 +90,7 @@ import { markdownToPreviewText, stripLeadingListMarker } from "./markdown";
 import { safeStorage } from "./safeStorage";
 import type { NotificationPayload } from "./types";
 import { nextSoundState, playChime } from "./notificationSound";
+import { parseRescheduleTime } from "./nlp";
 
 type NotificationThemeMode = "system" | "app" | "light" | "dark";
 
@@ -485,6 +497,34 @@ const handleSnooze = async (option?: SnoozeOption) => {
       until: option?.until ? option.until() : null
     })
   );
+};
+
+// 自定义稍后提醒：输入自然语言时间，识别后改到该时间（后端已支持 until）。
+const customSnoozeText = ref("");
+const customSnoozeInput = ref<HTMLInputElement | null>(null);
+const customSnooze = computed(() => parseRescheduleTime(customSnoozeText.value));
+const customSnoozeHint = computed(() => {
+  if (customSnooze.value.error) return customSnooze.value.error;
+  const time = customSnooze.value.time;
+  if (time) return `回车改到 ${formatScheduledTime(time)}`;
+  return "也可以点下方的常用时长";
+});
+
+const openSnoozePicker = async () => {
+  customSnoozeText.value = "";
+  snoozePickerOpen.value = true;
+  await nextTick();
+  customSnoozeInput.value?.focus();
+};
+
+watch(snoozePickerOpen, open => {
+  if (!open) customSnoozeText.value = "";
+});
+
+const handleCustomSnooze = async () => {
+  const time = customSnooze.value.time;
+  if (!time) return;
+  await handleSnooze({ label: "自定义", minutes: 1, until: () => formatLocalDateTime(time) });
 };
 
 const handleComplete = async () => {

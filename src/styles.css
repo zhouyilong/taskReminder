@@ -2153,6 +2153,28 @@ label:has(> input[type="checkbox"]) {
   gap: 6px;
 }
 
+.notification-custom-snooze {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.notification-custom-snooze .input {
+  height: 32px;
+  font-size: 13px;
+}
+
+.notification-custom-hint {
+  min-height: 16px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.notification-custom-hint.is-error {
+  color: var(--danger-text);
+}
+
 .notification-actions.is-snooze .button {
   min-width: 0;
   flex: 1;
