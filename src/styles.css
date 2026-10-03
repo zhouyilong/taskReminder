@@ -5367,3 +5367,117 @@ button.task-tag:disabled {
     display: none;
   }
 }
+
+/* ---------- 便签清单进度（v2.1.1） ---------- */
+
+.checklist-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--bg-muted);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.checklist-bar {
+  width: 22px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-strong);
+  overflow: hidden;
+}
+
+.checklist-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--primary);
+}
+
+.checklist-chip.is-done {
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+
+.checklist-chip.is-done .checklist-bar-fill {
+  background: var(--success-text);
+}
+
+.note-cell-with-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.note-cell-with-progress .note-cell-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 便签窗口：页脚顶部的进度线与“标记完成”按钮。 */
+.paper-note-footer {
+  position: relative;
+}
+
+.paper-note-progress {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  pointer-events: none;
+}
+
+.paper-note-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--sticky-accent);
+  transition: width 0.24s ease;
+}
+
+.paper-note-progress-text {
+  flex-shrink: 0;
+  color: var(--sticky-text-muted);
+  font-size: calc(11px * var(--sticky-ui-scale));
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-sans);
+}
+
+.paper-note-done-button {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(4px * var(--sticky-ui-scale));
+  height: calc(22px * var(--sticky-ui-scale));
+  padding: 0 calc(9px * var(--sticky-ui-scale));
+  border: none;
+  border-radius: 999px;
+  background: var(--success-soft);
+  color: var(--success-text);
+  font-size: calc(12px * var(--sticky-ui-scale));
+  font-weight: 600;
+  font-family: var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.paper-note-done-button:hover {
+  filter: brightness(1.08);
+}
+
+.paper-note-done-button svg {
+  width: calc(12px * var(--sticky-ui-scale));
+  height: calc(12px * var(--sticky-ui-scale));
+}

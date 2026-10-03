@@ -44,3 +44,46 @@ export const markdownToPreviewText = (value: string | null | undefined, fallback
   const text = markdownToPlainText(value);
   return text || fallback;
 };
+
+const FENCE_PATTERN = /^\s{0,3}(```|~~~)/;
+const TASK_ITEM_PATTERN = /^\s*(?:[-*+]|\d+[.)])\s+\[( |x|X)\](?=\s|$)/;
+
+export interface ChecklistProgress {
+  done: number;
+  total: number;
+}
+
+/**
+ * 统计 Markdown 中的勾选清单（GFM 任务项 `- [ ]` / `- [x]`，含 `*`、`+`、有序列表与嵌套），
+ * 忽略代码块中的内容。没有任务项时返回 null。
+ */
+export const checklistProgress = (value: string | null | undefined): ChecklistProgress | null => {
+  if (!value) {
+    return null;
+  }
+  let done = 0;
+  let total = 0;
+  let fence: string | null = null;
+  for (const line of value.split(/\r?\n/)) {
+    const fenceMatch = FENCE_PATTERN.exec(line);
+    if (fenceMatch) {
+      if (!fence) {
+        fence = fenceMatch[1];
+      } else if (fence === fenceMatch[1]) {
+        fence = null;
+      }
+      continue;
+    }
+    if (fence) {
+      continue;
+    }
+    const match = TASK_ITEM_PATTERN.exec(line);
+    if (match) {
+      total += 1;
+      if (match[1] !== " ") {
+        done += 1;
+      }
+    }
+  }
+  return total ? { done, total } : null;
+};

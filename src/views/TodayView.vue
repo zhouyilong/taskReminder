@@ -40,6 +40,7 @@
             <div class="timeline-body">
               <input type="checkbox" class="check-round" title="标记完成" @change="toggleTask(task)" />
               <span class="timeline-title" :title="task.description">{{ task.description }}</span>
+              <ChecklistProgress :content="task.stickyContent" />
               <span class="status-pill action-overdue">未完成</span>
             </div>
           </div>
@@ -75,6 +76,7 @@
                 <span class="timeline-title" :class="{ 'is-done': entry.state === 'done' }" :title="entry.title">
                   {{ entry.kind === "task" ? entry.title : recordDescription(entry.title) }}
                 </span>
+                <ChecklistProgress v-if="entry.task" :content="entry.task.stickyContent" />
                 <span v-if="entry.collapsedCount" class="timeline-note">
                   {{ entry.isPast ? `今日已提醒 ${entry.collapsedCount + 1} 次` : `今日还有 ${entry.collapsedCount + 1} 次` }}
                 </span>
@@ -104,6 +106,7 @@
 import { taskAnchorTime } from "../due";
 import { computed, ref, watch } from "vue";
 import { api } from "../api";
+import ChecklistProgress from "../components/ChecklistProgress.vue";
 import { formatAction, formatClock, formatMonthDay, recordDescription, toLocalDateTimeString, dateKey } from "../format";
 import { buildTodayData, nowMarkerIndex, type TimelineEntry } from "../timeline";
 import type { TabKey } from "../navigation";

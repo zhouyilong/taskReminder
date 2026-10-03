@@ -139,7 +139,12 @@
                   <TaskBadges :task="task" clickable :active-tag="filter.tag" @select-tag="toggleTagFilter" />
                 </div>
               </td>
-              <td class="col-note cell-muted" :class="{ 'cell-empty': !task.stickyContent?.trim() }" :title="taskStickyPreview(task.stickyContent)">{{ taskStickyPreview(task.stickyContent) }}</td>
+              <td class="col-note cell-muted" :class="{ 'cell-empty': !task.stickyContent?.trim() }" :title="taskStickyPreview(task.stickyContent)">
+                <span class="note-cell-with-progress">
+                  <ChecklistProgress :content="task.stickyContent" />
+                  <span class="note-cell-text">{{ taskStickyPreview(task.stickyContent) }}</span>
+                </span>
+              </td>
               <td class="col-datetime" :title="timeTitle(task)">
                 <div v-if="task.dueAt" class="due-cell">
                   <span class="time-chip is-due" :class="reminderTone(task.dueAt)">
@@ -187,6 +192,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import ChecklistProgress from "../components/ChecklistProgress.vue";
 import MarkdownNoteEditor from "../components/MarkdownNoteEditor.vue";
 import Pagination from "../components/Pagination.vue";
 import SmartParseHint from "../components/SmartParseHint.vue";
