@@ -1,5 +1,5 @@
-//! 跨版本同步测试：按 2.0.0 / 2.0.1 / 2.0.2 发布时的迁移建库并写入示例数据
-//! （`tests/fixtures/sync-sample-2.0.sql`），检查与当前版本双向合并、从旧版本升级都不丢数据；
+//! 跨版本同步测试：按各发布版本的迁移建库并写入示例数据（`tests/fixtures/sync-sample-2.0.sql`，
+//! 2.1.0 起再加 `sync-sample-2.1.sql`），检查与当前版本双向合并、从旧版本升级都不丢数据；
 //! 再用“模拟更新的版本”（多同步列、多一种循环模式）的库检查不认识的列与值原样保留。
 //!
 //! 发布新版本时：把它的库结构版本加到 `RELEASES`；若新增了同步列，为它另写一份夹具。
@@ -19,8 +19,21 @@ const RELEASES: &[(&str, &str)] = &[
     ("2.0.1", "2.0.3"),
     ("2.0.2", "2.0.5"),
     ("2.0.3", "2.0.5"),
+    ("2.1.0", "2.1.0"),
 ];
 const SAMPLE: &str = include_str!("../../tests/fixtures/sync-sample-2.0.sql");
+/// v2.1 新增同步列的示例数据，只写入库结构 2.1.0 起的库。
+const SAMPLE_2_1: &str = include_str!("../../tests/fixtures/sync-sample-2.1.sql");
+const V2_1_SCHEMA: &str = "2.1.0";
+
+fn parse_version(version: &str) -> Vec<u32> {
+    version.split('.').map(|part| part.parse().unwrap()).collect()
+}
+
+/// 库结构版本是否已有 v2.1 的同步列。
+fn has_v2_1(schema_version: &str) -> bool {
+    parse_version(schema_version) >= parse_version(V2_1_SCHEMA)
+}
 
 struct TempDir(PathBuf);
 
@@ -51,6 +64,9 @@ fn release_db(path: &Path, schema_version: &str) {
     let conn = Connection::open(path).unwrap();
     create_schema_up_to(&conn, schema_version).unwrap();
     conn.execute_batch(SAMPLE).unwrap();
+    if has_v2_1(schema_version) {
+        conn.execute_batch(SAMPLE_2_1).unwrap();
+    }
 }
 
 /// 当前版本的库，含一条本机新建的待办。
@@ -62,10 +78,10 @@ fn current_db(path: &Path) -> (DbManager, String) {
 
 type Rows = Vec<(String, Vec<(String, Value)>)>;
 
-/// 示例数据所属版本（2.0.x）已有的列：之后版本新增的列旧数据里没有值，不参与比较。
-fn sample_columns(table: &str) -> Vec<String> {
+/// 示例数据所属版本已有的列：之后版本新增的列旧数据里没有值，不参与比较。
+fn sample_columns(table: &str, schema_version: &str) -> Vec<String> {
     let conn = Connection::open_in_memory().unwrap();
-    create_schema_up_to(&conn, "2.0.5").unwrap();
+    create_schema_up_to(&conn, schema_version).unwrap();
     table_columns(&conn, table)
         .unwrap()
         .into_iter()
@@ -74,9 +90,9 @@ fn sample_columns(table: &str) -> Vec<String> {
 }
 
 /// 读出一张表中指定 id 的行（只取示例数据版本已有的同步列），用于比较合并前后是否一致。
-fn sync_rows(path: &Path, table: &str, ids: &[&str]) -> Rows {
+fn sync_rows(path: &Path, table: &str, ids: &[&str], schema_version: &str) -> Rows {
     let spec = SYNC_TABLES.iter().find(|t| t.name == table).unwrap();
-    let known = sample_columns(table);
+    let known = sample_columns(table, schema_version);
     let conn = Connection::open(path).unwrap();
     let columns: Vec<&str> = spec
         .columns
@@ -108,13 +124,65 @@ fn sync_rows(path: &Path, table: &str, ids: &[&str]) -> Rows {
 const TASK_IDS: &[&str] = &["old-task-pending", "old-task-done", "old-task-deleted"];
 const RECURRING_IDS: &[&str] = &["old-rec-workday", "old-rec-weekly", "old-rec-future-mode"];
 const RECORD_IDS: &[&str] = &["old-record-1", "old-record-2"];
+const V2_1_TASK_IDS: &[&str] = &["v21-task-due", "v21-task-due-only", "v21-task-future-color"];
+const V2_1_RECURRING_IDS: &[&str] = &["v21-rec-last-day", "v21-rec-last-workday"];
+const V2_1_RECORD_IDS: &[&str] = &["v21-record-1"];
 
-fn all_rows(path: &Path) -> (Rows, Rows, Rows) {
+/// 示例数据中的全部行。2.0.x 的库只比较 2.0 示例数据已有的列；2.1.0 起的库再加上 v2.1 的行与列。
+fn all_rows(path: &Path, schema_version: &str) -> (Rows, Rows, Rows) {
+    let v2_1 = has_v2_1(schema_version);
+    let columns_at = if v2_1 { V2_1_SCHEMA } else { "2.0.5" };
+    let ids = |base: &[&'static str], added: &[&'static str]| -> Vec<&'static str> {
+        let mut ids = base.to_vec();
+        if v2_1 {
+            ids.extend_from_slice(added);
+        }
+        ids
+    };
     (
-        sync_rows(path, "tasks", TASK_IDS),
-        sync_rows(path, "recurring_tasks", RECURRING_IDS),
-        sync_rows(path, "reminder_records", RECORD_IDS),
+        sync_rows(path, "tasks", &ids(TASK_IDS, V2_1_TASK_IDS), columns_at),
+        sync_rows(
+            path,
+            "recurring_tasks",
+            &ids(RECURRING_IDS, V2_1_RECURRING_IDS),
+            columns_at,
+        ),
+        sync_rows(
+            path,
+            "reminder_records",
+            &ids(RECORD_IDS, V2_1_RECORD_IDS),
+            columns_at,
+        ),
     )
+}
+
+/// 2.1.0 起的示例数据：v2.1 字段（含不认识的便签颜色）与两种月末模式读出来都对。
+fn assert_v2_1_sample(db: &DbManager, release: &str) {
+    let task = db.get_task("v21-task-due").unwrap().unwrap();
+    assert_eq!(
+        task.due_at.as_deref(),
+        Some("2026-10-16T18:00:00"),
+        "{}",
+        release
+    );
+    assert_eq!(task.sticky_color, "blue", "{}", release);
+    assert_eq!(task.sort_order, Some(1.5), "{}", release);
+    let future = db.get_task("v21-task-future-color").unwrap().unwrap();
+    assert_eq!(future.sticky_color, "teal", "{}", release);
+    let last_day = db.get_recurring_task("v21-rec-last-day").unwrap().unwrap();
+    assert_eq!(last_day.repeat_mode, RepeatMode::MonthlyLastDay, "{}", release);
+    assert_eq!(last_day.tags, vec!["家务"], "{}", release);
+    let last_workday = db
+        .get_recurring_task("v21-rec-last-workday")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        last_workday.repeat_mode,
+        RepeatMode::MonthlyLastWorkday,
+        "{}",
+        release
+    );
+    assert_eq!(last_workday.tags, vec!["工作", "报销"], "{}", release);
 }
 
 fn column_names(path: &Path, table: &str) -> Vec<String> {
@@ -145,13 +213,13 @@ fn current_device_merges_release_snapshots_without_loss() {
         let dir = TempDir::new("pull");
         let old = dir.path("old.db");
         release_db(&old, schema);
-        let expected = all_rows(&old);
+        let expected = all_rows(&old, schema);
 
         let (current, new_id) = current_db(&dir.path("current.db"));
         merge_databases(&current.db_path(), &old).unwrap();
 
         assert_eq!(
-            all_rows(&current.db_path()),
+            all_rows(&current.db_path(), schema),
             expected,
             "从 {} 合并",
             release
@@ -173,6 +241,9 @@ fn current_device_merges_release_snapshots_without_loss() {
         // 本机专用的便签锚定状态不随同步过来。
         assert!(!current.get_sticky_note_pinned("old-task-pending").unwrap());
         assert_unknown_mode_untouched(&current);
+        if has_v2_1(schema) {
+            assert_v2_1_sample(&current, release);
+        }
     }
 }
 
@@ -182,7 +253,7 @@ fn release_database_receives_current_snapshot() {
         let dir = TempDir::new("push");
         let old = dir.path("old.db");
         release_db(&old, schema);
-        let expected = all_rows(&old);
+        let expected = all_rows(&old, schema);
 
         // 当前版本上传的快照与旧版本建出的库合并：旧数据不变，当前版本新建的行（含 v2.1 新列的值）到达，
         // 表结构补齐到与当前版本一致（合并时补上后来加入的同步列）。
@@ -203,7 +274,7 @@ fn release_database_receives_current_snapshot() {
                 table.name
             );
         }
-        assert_eq!(all_rows(&old), expected, "{}", release);
+        assert_eq!(all_rows(&old, schema), expected, "{}", release);
         let conn = Connection::open(&old).unwrap();
         let due: Option<String> = conn
             .query_row("SELECT due_at FROM tasks WHERE id = ?", [&new_id], |row| {
@@ -220,10 +291,10 @@ fn upgrading_release_database_keeps_data() {
         let dir = TempDir::new("upgrade");
         let path = dir.path("old.db");
         release_db(&path, schema);
-        let expected = all_rows(&path);
+        let expected = all_rows(&path, schema);
 
         let db = DbManager::new(path.clone()).unwrap();
-        assert_eq!(all_rows(&path), expected, "从 {} 升级", release);
+        assert_eq!(all_rows(&path, schema), expected, "从 {} 升级", release);
         assert!(
             db.get_sticky_note_pinned("old-task-pending").unwrap(),
             "{}",
@@ -235,7 +306,10 @@ fn upgrading_release_database_keeps_data() {
         // 读取不会改写不认识的循环模式。
         db.list_recurring_tasks().unwrap();
         assert_unknown_mode_untouched(&db);
-        assert_eq!(all_rows(&path), expected, "{}", release);
+        if has_v2_1(schema) {
+            assert_v2_1_sample(&db, release);
+        }
+        assert_eq!(all_rows(&path, schema), expected, "{}", release);
     }
 }
 
