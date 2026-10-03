@@ -24,6 +24,12 @@
       </button>
     </div>
     <div class="titlebar-actions">
+      <button class="icon-button" type="button" title="搜索（Ctrl+K）" aria-label="搜索" @click="openSearch">
+        <svg viewBox="0 0 24 24" aria-hidden="true" class="stroke-icon">
+          <circle cx="11" cy="11" r="6.5" />
+          <path d="M20 20l-4.2-4.2" />
+        </svg>
+      </button>
       <button class="icon-button theme-toggle" type="button" title="切换主题" @click="toggleTheme">
         <transition name="theme" mode="out-in">
           <svg v-if="isLightTheme" key="sun" viewBox="0 0 24 24" aria-hidden="true" class="theme-icon theme-icon-sun">
@@ -101,6 +107,7 @@ import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/wi
 import { useSettings } from "../composables/useSettings";
 import { useUiPrefs } from "../composables/useUiPrefs";
 import { useUpdater } from "../composables/useUpdater";
+import { useSearchPalette } from "../composables/useSearchPalette";
 
 defineProps<{
   appVersion: string;
@@ -113,6 +120,7 @@ const emit = defineEmits<{ (e: "create-sticky-note"): void }>();
 const { syncStatusLabel, syncStatusTone, syncStatusTitle, openSettings, openWebdav } = useSettings();
 const { isLightTheme, toggleTheme } = useUiPrefs();
 const { updateTagLabel } = useUpdater();
+const { openSearch } = useSearchPalette();
 
 const isWindowMaximized = ref(false);
 

@@ -5,6 +5,7 @@ export type ShortcutAction =
   | { type: "tab"; tab: TabKey }
   | { type: "new" }
   | { type: "search" }
+  | { type: "palette" }
   | { type: "escape" }
   | { type: "delete" };
 
@@ -16,6 +17,7 @@ type KeyLike = Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "alt
 /** 快捷键说明（设置中展示）。 */
 export const SHORTCUT_HELP: Array<{ keys: string; label: string }> = [
   { keys: "Ctrl + N", label: "新建（聚焦当前页的新建输入框）" },
+  { keys: "Ctrl + K", label: "全局搜索（待办、循环提醒、已办与便签内容）" },
   { keys: "Ctrl + F", label: "搜索（聚焦当前页的搜索框）" },
   { keys: "Alt + 1 … 9", label: "切换到侧边栏中的第 1 … 9 页" },
   { keys: "Esc", label: "关闭弹窗 / 退出多选" },
@@ -41,6 +43,7 @@ export const resolveShortcut = (event: KeyLike): ShortcutAction | null => {
   if (mod && !event.altKey && !event.shiftKey) {
     if (key === "n") return { type: "new" };
     if (key === "f") return { type: "search" };
+    if (key === "k") return { type: "palette" };
     return null;
   }
   if (event.altKey && !mod && !event.shiftKey) {

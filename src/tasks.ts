@@ -1,5 +1,6 @@
 // 待办列表的标签、优先级、筛选与排序。纯函数，便于测试。
 import { taskAnchorTime } from "./due";
+import { matchesKeyword } from "./search";
 import type { Task } from "./types";
 
 export const PRIORITY_OPTIONS = [
@@ -75,14 +76,7 @@ export const matchesTaskFilter = (task: Task, filter: TaskFilter) => {
   if (filter.priority >= 0 && priorityOf(task) !== filter.priority) {
     return false;
   }
-  const query = filter.query.trim().toLowerCase();
-  if (!query) {
-    return true;
-  }
-  const haystack = [task.description, task.stickyContent ?? "", ...(task.tags ?? []).map(tag => `#${tag}`)]
-    .join("\n")
-    .toLowerCase();
-  return query.split(/\s+/).every(part => haystack.includes(part));
+  return matchesKeyword({ text: [task.description, task.stickyContent], tags: task.tags }, filter.query);
 };
 
 const compareOptionalTime = (a?: string | null, b?: string | null) => {

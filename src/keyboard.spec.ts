@@ -18,6 +18,8 @@ describe("resolveShortcut", () => {
     expect(resolveShortcut(key({ key: "n", ctrlKey: true }))).toEqual({ type: "new" });
     expect(resolveShortcut(key({ key: "N", metaKey: true }))).toEqual({ type: "new" });
     expect(resolveShortcut(key({ key: "f", ctrlKey: true }))).toEqual({ type: "search" });
+    expect(resolveShortcut(key({ key: "k", ctrlKey: true }))).toEqual({ type: "palette" });
+    expect(resolveShortcut(key({ key: "K", metaKey: true }))).toEqual({ type: "palette" });
     expect(resolveShortcut(key({ key: "n", ctrlKey: true, shiftKey: true }))).toBeNull();
     expect(resolveShortcut(key({ key: "s", ctrlKey: true }))).toBeNull();
   });

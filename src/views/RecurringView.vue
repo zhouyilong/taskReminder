@@ -22,12 +22,24 @@
         <TagInput v-model="newRecurring.tags" :suggestions="tagSuggestions" />
       </div>
     </div>
-    <div v-if="recurringTagOptions.length" class="task-toolbar">
-      <select class="select" v-model="tagFilter" title="按标签筛选">
+    <div class="task-toolbar">
+      <div class="search-field">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="11" cy="11" r="6.5" />
+          <path d="M16 16l4 4" />
+        </svg>
+        <input data-shortcut="search" class="input" v-model="keyword" placeholder="搜索描述、规则或 #标签" />
+        <button v-if="keyword" class="search-clear" type="button" title="清空" @click="keyword = ''">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M7 7l10 10M17 7L7 17" />
+          </svg>
+        </button>
+      </div>
+      <select v-if="recurringTagOptions.length" class="select" v-model="tagFilter" title="按标签筛选">
         <option value="">全部标签</option>
         <option v-for="item in recurringTagOptions" :key="item.tag" :value="item.tag">#{{ item.tag }}（{{ item.count }}）</option>
       </select>
-      <span v-if="tagFilter" class="section-meta">筛选后 {{ visibleRecurring.length }} / {{ recurringTasks.length }} 条</span>
+      <span v-if="tagFilter || keyword.trim()" class="section-meta">筛选后 {{ visibleRecurring.length }} / {{ recurringTasks.length }} 条</span>
     </div>
     <div class="table-card">
       <div class="table-scroll">
@@ -107,6 +119,7 @@ import {
   validateRecurringDraft,
   workdayHolidayWarning
 } from "../recurring";
+import { matchesKeyword, parseQuery } from "../search";
 import { useAppData } from "../composables/useAppData";
 import { useItemActions } from "../composables/useItemActions";
 import { usePagination } from "../composables/usePagination";
@@ -119,12 +132,19 @@ const recurringTagOptions = computed(() => collectTags(recurringTasks.value));
 const tagSuggestions = computed(() =>
   collectTags([...recurringTasks.value, ...tasks.value, ...completedTasks.value]).map(item => item.tag)
 );
+const keyword = ref("");
 const visibleRecurring = computed(() => {
   const tag = tagFilter.value.toLowerCase();
-  return tag
-    ? recurringTasks.value.filter(task => (task.tags ?? []).some(item => item.toLowerCase() === tag))
-    : recurringTasks.value;
+  const query = parseQuery(keyword.value);
+  return recurringTasks.value.filter(task => {
+    if (tag && !(task.tags ?? []).some(item => item.toLowerCase() === tag)) return false;
+    return matchesKeyword(
+      { text: [task.description, formatRecurringMode(task.repeatMode), formatRecurringRule(task)], tags: task.tags },
+      query
+    );
+  });
 });
+const paginationKey = computed(() => `${tagFilter.value}\n${keyword.value}`);
 const toggleTagFilter = (tag: string) => {
   tagFilter.value = tagFilter.value.toLowerCase() === tag.toLowerCase() ? "" : tag;
 };
@@ -139,7 +159,7 @@ const {
   pageSize: recurringPageSize,
   totalPages: recurringTotalPages,
   page: recurringPage
-} = usePagination(visibleRecurring, tagFilter);
+} = usePagination(visibleRecurring, paginationKey);
 
 const newRecurring = reactive(createRecurringDraft());
 
