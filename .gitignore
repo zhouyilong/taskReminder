@@ -32,3 +32,7 @@ Thumbs.db
 src-tauri/gen/schemas/windows-schema.json
 
 .codex
+
+# Playwright
+test-results/
+playwright-report/

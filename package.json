@@ -8,6 +8,7 @@
     "build": "vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit",
     "test": "vitest run",
+    "e2e": "playwright test",
     "preview": "vite preview",
     "tauri": "node scripts/tauri.mjs",
     "release:updater": "powershell -ExecutionPolicy Bypass -File scripts/build-updater.ps1"
@@ -20,6 +21,7 @@
     "vue": "3.5.27"
   },
   "devDependencies": {
+    "@playwright/test": "~1.56.1",
     "@tauri-apps/cli": "^2.12.0",
     "@vitejs/plugin-vue": "^5.0.4",
     "typescript": "^5.4.0",
