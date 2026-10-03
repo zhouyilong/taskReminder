@@ -177,6 +177,11 @@ pub(super) fn migration_scripts() -> Vec<MigrationScript> {
             description: "add due time, sticky color, sort order and recurring tags".to_string(),
             sql: include_str!("../../migrations/V2.1.0__add_due_color_order_recurring_tags.sql"),
         },
+        MigrationScript {
+            version: "2.1.1".to_string(),
+            description: "add completed retention".to_string(),
+            sql: include_str!("../../migrations/V2.1.1__add_completed_retention.sql"),
+        },
     ]
 }
 

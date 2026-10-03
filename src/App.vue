@@ -20,6 +20,7 @@
     <SettingsModal :app-version="appVersion" />
     <WebdavModal />
     <DataModal />
+    <SearchPalette @navigate="activeTab = $event" />
     <!-- 放在最后：确认框需要叠在设置类弹窗之上。 -->
     <SharedDialogs />
   </div>
@@ -34,6 +35,7 @@ import SharedDialogs from "./components/SharedDialogs.vue";
 import SettingsModal from "./components/SettingsModal.vue";
 import WebdavModal from "./components/WebdavModal.vue";
 import DataModal from "./components/DataModal.vue";
+import SearchPalette from "./components/SearchPalette.vue";
 import TodayView from "./views/TodayView.vue";
 import CalendarView from "./views/CalendarView.vue";
 import TasksView from "./views/TasksView.vue";
@@ -53,6 +55,7 @@ import { useAppData } from "./composables/useAppData";
 import { useSettings } from "./composables/useSettings";
 import { useUiPrefs } from "./composables/useUiPrefs";
 import { useUpdater } from "./composables/useUpdater";
+import { useSearchPalette } from "./composables/useSearchPalette";
 import type { SyncStatus } from "./types";
 
 const VIEWS: Record<TabKey, Component> = {
@@ -81,6 +84,7 @@ const creatingQuickStickyNote = ref(false);
 const { refreshAll, loadHolidayYears } = useAppData();
 const { isLightTheme, uiScale, windowOpacity, emitCurrentUiState } = useUiPrefs();
 const { syncStatus, loadSettings, refreshSyncStatus, applyQuickAddShortcut, openSettings, openWebdav } = useSettings();
+const { openSearch } = useSearchPalette();
 const { handleCheckForUpdates, maybeAutoCheckForUpdates, releaseAvailableUpdateHandle, syncUpdatePreferencesDraft } = useUpdater();
 
 const handleCreateStickyNote = async () => {
@@ -145,6 +149,9 @@ const handleShortcut = (event: KeyboardEvent) => {
     case "new":
     case "search":
       void focusShortcutTarget(action.type);
+      break;
+    case "palette":
+      openSearch();
       break;
     case "escape":
     case "delete":

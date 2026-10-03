@@ -37,7 +37,8 @@ const settingsDraft = reactive<AppSettings>({
   nativeNotificationEnabled: false,
   stickyToggleShortcut: "",
   stickySnapEnabled: true,
-  holidayAutoUpdate: true
+  holidayAutoUpdate: true,
+  completedRetentionDays: 30
 });
 const syncStatus = ref<SyncStatus | null>(null);
 const quickAddShortcutError = ref("");

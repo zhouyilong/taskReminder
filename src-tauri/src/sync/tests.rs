@@ -52,7 +52,10 @@ fn cleaned_up_completed_task_does_not_resurrect_after_merge() {
     copy_task(&local.db_path(), &remote.db_path(), &task.id);
 
     local
-        .cleanup_data(crate::db::TOMBSTONE_RETENTION_DAYS_SYNC)
+        .cleanup_data(
+            crate::db::TOMBSTONE_RETENTION_DAYS_SYNC,
+            crate::models::DEFAULT_COMPLETED_RETENTION_DAYS,
+        )
         .unwrap();
     merge_databases(&local.db_path(), &remote.db_path()).unwrap();
 

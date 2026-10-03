@@ -71,6 +71,7 @@ import Pagination from "../components/Pagination.vue";
 import TaskBadges from "../components/TaskBadges.vue";
 import { formatDateTime, taskStickyPreview } from "../format";
 import { markdownToPlainText } from "../markdown";
+import { isEmptyQuery, matchesKeyword, parseQuery } from "../search";
 import { useAppData } from "../composables/useAppData";
 import { useItemActions } from "../composables/useItemActions";
 import { usePagination } from "../composables/usePagination";
@@ -81,16 +82,13 @@ const { toggleTask, openTaskDetail, openCompletedMenu } = useItemActions();
 const completedFilter = ref("");
 
 const filteredCompleted = computed(() => {
-  const keyword = completedFilter.value.trim().toLowerCase();
-  if (!keyword) {
+  const query = parseQuery(completedFilter.value);
+  if (isEmptyQuery(query)) {
     return completedTasks.value;
   }
-  return completedTasks.value.filter(task => {
-    const descriptionMatched = task.description.toLowerCase().includes(keyword);
-    const stickyContentMatched = markdownToPlainText(task.stickyContent).toLowerCase().includes(keyword);
-    const tagMatched = (task.tags ?? []).some(tag => `#${tag}`.toLowerCase().includes(keyword));
-    return descriptionMatched || stickyContentMatched || tagMatched;
-  });
+  return completedTasks.value.filter(task =>
+    matchesKeyword({ text: [task.description, markdownToPlainText(task.stickyContent)], tags: task.tags }, query)
+  );
 });
 
 const {

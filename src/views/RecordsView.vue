@@ -4,6 +4,18 @@
       <div class="section-title">提醒记录</div>
       <span class="section-meta">筛选后 {{ filteredRecords.length }} 条</span>
     </div>
+    <div class="search-field">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="11" cy="11" r="6.5" />
+          <path d="M16 16l4 4" />
+        </svg>
+        <input data-shortcut="search" class="input" v-model="recordKeyword" placeholder="搜索提醒描述" />
+        <button v-if="recordKeyword" class="search-clear" type="button" title="清空" @click="recordKeyword = ''">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M7 7l10 10M17 7L7 17" />
+          </svg>
+        </button>
+      </div>
     <div class="form-row compact filter-bar">
       <label class="field-label">开始</label>
       <input class="input" type="date" v-model="recordFilterStart" @change="handleRecordDatePicked" />
@@ -76,6 +88,7 @@
 import { computed, ref } from "vue";
 import Pagination from "../components/Pagination.vue";
 import { formatAction, formatDateTime, isLinuxPlatform, recordDescription } from "../format";
+import { matchesKeyword, parseQuery } from "../search";
 import { useAppData } from "../composables/useAppData";
 import { useItemActions } from "../composables/useItemActions";
 import { usePagination } from "../composables/usePagination";
@@ -88,8 +101,13 @@ const recordFilterEnd = ref("");
 const recordFilterType = ref("all");
 const selectedRecords = ref<string[]>([]);
 
+const recordKeyword = ref("");
 const filteredRecords = computed(() => {
+  const query = parseQuery(recordKeyword.value);
   return reminderRecords.value.filter(record => {
+    if (!matchesKeyword({ text: [recordDescription(record.description)] }, query)) {
+      return false;
+    }
     if (recordFilterType.value !== "all" && record.type !== recordFilterType.value) {
       return false;
     }
@@ -108,7 +126,7 @@ const {
   pageSize: recordPageSize,
   totalPages: recordTotalPages,
   page: recordPage
-} = usePagination(filteredRecords);
+} = usePagination(filteredRecords, recordKeyword);
 
 const handleRecordDatePicked = (event: Event) => {
   if (!isLinuxPlatform) {
@@ -131,6 +149,7 @@ const clearRecordFilter = () => {
   recordFilterStart.value = "";
   recordFilterEnd.value = "";
   recordFilterType.value = "all";
+  recordKeyword.value = "";
   recordPageIndex.value = 1;
 };
 

@@ -140,6 +140,8 @@ export interface AppSettings {
   stickySnapEnabled: boolean;
   /** 每天从项目仓库检查节假日数据更新（本机设置）。 */
   holidayAutoUpdate: boolean;
+  /** 已完成待办的保留天数：30（默认，另限最近 100 条）/ 90 / 365 / 0（永久），本机设置。 */
+  completedRetentionDays: number;
   /** 密码存放位置（只读）：keyring 为 Windows 凭据管理器，db 为本机数据库。 */
   secretStorage?: "db" | "keyring" | string;
 }

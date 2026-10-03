@@ -91,6 +91,9 @@
         @update:modelValue="handleContentInput"
       />
       <footer class="paper-note-footer">
+        <div v-if="checklist" class="paper-note-progress" aria-hidden="true">
+          <span class="paper-note-progress-fill" :style="{ width: `${(checklist.done / checklist.total) * 100}%` }"></span>
+        </div>
         <div class="paper-note-color">
           <button
             class="paper-note-color-trigger"
@@ -115,8 +118,27 @@
             </button>
           </div>
         </div>
-        <span class="paper-note-time">{{ formattedCreatedAt }}</span>
+        <!-- 全部勾完时页脚放“标记完成”，创建时间让出位置。 -->
+        <span v-if="!checklistDone" class="paper-note-time">{{ formattedCreatedAt }}</span>
+        <span
+          v-if="checklist"
+          class="paper-note-progress-text"
+          :title="`清单已完成 ${checklist.done} / ${checklist.total} 项`"
+        >{{ checklist.done }}/{{ checklist.total }}</span>
         <div class="paper-note-footer-right">
+          <button
+            v-if="checklistDone"
+            class="paper-note-done-button"
+            type="button"
+            title="清单已全部勾完，标记待办完成并关闭便签"
+            @mousedown.stop.prevent
+            @click.stop="completeAndCloseNote"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" stroke="currentColor" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            标记完成
+          </button>
           <span class="paper-note-save-hint">
             <template v-if="saveCountdownSeconds > 0">
               <span class="paper-note-save-countdown">{{ saveCountdownSeconds }}</span>秒后保存
@@ -177,6 +199,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import MarkdownNoteEditor from "./components/MarkdownNoteEditor.vue";
 import { safeStorage } from "./safeStorage";
 import { api } from "./api";
+import { checklistProgress } from "./markdown";
 import type { AppSettings, StickyNote, UiStatePayload } from "./types";
 import { STICKY_COLOR_OPTIONS, stickyColorClass, stickyDotClass as dotClass } from "./stickies";
 
@@ -285,6 +308,10 @@ let stickyNoteHandler: ((event: Event) => void) | null = null;
 let uiStatePollInterval: number = 0;
 // Tracks last-applied state key for change detection in the poll loop.
 let lastUiStateKey = "";
+
+// 勾选清单进度（v2.1.1）：全部勾完时页脚出现“标记完成”，不自动完成。
+const checklist = computed(() => checklistProgress(note.value?.content));
+const checklistDone = computed(() => !!checklist.value && checklist.value.done === checklist.value.total);
 
 const formattedCreatedAt = computed(() => {
   if (!note.value?.createdAt) return "";

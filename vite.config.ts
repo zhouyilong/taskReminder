@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { resolve } from "path";
@@ -15,6 +16,10 @@ export default defineConfig({
     watch: {
       ignored: ["**/.dev/**", "**/src-tauri/target/**"]
     }
+  },
+  // 单元测试只跑 src 与 scripts 下的用例；e2e/ 由 Playwright 运行（pnpm e2e）。
+  test: {
+    include: ["src/**/*.spec.ts", "scripts/**/*.spec.mjs"]
   },
   build: {
     target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",

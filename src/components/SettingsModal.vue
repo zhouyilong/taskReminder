@@ -132,6 +132,13 @@
         <button class="button secondary" type="button" @click="openData">导入导出与备份…</button>
         <span class="field-hint">JSON 备份、Markdown、日历（ICS），每天自动备份</span>
       </div>
+      <div class="form-row compact">
+        <label>已完成待办保留</label>
+        <select class="select" v-model.number="settingsDraft.completedRetentionDays">
+          <option v-for="item in COMPLETED_RETENTION_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
+        </select>
+        <span class="field-hint">{{ completedRetentionHint(settingsDraft.completedRetentionDays, settingsDraft.webdavEnabled) }}</span>
+      </div>
     </div>
     <div class="modal-section">
       <div class="form-row compact">
@@ -245,6 +252,7 @@ import { useUiPrefs } from "../composables/useUiPrefs";
 import { useUpdater } from "../composables/useUpdater";
 import { playChime } from "../notificationSound";
 import { SHORTCUT_HELP } from "../keyboard";
+import { COMPLETED_RETENTION_OPTIONS, completedRetentionHint } from "../retention";
 
 const props = defineProps<{ appVersion: string }>();
 

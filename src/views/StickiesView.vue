@@ -75,7 +75,10 @@
                 </span>
               </td>
               <td class="col-note cell-muted" :class="{ 'cell-empty': !item.preview }" :title="item.preview">
-                {{ item.preview || "-" }}
+                <span class="note-cell-with-progress">
+                  <ChecklistProgress :content="item.note.content" />
+                  <span class="note-cell-text">{{ item.preview || "-" }}</span>
+                </span>
               </td>
               <td class="col-sticky-reminder">
                 <span v-if="item.note.reminderTime" class="time-chip" :class="reminderTone(item.note.reminderTime)">
@@ -126,6 +129,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { listen } from "@tauri-apps/api/event";
+import ChecklistProgress from "../components/ChecklistProgress.vue";
 import Pagination from "../components/Pagination.vue";
 import { api } from "../api";
 import { errorMessage, formatDateTime, reminderTone } from "../format";

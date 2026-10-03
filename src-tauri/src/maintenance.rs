@@ -1,5 +1,6 @@
 use crate::backup;
 use crate::db::{tombstone_retention_days, DbManager};
+use crate::models::DEFAULT_COMPLETED_RETENTION_DAYS;
 use crate::time;
 
 use tokio::time::sleep;
@@ -13,7 +14,11 @@ pub fn start_maintenance(db: DbManager) {
                 .load_settings()
                 .map(|settings| settings.webdav_enabled)
                 .unwrap_or(true);
-            let _ = db_cleanup.cleanup_data(tombstone_retention_days(sync_enabled));
+            let completed_retention = db_cleanup
+                .completed_retention_days()
+                .unwrap_or(DEFAULT_COMPLETED_RETENTION_DAYS);
+            let _ = db_cleanup
+                .cleanup_data(tombstone_retention_days(sync_enabled), completed_retention);
         }
     });
 

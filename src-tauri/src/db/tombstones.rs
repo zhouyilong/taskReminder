@@ -24,14 +24,28 @@ impl DbManager {
     }
 
     /// 定期清理：
-    /// 1. 超过 30 天、或超出最近 100 条的已完成任务转为墓碑（软删除），
-    ///    而不是直接物理删除——否则云同步合并时远端仍有该行，会被重新插回本地；
+    /// 1. 完成超过 `completed_retention_days` 天的任务转为墓碑（软删除），
+    ///    而不是直接物理删除——否则云同步合并时远端仍有该行，会被重新插回本地。
+    ///    默认的 30 天另外只保留最近 100 条；0 表示永久保留，不清理已完成任务；
     /// 2. 物理删除超过保留期的墓碑。
-    pub fn cleanup_data(&self, tombstone_retention_days: i64) -> Result<(), AppError> {
+    pub fn cleanup_data(
+        &self,
+        tombstone_retention_days: i64,
+        completed_retention_days: i64,
+    ) -> Result<(), AppError> {
+        let completed_retention_days = normalize_completed_retention_days(completed_retention_days);
+        if completed_retention_days > 0 {
+            self.tombstone_old_completed_tasks(completed_retention_days)?;
+        }
+        self.purge_expired_tombstones(tombstone_retention_days)?;
+        Ok(())
+    }
+
+    fn tombstone_old_completed_tasks(&self, retention_days: i64) -> Result<(), AppError> {
         let conn = self.get_conn()?;
         let now = time::now();
         let now_text = format_datetime(&now);
-        let completed_cutoff = format_datetime(&(now - chrono::Duration::days(30)));
+        let completed_cutoff = format_datetime(&(now - chrono::Duration::days(retention_days)));
 
         conn.execute(
             "UPDATE tasks SET deleted_at = ?1, updated_at = ?1
@@ -39,6 +53,9 @@ impl DbManager {
                AND completed_at IS NOT NULL AND completed_at < ?2",
             params![now_text, completed_cutoff],
         )?;
+        if retention_days != DEFAULT_COMPLETED_RETENTION_DAYS {
+            return Ok(());
+        }
         conn.execute(
             "UPDATE tasks SET deleted_at = ?1, updated_at = ?1 WHERE id IN (
                 SELECT id FROM tasks
@@ -48,8 +65,6 @@ impl DbManager {
             )",
             params![now_text],
         )?;
-        drop(conn);
-        self.purge_expired_tombstones(tombstone_retention_days)?;
         Ok(())
     }
 

@@ -4,7 +4,7 @@
 - `src/` 存放 Vue 3 + TypeScript 前端，共三个窗口入口：
   - 主窗口：`index.html` → `src/main.ts` → `src/App.vue`（只负责外壳：标题栏、侧边栏、按 Tab 切换视图、挂载共享弹窗与全局事件监听）。
     - `src/views/`：每个 Tab 一个视图——`TodayView`（今天时间线）、`CalendarView`（日历月视图 / 周视图，可拖动待办改期到某天或某个时段）、`TasksView`（含搜索、标签/优先级筛选与排序）、`CompletedView`、`RecurringView`、`StickiesView`（便签管理列表：显示中 / 已隐藏 / 已关闭，打开、置前、关闭）、`RecordsView`、`StatsView`（统计）、`TrashView`（回收站）。Tab 键定义在 `src/navigation.ts`，上次打开的 Tab 记在 `localStorage.activeTab`。
-    - `src/composables/`：模块级单例的共享状态——`useAppData`（四个列表、`refreshAll`、`dataVersion`）、`useSettings`（设置草稿、同步状态、设置/云同步弹窗开关）、`useUpdater`、`useUiPrefs`（主题、缩放、透明度、侧边栏）、`useDialogs`（确认框、详情、编辑待办/循环提醒）、`useItemActions`（完成、删除、右键菜单等通用操作）、`useSmartAdd`（带自然语言识别的新建待办/循环提醒）、`useContextMenu`、`usePagination`、`useNow`。
+    - `src/composables/`：模块级单例的共享状态——`useAppData`（四个列表、`refreshAll`、`dataVersion`）、`useSettings`（设置草稿、同步状态、设置/云同步弹窗开关）、`useUpdater`、`useUiPrefs`（主题、缩放、透明度、侧边栏）、`useDialogs`（确认框、详情、编辑待办/循环提醒）、`useItemActions`（完成、删除、右键菜单等通用操作）、`useSmartAdd`（带自然语言识别的新建待办/循环提醒）、`useContextMenu`、`usePagination`、`useNow`、`useSearchPalette`（全局搜索面板开关）。
   - 提醒弹窗：`notification.html` → `src/notification.ts` → `src/NotificationApp.vue`。
   - 桌面便签：`sticky-note-item.html` → `src/stickyNoteItem.ts` → `src/StickyNoteItemApp.vue`（每张便签一个独立窗口，窗口标签为 `sticky-note-item-<编码后的 id>`）。
   - 快速添加：`quick-add.html` → `src/quickAdd.ts` → `src/QuickAddApp.vue`（窗口标签 `quick-add`，由全局快捷键或托盘菜单打开）。
@@ -20,10 +20,13 @@
   - `TaskBadges.vue`（优先级与标签徽标）、`TagInput.vue`（标签输入）、`PriorityPicker.vue`（优先级分段选择）、`SmartParseHint.vue`（自然语言识别结果提示）。
   - `DataModal.vue`：导入导出与本地备份（从设置打开）。
   - `TaskBatchBar.vue`：待办多选后的批量操作栏（完成、删除、加标签、优先级、改提醒时间）。
+  - `SearchPalette.vue`：全局搜索面板（`Ctrl+K` / 标题栏按钮），挂在 App.vue，回车跳到对应页面并打开编辑或详情。
+  - `StatsBarChart.vue`：统计面板的堆叠柱状图（提醒与完成趋势共用）。
+  - `ChecklistProgress.vue`：正文中勾选清单的进度徽标（如 2/5）。
 - `src/api.ts` 封装所有 Tauri `invoke` 命令；`src/types.ts` 为前后端共享的数据类型。
-- `src/markdown.ts` Markdown 转纯文本/预览文本工具（列表描述、提醒记录去掉前导列表标记）。
+- `src/markdown.ts` Markdown 转纯文本/预览文本工具（列表描述、提醒记录去掉前导列表标记）与勾选清单进度（`checklistProgress`，Crepe 保存为 `* [ ]`）。
 - `src/format.ts` 主窗口共用的时间与文案格式化；`src/recurring.ts` 循环规则展示、表单草稿、校验与提交载荷。
-- `src/timeline.ts`（“今天”时间线）、`src/stats.ts`（统计面板）、`src/calendar.ts`（日历网格与按天归类）、`src/tasks.ts`（标签、优先级、筛选排序）、`src/stickies.ts`（便签列表状态、筛选排序）、`src/nlp.ts`（自然语言时间/标签/优先级/循环规则识别）为纯函数，测试在同名 `*.spec.ts`。
+- `src/timeline.ts`（“今天”时间线）、`src/stats.ts`（统计面板）、`src/calendar.ts`（日历网格与按天归类）、`src/tasks.ts`（标签、优先级、筛选排序）、`src/stickies.ts`（便签列表状态、筛选排序）、`src/nlp.ts`（自然语言时间/标签/优先级/循环规则识别）、`src/search.ts`（全局搜索与各列表关键词搜索的统一规则：多词为“且”，`#标签` 只与标签前缀匹配）、`src/retention.ts`（已完成待办保留期选项与说明）为纯函数，测试在同名 `*.spec.ts`。
 - `src/syncStatus.ts` 云同步状态码到文案与色调的映射（兼容旧版中文状态）；`src/quietHours.ts` 勿扰时段说明文案。
 - `src/safeStorage.ts` 带异常保护的 `localStorage` 封装；`src/startupError.ts` 启动失败时渲染错误页。
 - `src/styles.css` 为三个窗口共用的全局样式表（设计令牌、主窗口、提醒弹窗、便签）；组件私有样式放在 `.vue` 文件内。
@@ -40,7 +43,7 @@
   - `src-tauri/tauri.conf.json` 定义窗口、打包、更新器与应用元数据；`src-tauri/tauri.updater.conf.json` 为签名构建时的覆盖配置。
 - `docs/ROADMAP.md` 为功能扩展与重构路线图，完成条目后同步勾选并补充变更记录。
 - `.github/workflows/release.yml` 推送 `v*` tag 时签名构建 MSI 并上传到草稿 Release（发布说明取 `docs/release-notes/v{version}.md`）。
-- `.github/workflows/ci.yml` 为 CI（Ubuntu + Windows：`pnpm build`、`pnpm test`、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`；另有 `holidays` 任务检查节假日数据）。
+- `.github/workflows/ci.yml` 为 CI（Ubuntu + Windows：`pnpm build`、`pnpm test`、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`；另有 `holidays` 任务检查节假日数据、`e2e` 任务运行 Playwright）。
 - `scripts/` 存放构建与发布脚本。
   - `scripts/build-updater.ps1` 签名构建 MSI + 生成更新清单。
   - `scripts/write-updater-manifest.mjs` 生成 `latest.json` 更新清单。
@@ -52,7 +55,8 @@
 - `pnpm dev`：启动 Web UI 的 Vite 开发服务器。
 - `pnpm build`：先执行 `vue-tsc --noEmit` 类型检查，再将前端打包到 `dist/`。
 - `pnpm typecheck`：仅做类型检查。
-- `pnpm test`：运行 Vitest 前端单元测试（`src/**/*.spec.ts`）。
+- `pnpm test`：运行 Vitest 前端单元测试（`src/**/*.spec.ts` 与 `scripts/**/*.spec.mjs`）。
+- `pnpm e2e`：运行 Playwright 端到端测试（`e2e/*.spec.ts`，自动启动 Vite 开发服务器，Tauri 运行时由 `e2e/tauri-mock.js` 模拟）。
 - `pnpm preview`：本地预览生产构建。
 - `pnpm tauri dev`：以开发模式运行完整的 Tauri 桌面应用。
 - `pnpm tauri build`：生成生产环境桌面应用包，不生成 updater 签名产物。
@@ -128,6 +132,7 @@
 ### 删除与清理必须走墓碑
 - **问题**：直接 `DELETE` 行后，远端库仍有该行，同步合并会把它重新插回本地（“复活”）。
 - **规则**：业务删除与定期清理一律写 `deleted_at` + `updated_at`（墓碑）；只有 `purge_expired_tombstones` 按保留期（本地 7 天，开启同步 60 天）物理删除，同步在合并后、上传前也会调用它。
+- 已完成待办的清理按本机设置 `completed_retention_days`（30 默认并限最近 100 条 / 90 / 365 / 0 永久，迁移 `V2.1.1`；定期清理用 `DbManager::completed_retention_days` 只读这一列）。清理写的是墓碑并会同步，所以多设备时以最短的为准，界面说明中写明，不要改成只在本机隐藏。
 - 回收站（`list_trash`）只列出保留期内的墓碑。恢复即清除 `deleted_at`；恢复循环提醒时从当前时间重新计算下次触发。
 - 回收站的“永久删除”（`purge_trash` → `expire_tombstones`）不能直接 `DELETE`：把 `deleted_at` 改为 `EXPIRED_TOMBSTONE_TIME` 并刷新 `updated_at`，让本地行在合并中胜出，再由清理物理删除（未开启同步时立即清理）。
 
@@ -211,10 +216,11 @@
 ## 测试指南
 - 前端使用 Vitest：测试与被测模块同目录，命名为 `*.spec.ts`（`scripts/` 下的脚本为 `*.spec.mjs`），运行 `pnpm test`。前端改动至少执行 `pnpm build`（含 `vue-tsc` 类型检查）与 `pnpm test`。
 - 视图里的计算逻辑（如时间线、统计）优先抽成 `src/` 下的纯函数再写测试，组件只做展示。
-- Rust 测试位于 `src-tauri/src/` 各模块的 `#[cfg(test)]` 中（便签窗口标签/URL、提醒队列、墓碑清理、同步合并、时间解析、节假日、循环规则）；跨版本同步测试在 `sync/compat_tests.rs`，按各发布版本的迁移建库（`db::create_schema_up_to`，仅测试）并写入 `src-tauri/tests/fixtures/` 中的示例数据，发布新版本时把它的库结构版本加到 `RELEASES`，通过 `cargo test` 运行；需要数据库的测试用临时目录创建 `DbManager`，会自动执行迁移。
+- Rust 测试位于 `src-tauri/src/` 各模块的 `#[cfg(test)]` 中（便签窗口标签/URL、提醒队列、墓碑清理、同步合并、时间解析、节假日、循环规则）；跨版本同步测试在 `sync/compat_tests.rs`，按各发布版本的迁移建库（`db::create_schema_up_to`，仅测试）并写入 `src-tauri/tests/fixtures/` 中的示例数据（`sync-sample-2.0.sql`；库结构 2.1.0 起再加 `sync-sample-2.1.sql`），发布新版本时把它的库结构版本加到 `RELEASES`，通过 `cargo test` 运行；需要数据库的测试用临时目录创建 `DbManager`，会自动执行迁移。
 - 提交前运行 `cargo fmt` 与 `cargo clippy --all-targets -- -D warnings`，CI 会执行 `cargo fmt --check` 并在 clippy 有告警时失败。只在 Windows 编译的代码（`#[cfg(target_os = "windows")]`）在 Linux 上检查不到，可用 `rustup target add x86_64-pc-windows-gnu`（需 `mingw-w64`）后执行 `cargo clippy --target x86_64-pc-windows-gnu --all-targets` 预检。
 - 在 Linux 上构建会改写 `src-tauri/gen/schemas/`，这些生成文件的无关变动不要提交。
-- 仅调整前端 UI 时，可用 `pnpm dev` 在浏览器中预览；浏览器中没有 Tauri 运行时，需要在页面加载前注入 `window.__TAURI_INTERNALS__`（模拟 `invoke`、`transformCallback`、`metadata.currentWindow`）并返回示例数据，否则列表为空。
+- 仅调整前端 UI 时，可用 `pnpm dev` 在浏览器中预览；浏览器中没有 Tauri 运行时，需要在页面加载前注入 `window.__TAURI_INTERNALS__`，直接复用 `e2e/tauri-mock.js`（Playwright 的 `page.addInitScript({ path })`，内存示例数据、调用记录在 `window.__TAURI_MOCK__.calls`；可先设 `window.__TAURI_MOCK_SEED__` 覆盖数据）。新增后端命令时若界面依赖它，同步在模拟中补上。
+- 端到端测试（`e2e/`）只断言 DOM 与 `invoke` 参数，不做截图比对；用 `e2e/fixtures.ts` 的 `test` / `invokeCalls`。Milkdown 编辑器的内容变更事件有 200ms 防抖，输入后要稍等再提交。本地环境若已预装 Chromium，`@playwright/test` 的版本需与之匹配（当前 1.56）。
 
 ## 提交与合并请求指南
 - 提交信息使用简短祈使句，例如：`feat: 新增托盘开关`、`fix: 修复更新安装失败`。
