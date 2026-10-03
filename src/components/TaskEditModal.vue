@@ -5,6 +5,7 @@
     </div>
     <div class="form-row form-row-markdown">
       <MarkdownNoteEditor
+        ref="noteEditor"
         v-model="stickyContent"
         class="task-markdown-editor task-markdown-editor-modal"
         :theme="isLightTheme ? 'light' : 'dark'"
@@ -46,6 +47,20 @@
       <span class="form-row-label">标签</span>
       <TagInput v-model="tags" :suggestions="tagSuggestions" />
     </div>
+    <div class="form-row compact">
+      <span class="form-row-label">项目</span>
+      <input
+        class="input"
+        v-model="project"
+        list="task-project-suggestions"
+        :maxlength="MAX_PROJECT_CHARS"
+        placeholder="未分组"
+        style="width: 220px"
+      />
+      <datalist id="task-project-suggestions">
+        <option v-for="item in projectSuggestions" :key="item.project" :value="item.project" />
+      </datalist>
+    </div>
   </Modal>
 </template>
 
@@ -55,7 +70,7 @@ import Modal from "./Modal.vue";
 import MarkdownNoteEditor from "./MarkdownNoteEditor.vue";
 import PriorityPicker from "./PriorityPicker.vue";
 import TagInput from "./TagInput.vue";
-import { collectTags, priorityOf } from "../tasks";
+import { MAX_PROJECT_CHARS, collectProjects, collectTags, normalizeProject, priorityOf } from "../tasks";
 import { LEAD_OPTIONS, NO_REMINDER, leadOf, reminderForDue, type LeadChoice } from "../due";
 import { api } from "../api";
 import { fromDatetimeLocal, isLinuxPlatform, toDatetimeLocal } from "../format";
@@ -82,6 +97,9 @@ let loading = false;
 const priority = ref(0);
 const tags = ref<string[]>([]);
 const tagSuggestions = computed(() => collectTags([...tasks.value, ...completedTasks.value]).map(item => item.tag));
+// 项目（v2.2）：建议来自已有待办的项目。
+const project = ref("");
+const projectSuggestions = computed(() => collectProjects([...tasks.value, ...completedTasks.value]));
 
 watch(
   () => taskEditor.open,
@@ -101,6 +119,7 @@ watch(
     lead.value = due.value ? leadOf(due.value, reminder.value) : reminder.value ? "custom" : NO_REMINDER;
     priority.value = priorityOf(task);
     tags.value = [...(task.tags ?? [])];
+    project.value = task.project ?? "";
   }
 );
 
@@ -144,7 +163,11 @@ const clearDue = () => {
   lead.value = reminder.value ? "custom" : NO_REMINDER;
 };
 
+const noteEditor = ref<InstanceType<typeof MarkdownNoteEditor> | null>(null);
+
 const save = async () => {
+  // 编辑器内容变更有 200ms 防抖：保存前先取当前内容，避免丢掉最后的输入。
+  noteEditor.value?.flush();
   const task = taskEditor.task;
   if (!task) {
     close();
@@ -157,7 +180,8 @@ const save = async () => {
     reminderTime: fromDatetimeLocal(reminder.value),
     dueAt: fromDatetimeLocal(due.value),
     tags: tags.value,
-    priority: priority.value
+    priority: priority.value,
+    project: normalizeProject(project.value)
   });
   close();
   await refreshAll();

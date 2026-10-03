@@ -1,6 +1,7 @@
-// 自然语言输入解析：从“明天下午3点 交周报 #工作 !高”这类文本中识别提醒时间、
-// 循环规则、标签与优先级，剩余文本作为标题。纯函数，规则 + 正则覆盖常见中文表达。
-import { createRecurringDraft, type RecurringDraft } from "./recurring";
+// 自然语言输入解析：从“明天下午3点 交周报 #工作 @季度 !高”这类文本中识别提醒时间、
+// 循环规则（含结束条件“共 10 次”“到 12月31日”）、标签、项目与优先级，剩余文本作为标题。
+// 纯函数，规则 + 正则覆盖常见中文表达。
+import { MAX_REPEAT_COUNT, createRecurringDraft, formatRecurringEnd, type RecurringDraft } from "./recurring";
 import { WEEKDAY_MASK_ALL, WEEKDAY_MASK_WEEKEND, formatWeekdayMask, weekdayBit } from "./weekdays";
 
 export type Priority = 0 | 1 | 2 | 3;
@@ -17,6 +18,8 @@ export interface ParsedInput {
   /** 循环规则（描述取 title）；为 null 表示一次性待办。 */
   recurring: RecurringDraft | null;
   tags: string[];
+  /** 项目（v2.2，“@装修”），没有时为空字符串；循环提醒不保存项目。 */
+  project: string;
   priority: Priority;
   /** 被识别并从标题中移除的原文片段，按出现顺序。 */
   matches: string[];
@@ -164,6 +167,58 @@ const parseTags = (scanner: Scanner): string[] => {
     match = take(scanner, pattern);
   }
   return tags;
+};
+
+/** 项目：第一个“@项目”，其余的“@”词留在标题中（如邮箱以外的写法）。 */
+const parseProject = (scanner: Scanner): string => {
+  const match = take(scanner, /(^|\s)[@＠]([^\s@＠#＃]{1,32})/);
+  return match ? match[2] : "";
+};
+
+/** 循环规则的结束条件（v2.2）：“共 10 次 / 重复 10 次 / 10 次后停止”与“到 12月31日 / 直到 2027-01-31 为止 / 到年底”。 */
+const parseRecurringEnd = (scanner: Scanner, draft: RecurringDraft, now: Date) => {
+  const COUNT = `(\\d{1,4}|${NUM})`;
+  const count =
+    take(scanner, new RegExp(`(?:总共|一共|共|重复)\\s*${COUNT}\\s*次`)) ??
+    take(scanner, new RegExp(`${COUNT}\\s*次(?:后|以后)?(?:停止|结束)`));
+  if (count) {
+    const value = parseNumber(count[1]);
+    if (value && value > 0) {
+      draft.count = Math.min(value, MAX_REPEAT_COUNT);
+    }
+  }
+  const until = take(
+    scanner,
+    new RegExp(
+      `(?:一直到|直到|截至|截止到|到)\\s*(?:(年底|年末|月底|月末)|(?:(\\d{4})\\s*[年\\-/.])?\\s*(\\d{1,2}|${NUM})\\s*[月\\-/.]\\s*(\\d{1,2}|${NUM})\\s*[日号]?)\\s*(?:为止|结束|止)?`
+    )
+  );
+  if (!until) {
+    return;
+  }
+  let end: Date | null = null;
+  if (until[1] === "年底" || until[1] === "年末") {
+    end = new Date(now.getFullYear(), 11, 31);
+  } else if (until[1]) {
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  } else {
+    const month = parseNumber(until[3]);
+    const day = parseNumber(until[4]);
+    if (month && day && month <= 12 && day <= 31) {
+      const year = until[2] ? Number(until[2]) : now.getFullYear();
+      end = new Date(year, month - 1, day);
+      // 没写年份且已过：指明年的这一天。
+      if (!until[2] && end < startOfDay(now)) {
+        end = new Date(year + 1, month - 1, day);
+      }
+      if (end.getMonth() !== month - 1) {
+        end = null;
+      }
+    }
+  }
+  if (end) {
+    draft.endsOn = `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`;
+  }
 };
 
 const parsePriority = (scanner: Scanner): Priority => {
@@ -455,9 +510,13 @@ const cleanTitle = (text: string) =>
 export const parseQuickInput = (input: string, now: Date = new Date()): ParsedInput => {
   const scanner: Scanner = { text: input, matches: [] };
   const tags = parseTags(scanner);
+  const project = parseProject(scanner);
   const priority = parsePriority(scanner);
 
   const recurring = parseRecurring(scanner);
+  if (recurring) {
+    parseRecurringEnd(scanner, recurring, now);
+  }
   let reminderTime: Date | null = null;
   let dueTime: Date | null = null;
   let leadMinutes: number | null = null;
@@ -528,6 +587,7 @@ export const parseQuickInput = (input: string, now: Date = new Date()): ParsedIn
     leadMinutes,
     recurring,
     tags,
+    project,
     priority,
     matches: scanner.matches.sort((a, b) => a.index - b.index).map(item => item.value),
   };
@@ -539,24 +599,14 @@ const WEEKDAY_NAMES = ["日", "一", "二", "三", "四", "五", "六"];
 export const describeParsedSchedule = (parsed: ParsedInput, now: Date = new Date()): string => {
   if (parsed.recurring) {
     const draft = parsed.recurring;
-    switch (draft.mode) {
-      case "INTERVAL_RANGE":
-        return `每 ${draft.intervalMinutes} 分钟（${draft.startTime} - ${draft.endTime}）`;
-      case "DAILY":
-        return `每天 ${draft.scheduleTime}`;
-      case "WORKDAY":
-        return `法定工作日 ${draft.scheduleTime}`;
-      case "WEEKLY":
-        return `${formatWeekdayMask(draft.scheduleWeekdays)} ${draft.scheduleTime}`;
-      case "MONTHLY":
-        return `每月 ${draft.scheduleDay} 日 ${draft.scheduleTime}`;
-      case "MONTHLY_LAST_DAY":
-        return `每月最后一天 ${draft.scheduleTime}`;
-      case "MONTHLY_LAST_WORKDAY":
-        return `每月最后一个工作日 ${draft.scheduleTime}`;
-      default:
-        return "";
+    const parts = [describeRecurringRule(draft)];
+    if (draft.endsOn) {
+      parts.push(formatRecurringEnd({ endsOn: draft.endsOn }, now));
     }
+    if (draft.count) {
+      parts.push(`共 ${draft.count} 次`);
+    }
+    return parts[0] ? parts.join(" · ") : "";
   }
   if (parsed.dueTime) {
     const due = `截止 ${describeMoment(parsed.dueTime, now)}`;
@@ -565,6 +615,27 @@ export const describeParsedSchedule = (parsed: ParsedInput, now: Date = new Date
   }
   const target = parsed.reminderTime;
   return target ? describeMoment(target, now) : "";
+};
+
+const describeRecurringRule = (draft: RecurringDraft): string => {
+  switch (draft.mode) {
+    case "INTERVAL_RANGE":
+      return `每 ${draft.intervalMinutes} 分钟（${draft.startTime} - ${draft.endTime}）`;
+    case "DAILY":
+      return `每天 ${draft.scheduleTime}`;
+    case "WORKDAY":
+      return `法定工作日 ${draft.scheduleTime}`;
+    case "WEEKLY":
+      return `${formatWeekdayMask(draft.scheduleWeekdays)} ${draft.scheduleTime}`;
+    case "MONTHLY":
+      return `每月 ${draft.scheduleDay} 日 ${draft.scheduleTime}`;
+    case "MONTHLY_LAST_DAY":
+      return `每月最后一天 ${draft.scheduleTime}`;
+    case "MONTHLY_LAST_WORKDAY":
+      return `每月最后一个工作日 ${draft.scheduleTime}`;
+    default:
+      return "";
+  }
 };
 
 const describeLead = (minutes: number) =>
@@ -589,7 +660,7 @@ const describeMoment = (target: Date, now: Date) => {
 
 /** 是否识别出了任何结构化信息（用于决定是否展示识别提示）。 */
 export const hasParsedMeta = (parsed: ParsedInput) =>
-  Boolean(parsed.reminderTime || parsed.recurring || parsed.tags.length || parsed.priority);
+  Boolean(parsed.reminderTime || parsed.recurring || parsed.tags.length || parsed.project || parsed.priority);
 
 export interface RescheduleParse {
   time: Date | null;

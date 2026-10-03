@@ -32,7 +32,11 @@ const hits = (segments: Array<{ text: string; hit: boolean }> | null) =>
 
 describe("parseQuery", () => {
   it("splits terms and #tags, ignoring a bare #", () => {
-    expect(parseQuery("  周报 #工作  ＃Home # ")).toEqual({ terms: ["周报"], tags: ["工作", "home"] });
+    expect(parseQuery("  周报 #工作  ＃Home # ")).toEqual({ terms: ["周报"], tags: ["工作", "home"], projects: [] });
+  });
+
+  it("splits @projects, ignoring a bare @", () => {
+    expect(parseQuery("瓷砖 @装修 ＠Home @")).toEqual({ terms: ["瓷砖"], tags: [], projects: ["装修", "home"] });
   });
 });
 
@@ -49,6 +53,31 @@ describe("matchesKeyword", () => {
     expect(matchesKeyword(fields, "#工")).toBe(true);
     expect(matchesKeyword(fields, "#作")).toBe(false);
     expect(matchesKeyword({ text: ["工作安排"], tags: [] }, "#工作")).toBe(false);
+  });
+});
+
+describe("@project terms", () => {
+  it("matches projects by prefix and plain terms against the project too", () => {
+    const fields = { text: ["买瓷砖"], tags: ["采购"], project: "装修" };
+    expect(matchesKeyword(fields, "@装")).toBe(true);
+    expect(matchesKeyword(fields, "@修")).toBe(false);
+    expect(matchesKeyword(fields, "装修 瓷砖")).toBe(true);
+    expect(matchesKeyword({ text: ["买瓷砖"] }, "@装修")).toBe(false);
+  });
+
+  it("filters global search by project and ranks it with tags", () => {
+    const groups = searchAll(
+      {
+        tasks: [task("a", "买瓷砖", { project: "装修" }), task("b", "写周报")],
+        recurringTasks: [recurring("r", "装修进度")],
+        completedTasks: [task("c", "量尺寸", { status: "COMPLETED", project: "装修" })]
+      },
+      "@装修"
+    );
+    expect(groups.map(group => [group.kind, group.hits.map(hit => hit.id), group.hits[0].field])).toEqual([
+      ["task", ["a"], "tag"],
+      ["completed", ["c"], "tag"]
+    ]);
   });
 });
 

@@ -1018,6 +1018,12 @@ textarea:focus-visible {
   text-align: right;
 }
 
+.field-unit {
+  margin-left: -4px;
+  color: var(--text-muted);
+  font-size: var(--font-meta);
+}
+
 .field-hint {
   color: var(--text-faint);
   font-size: var(--font-meta);
@@ -1422,6 +1428,17 @@ label:has(> input[type="checkbox"]) {
 .status-pill.action-snoozed {
   background: var(--warning-soft);
   color: var(--warning-text);
+}
+
+.status-pill.is-ended {
+  background: var(--violet-soft);
+  color: var(--violet-text);
+}
+
+.recurring-end-note {
+  margin-left: 4px;
+  color: var(--text-faint);
+  white-space: nowrap;
 }
 
 .status-pill.action-pending,
@@ -4334,6 +4351,53 @@ html.sticky-note-mode.is-linux .paper-note {
   overflow: hidden;
   text-overflow: ellipsis;
   flex-shrink: 0;
+}
+
+.task-project {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  max-width: 140px;
+  padding: 0 7px 0 5px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--primary-soft);
+  color: var(--primary-text);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.task-project svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+
+.task-project-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+button.task-project:not(:disabled) {
+  cursor: pointer;
+}
+
+button.task-project:not(:disabled):hover,
+.task-project.is-active {
+  border-color: var(--primary-text);
+}
+
+button.task-project:disabled {
+  cursor: default;
 }
 
 button.task-tag:not(:disabled) {

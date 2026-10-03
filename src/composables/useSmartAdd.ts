@@ -1,4 +1,4 @@
-// 带自然语言识别的新建待办：输入框实时识别时间、循环规则、标签与优先级，
+// 带自然语言识别的新建待办：输入框实时识别时间、循环规则、标签、项目与优先级，
 // 提交时按识别结果创建一次性待办或循环提醒。待办视图与日历视图共用。
 import { computed, ref, watch, type Ref } from "vue";
 import { api } from "../api";
@@ -72,6 +72,7 @@ export const useSmartAdd = (text: Ref<string>) => {
           description,
           stickyContent: options.stickyContent?.trim() ? options.stickyContent : null,
           tags: result?.tags ?? [],
+          project: result?.project ?? "",
           priority: result?.priority ?? 0,
           reminderTime: reminder ? toLocalDateTimeString(reminder) : null,
           dueAt: due ? toLocalDateTimeString(due) : null,

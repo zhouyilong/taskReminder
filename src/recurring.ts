@@ -27,6 +27,66 @@ export const recurringModeOptions: { value: RecurringMode; label: string }[] = [
 export const isSupportedRecurringMode = (mode?: string | null) =>
   recurringModeOptions.some(item => item.value === mode);
 
+/** 重复次数上限，与后端 MAX_REPEAT_COUNT 一致。 */
+export const MAX_REPEAT_COUNT = 9999;
+
+const datePart = (value?: string | null) => (value ? value.slice(0, 10) : "");
+
+/**
+ * 是否已到结束条件（v2.2，与后端 has_ended 一致）：剩余次数用完，或下次触发晚于结束日期当天。
+ * 已结束的提醒同时是暂停状态（旧版本也会停止提醒），界面上显示为“已结束”。
+ */
+export const isRecurringEnded = (task: Pick<RecurringTask, "remainingCount" | "endsOn" | "nextTrigger">) => {
+  if (typeof task.remainingCount === "number" && task.remainingCount <= 0) {
+    return true;
+  }
+  const end = datePart(task.endsOn);
+  const next = datePart(task.nextTrigger);
+  return Boolean(end && next && next > end);
+};
+
+/** 结束日期显示为“12月31日”，不是今年的带上年份。 */
+const formatEndDate = (value: string, now: Date) => {
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) {
+    return value;
+  }
+  return `${year === now.getFullYear() ? "" : `${year}年`}${month}月${day}日`;
+};
+
+/** 结束条件的简短说明，如“到 12月31日”“剩 3 次”；没有结束条件时返回空字符串。 */
+export const formatRecurringEnd = (
+  task: Pick<RecurringTask, "remainingCount" | "endsOn">,
+  now = new Date()
+) => {
+  const parts: string[] = [];
+  const end = datePart(task.endsOn);
+  if (end) {
+    parts.push(`到 ${formatEndDate(end, now)}`);
+  }
+  if (typeof task.remainingCount === "number") {
+    parts.push(`剩 ${Math.max(0, task.remainingCount)} 次`);
+  }
+  return parts.join("，");
+};
+
+export type RecurringStatus = "unsupported" | "ended" | "paused" | "running";
+
+export const recurringStatus = (
+  task: Pick<RecurringTask, "repeatMode" | "isPaused" | "remainingCount" | "endsOn" | "nextTrigger">
+): RecurringStatus => {
+  if (!isSupportedRecurringMode(task.repeatMode)) return "unsupported";
+  if (task.isPaused && isRecurringEnded(task)) return "ended";
+  return task.isPaused ? "paused" : "running";
+};
+
+export const RECURRING_STATUS_LABELS: Record<RecurringStatus, string> = {
+  unsupported: "需升级",
+  ended: "已结束",
+  paused: "已暂停",
+  running: "运行中",
+};
+
 /** 能否“跳过本次”：运行中、本机认识的模式，且有下次触发时间。 */
 export const canSkipRecurring = (task: Pick<RecurringTask, "isPaused" | "repeatMode" | "nextTrigger">) =>
   !task.isPaused && isSupportedRecurringMode(task.repeatMode) && Boolean(task.nextTrigger);
@@ -151,6 +211,10 @@ export interface RecurringDraft {
   cronExpression: string;
   /** 标签（v2.1）。 */
   tags: string[];
+  /** 结束日期（v2.2，YYYY-MM-DD），空为不限。 */
+  endsOn: string;
+  /** 次数（v2.2）：新建时为“共几次”，编辑时为“还剩几次”；null 为不限。 */
+  count: number | null;
 }
 
 export const createRecurringDraft = (): RecurringDraft => ({
@@ -164,6 +228,8 @@ export const createRecurringDraft = (): RecurringDraft => ({
   scheduleDay: 1,
   cronExpression: "0 9 * * *",
   tags: [],
+  endsOn: "",
+  count: null,
 });
 
 export const draftFromRecurringTask = (task: RecurringTask): RecurringDraft => ({
@@ -178,10 +244,31 @@ export const draftFromRecurringTask = (task: RecurringTask): RecurringDraft => (
   scheduleDay: task.scheduleDay ?? 1,
   cronExpression: task.cronExpression ?? "",
   tags: [...(task.tags ?? [])],
+  endsOn: datePart(task.endsOn),
+  count: typeof task.remainingCount === "number" ? task.remainingCount : null,
 });
 
+/** 次数输入框清空时 v-model.number 给出空字符串，统一成 null。 */
+const normalizeCount = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? value : null;
+
+/** 结束条件的校验；通过时返回 null。 */
+const validateRecurringEnd = (draft: RecurringDraft): string | null => {
+  if (draft.endsOn && !/^\d{4}-\d{2}-\d{2}$/.test(draft.endsOn)) {
+    return "结束日期格式无效";
+  }
+  const count = normalizeCount(draft.count);
+  if (count !== null && (!Number.isInteger(count) || count < 0 || count > MAX_REPEAT_COUNT)) {
+    return `次数需为 0 到 ${MAX_REPEAT_COUNT} 之间的整数`;
+  }
+  return null;
+};
+
 /** 返回错误提示；通过校验时返回 null。 */
-export const validateRecurringDraft = (draft: RecurringDraft): string | null => {
+export const validateRecurringDraft = (draft: RecurringDraft): string | null =>
+  validateRecurringRule(draft) ?? validateRecurringEnd(draft);
+
+const validateRecurringRule = (draft: RecurringDraft): string | null => {
   switch (draft.mode) {
     case "INTERVAL_RANGE":
       if (!Number.isFinite(draft.intervalMinutes) || draft.intervalMinutes < 1) {
@@ -234,6 +321,8 @@ export const buildRecurringPayload = (draft: RecurringDraft) => {
     scheduleDay: null as number | null,
     cronExpression: null as string | null,
     tags: normalizeTags(draft.tags ?? []),
+    endsOn: draft.endsOn || null,
+    remainingCount: normalizeCount(draft.count),
   };
   switch (draft.mode) {
     case "INTERVAL_RANGE":
