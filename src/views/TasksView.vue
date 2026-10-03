@@ -29,6 +29,7 @@
         :has-note="!!newTaskStickyContent.trim()"
       />
       <MarkdownNoteEditor
+        ref="composerEditor"
         v-model="newTaskStickyContent"
         class="composer-editor"
         variant="ghost"
@@ -42,13 +43,18 @@
           <circle cx="11" cy="11" r="6.5" />
           <path d="M16 16l4 4" />
         </svg>
-        <input data-shortcut="search" class="input" v-model="filter.query" placeholder="搜索标题、描述或 #标签" />
+        <input data-shortcut="search" class="input" v-model="filter.query" placeholder="搜索标题、描述、#标签或 @项目" />
         <button v-if="filter.query" class="search-clear" type="button" title="清空" @click="filter.query = ''">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M7 7l10 10M17 7L7 17" />
           </svg>
         </button>
       </div>
+      <select v-if="allProjects.length || filter.project !== null" class="select" v-model="filter.project" title="按项目筛选">
+        <option :value="null">全部项目</option>
+        <option v-for="item in allProjects" :key="item.project" :value="item.project">{{ item.project }}（{{ item.count }}）</option>
+        <option value="">未分组（{{ ungroupedCount }}）</option>
+      </select>
       <select class="select" v-model="filter.tag" title="按标签筛选">
         <option value="">全部标签</option>
         <option v-for="item in allTags" :key="item.tag" :value="item.tag">#{{ item.tag }}（{{ item.count }}）</option>
@@ -65,7 +71,7 @@
       <button
         class="button secondary"
         :class="{ 'is-active': selectionMode }"
-        title="多选后批量完成、删除、加标签、改优先级或提醒时间（也可按住 Ctrl 点击行）"
+        title="多选后批量完成、删除、加标签、移到项目、改优先级或提醒时间（也可按住 Ctrl 点击行）"
         @click="selectionMode ? exitSelection() : (selectionMode = true)"
       >
         {{ selectionMode ? "退出多选" : "多选" }}
@@ -136,7 +142,14 @@
               <td class="col-desc cell-title" :title="task.description">
                 <div class="task-title-cell">
                   <span class="task-title-text">{{ task.description }}</span>
-                  <TaskBadges :task="task" clickable :active-tag="filter.tag" @select-tag="toggleTagFilter" />
+                  <TaskBadges
+                    :task="task"
+                    clickable
+                    :active-tag="filter.tag"
+                    :active-project="filter.project"
+                    @select-tag="toggleTagFilter"
+                    @select-project="toggleProjectFilter"
+                  />
                 </div>
               </td>
               <td class="col-note cell-muted" :class="{ 'cell-empty': !task.stickyContent?.trim() }" :title="taskStickyPreview(task.stickyContent)">
@@ -209,6 +222,7 @@ import { planReorder } from "../reorder";
 import {
   PRIORITY_OPTIONS,
   TASK_SORT_OPTIONS,
+  collectProjects,
   collectTags,
   filterAndSortTasks,
   type TaskFilter,
@@ -226,7 +240,7 @@ const { toggleTask, openTaskMenu, openTaskEditor } = useItemActions();
 const { isLightTheme } = useUiPrefs();
 const { confirmAction } = useDialogs();
 
-const filter = reactive<TaskFilter>({ query: "", tag: "", priority: -1 });
+const filter = reactive<TaskFilter>({ query: "", tag: "", priority: -1, project: null });
 const storedSort = safeStorage.getItem("tasksSort");
 const sortKey = ref<TaskSortKey>(
   TASK_SORT_OPTIONS.some(option => option.value === storedSort) ? (storedSort as TaskSortKey) : "created"
@@ -235,9 +249,16 @@ watch(sortKey, value => safeStorage.setItem("tasksSort", value));
 
 const priorityFilterOptions = [...PRIORITY_OPTIONS].reverse();
 const allTags = computed(() => collectTags(tasks.value));
-const isFiltering = computed(() => Boolean(filter.query.trim() || filter.tag || filter.priority >= 0));
+// 项目（v2.2）：null 为全部项目，空字符串为未分组。
+const allProjects = computed(() => collectProjects(tasks.value));
+const ungroupedCount = computed(() => tasks.value.filter(task => !task.project).length);
+const isFiltering = computed(() =>
+  Boolean(filter.query.trim() || filter.tag || filter.priority >= 0 || filter.project !== null)
+);
 const visibleTasks = computed(() => filterAndSortTasks(tasks.value, filter, sortKey.value));
-const filterKey = computed(() => `${filter.query}|${filter.tag}|${filter.priority}|${sortKey.value}`);
+const filterKey = computed(
+  () => `${filter.query}|${filter.tag}|${filter.priority}|${filter.project ?? "\u0000all"}|${sortKey.value}`
+);
 
 // 标签被删光后自动回到“全部标签”。
 watch(allTags, list => {
@@ -257,6 +278,17 @@ const timeTitle = (task: Task) =>
 const toggleTagFilter = (tag: string) => {
   filter.tag = filter.tag.toLowerCase() === tag.toLowerCase() ? "" : tag;
 };
+
+const toggleProjectFilter = (project: string) => {
+  filter.project = filter.project?.toLowerCase() === project.toLowerCase() ? null : project;
+};
+
+// 项目被清空后自动回到“全部项目”（“未分组”保留）。
+watch(allProjects, list => {
+  if (filter.project && !list.some(item => item.project.toLowerCase() === filter.project?.toLowerCase())) {
+    filter.project = null;
+  }
+});
 
 const {
   pageIndex: tasksPageIndex,
@@ -370,7 +402,11 @@ const {
   submit
 } = useSmartAdd(newTaskDescription);
 
+const composerEditor = ref<InstanceType<typeof MarkdownNoteEditor> | null>(null);
+
 const handleAddTask = async () => {
+  // 编辑器内容变更有 200ms 防抖：提交前先取当前内容，避免丢掉最后的输入。
+  composerEditor.value?.flush();
   if (await submit({ stickyContent: newTaskStickyContent.value })) {
     newTaskStickyContent.value = "";
   }

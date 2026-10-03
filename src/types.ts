@@ -33,6 +33,8 @@ export interface Task {
   stickyColor?: string;
   /** 手动排序位置（v2.1），越小越靠前。 */
   sortOrder?: number | null;
+  /** 项目（v2.2），空为未分组。 */
+  project?: string;
 }
 
 export interface RecurringTask {
@@ -60,6 +62,10 @@ export interface RecurringTask {
   cronExpression?: string | null;
   /** 标签（v2.1），与待办相同的规范化。 */
   tags?: string[];
+  /** 结束日期（v2.2，YYYY-MM-DD，含当天）；空为不限。 */
+  endsOn?: string | null;
+  /** 剩余提醒次数（v2.2），每次触发减一，到 0 时结束；空为不限。 */
+  remainingCount?: number | null;
 }
 
 export interface ReminderRecord {
@@ -213,4 +219,5 @@ export type TaskBatchPayload =
   | { action: "delete" }
   | { action: "addTags"; tags: string[] }
   | { action: "setPriority"; priority: number }
+  | { action: "setProject"; project: string }
   | { action: "setReminder"; reminderTime: string | null };

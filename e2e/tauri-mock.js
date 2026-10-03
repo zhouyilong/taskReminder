@@ -33,6 +33,7 @@
     dueAt: null,
     stickyColor: "",
     sortOrder: null,
+    project: "",
     ...extra
   });
   const recurring = (id, description, extra = {}) => ({
@@ -48,6 +49,8 @@
     repeatMode: "DAILY",
     scheduleTime: "09:00",
     tags: [],
+    endsOn: null,
+    remainingCount: null,
     ...extra
   });
   const record = (id, reminderId, description, type, triggerTime, action) => ({
@@ -70,23 +73,27 @@
         dueAt: at(2, 18),
         reminderTime: at(2, 17),
         stickyContent: "- [x] 收集数据\n- [x] 写初稿\n- [ ] 请组长审阅\n- [ ] 提交",
-        stickyColor: "blue"
+        stickyColor: "blue",
+        project: "季度总结"
       }),
       task("t-groceries", "买菜", {
         tags: ["生活"],
+        project: "家务",
         reminderTime: at(0, 19),
         stickyContent: "- [ ] 牛奶\n- [ ] 鸡蛋\n- [ ] 西红柿"
       }),
       task("t-dentist", "预约牙医", { tags: ["健康"], priority: 1, reminderTime: at(-1, 10) }),
       task("t-ideas", "读书笔记", { stickyContent: "《置身事内》第三章：土地财政与地方债。" }),
-      task("t-done-1", "交电费", { status: "COMPLETED", completedAt: at(-1, 20), tags: ["生活"] }),
+      task("t-done-1", "交电费", { status: "COMPLETED", completedAt: at(-1, 20), tags: ["生活"], project: "家务" }),
       task("t-done-2", "提交报销单", { status: "COMPLETED", completedAt: at(-9, 11), tags: ["工作"] }),
       task("t-done-3", "修自行车", { status: "COMPLETED", completedAt: at(-20, 16) })
     ];
     const recurringTasks = [
       recurring("r-standup", "站会", { repeatMode: "WORKDAY", scheduleTime: "09:30", tags: ["工作"] }),
       recurring("r-water", "喝水", { repeatMode: "INTERVAL_RANGE", intervalMinutes: 90, startTime: "09:00", endTime: "18:00", tags: ["健康"] }),
-      recurring("r-rent", "交房租", { repeatMode: "MONTHLY_LAST_DAY", scheduleTime: "20:00", tags: ["生活"] })
+      recurring("r-rent", "交房租", { repeatMode: "MONTHLY_LAST_DAY", scheduleTime: "20:00", tags: ["生活"], endsOn: `${at(90, 0).slice(0, 10)}` }),
+      // 已到结束条件（共 21 次已用完）：写入暂停，界面显示“已结束”。
+      recurring("r-camp", "训练营打卡", { scheduleTime: "21:00", isPaused: true, remainingCount: 0, nextTrigger: at(1, 21) })
     ];
     const reminderRecords = [];
     // 近 12 周的提醒记录：站会每个工作日一次，喝水每天两次，待办偶尔推迟。
@@ -160,6 +167,11 @@
   const touch = item => {
     item.updatedAt = now();
   };
+  const normalizeProject = value =>
+    Array.from(String(value ?? "").trim().replace(/^[@＠]+/, "")).slice(0, 32).join("").trim();
+  const hasEnded = item =>
+    (typeof item.remainingCount === "number" && item.remainingCount <= 0) ||
+    Boolean(item.endsOn && item.nextTrigger && item.nextTrigger.slice(0, 10) > item.endsOn);
   const normalizeTags = tags => {
     const result = [];
     for (const raw of tags ?? []) {
@@ -207,7 +219,8 @@
         tags: normalizeTags(payload.tags),
         priority: payload.priority ?? 0,
         reminderTime: payload.reminderTime ?? null,
-        dueAt: payload.dueAt ?? null
+        dueAt: payload.dueAt ?? null,
+        project: normalizeProject(payload.project)
       });
       state.tasks.push(item);
       return item;
@@ -222,6 +235,7 @@
       if (patch.tags !== undefined) item.tags = normalizeTags(patch.tags);
       if (patch.priority !== undefined) item.priority = patch.priority;
       if (patch.dueAt !== undefined) item.dueAt = patch.dueAt;
+      if (patch.project !== undefined) item.project = normalizeProject(patch.project);
       touch(item);
     },
     complete_task: ({ id }) => {
@@ -257,6 +271,7 @@
         else if (payload.action === "delete") commands.delete_task({ id });
         else if (payload.action === "addTags") item.tags = normalizeTags([...(item.tags ?? []), ...payload.tags]);
         else if (payload.action === "setPriority") item.priority = payload.priority;
+        else if (payload.action === "setProject") item.project = normalizeProject(payload.project);
         else if (payload.action === "setReminder") item.reminderTime = payload.reminderTime;
         touch(item);
         changed += 1;
@@ -281,7 +296,12 @@
     },
     update_recurring_task: ({ task: patch }) => {
       const item = findRecurring(patch.id);
-      if (item) Object.assign(item, patch, { tags: normalizeTags(patch.tags) });
+      if (!item) return;
+      // 与后端一致：编辑前已结束、编辑后不再结束的自动恢复运行。
+      const wasEnded = item.isPaused && hasEnded(item);
+      Object.assign(item, patch, { tags: normalizeTags(patch.tags) });
+      if (wasEnded && !hasEnded(item)) item.isPaused = false;
+      if (hasEnded(item)) item.isPaused = true;
     },
     pause_recurring_task: ({ id }) => {
       const item = findRecurring(id);
@@ -289,6 +309,7 @@
     },
     resume_recurring_task: ({ id }) => {
       const item = findRecurring(id);
+      if (item && hasEnded(item)) throw "已到结束条件，请先编辑结束条件";
       if (item) item.isPaused = false;
     },
     skip_recurring_occurrence: ({ id }) => findRecurring(id),

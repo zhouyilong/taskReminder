@@ -132,6 +132,9 @@ const resolveReminder = (): Date | null => {
 
 const metaSummary = computed(() => {
   const parts = parsed.value.tags.map(tag => `#${tag}`);
+  if (parsed.value.project) {
+    parts.push(`@${parsed.value.project}`);
+  }
   if (parsed.value.priority) {
     parts.push(`${priorityLabel(parsed.value.priority)}优先级`);
   }
@@ -247,6 +250,7 @@ const submit = async () => {
       description: text,
       reminderTime: target ? `${formatLocal(target)}:00` : null,
       tags: parsed.value.tags,
+      project: parsed.value.project,
       priority: parsed.value.priority,
       dueAt: due ? `${formatLocal(due)}:00` : null
     });

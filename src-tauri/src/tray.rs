@@ -390,6 +390,7 @@ mod tests {
             due_at: None,
             sticky_color: String::new(),
             sort_order: None,
+            project: String::new(),
         }
     }
 
@@ -417,6 +418,8 @@ mod tests {
             schedule_day: None,
             cron_expression: None,
             tags: Vec::new(),
+            ends_on: None,
+            remaining_count: None,
         }
     }
 

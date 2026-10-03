@@ -10,9 +10,15 @@
         </svg>
         {{ scheduleText }}
       </span>
-      <TaskBadges :task="{ tags: parsed.tags, priority: parsed.recurring ? 0 : parsed.priority }" />
-      <span v-if="parsed.recurring && (parsed.priority || hasNote)" class="composer-parse-hint">
-        循环提醒不保存优先级与描述
+      <TaskBadges
+        :task="{
+          tags: parsed.tags,
+          priority: parsed.recurring ? 0 : parsed.priority,
+          project: parsed.recurring ? '' : parsed.project
+        }"
+      />
+      <span v-if="parsed.recurring && unsavedText" class="composer-parse-hint">
+        循环提醒不保存{{ unsavedText }}
       </span>
     </template>
     <span v-else-if="!enabled" class="composer-parse-hint">已关闭识别，按原文添加</span>
@@ -24,10 +30,11 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
 import TaskBadges from "./TaskBadges.vue";
 import type { ParsedInput } from "../nlp";
 
-defineProps<{
+const props = defineProps<{
   parsed: ParsedInput | null;
   hasMeta: boolean;
   scheduleText: string;
@@ -36,4 +43,16 @@ defineProps<{
 }>();
 
 const enabled = defineModel<boolean>("enabled", { required: true });
+
+// 循环提醒没有优先级、项目与描述，识别出来时提示不会保存。
+const unsavedText = computed(() => {
+  const parsed = props.parsed;
+  if (!parsed?.recurring) return "";
+  const parts = [
+    parsed.priority ? "优先级" : "",
+    parsed.project ? "项目" : "",
+    props.hasNote ? "描述" : ""
+  ].filter(Boolean);
+  return parts.join("、");
+});
 </script>

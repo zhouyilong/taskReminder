@@ -16,16 +16,22 @@
       <span class="form-row-label">标签</span>
       <TagInput v-model="draft.tags" :suggestions="tagSuggestions" />
     </div>
+    <div class="form-row compact">
+      <span class="form-row-label">结束条件</span>
+      <RecurringEndFields :draft="draft" editing />
+    </div>
   </Modal>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, watch } from "vue";
 import Modal from "./Modal.vue";
+import RecurringEndFields from "./RecurringEndFields.vue";
 import RecurringFields from "./RecurringFields.vue";
 import TagInput from "./TagInput.vue";
 import { collectTags } from "../tasks";
 import { api } from "../api";
+import { errorMessage } from "../format";
 import {
   buildRecurringPayload,
   createRecurringDraft,
@@ -72,7 +78,12 @@ const save = async () => {
     alert(error);
     return;
   }
-  await api.updateRecurringTask({ ...target, ...buildRecurringPayload(draft) });
+  try {
+    await api.updateRecurringTask({ ...target, ...buildRecurringPayload(draft) });
+  } catch (error) {
+    alert(errorMessage(error));
+    return;
+  }
   close();
   await refreshAll();
 };

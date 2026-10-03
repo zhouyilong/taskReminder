@@ -2,11 +2,13 @@
 
 use super::*;
 
-/// 待办的组织信息：标签与优先级。
+/// 待办的组织信息：标签、优先级与项目。
 #[derive(Clone, Debug, Default)]
 pub struct TaskMeta {
     pub tags: Vec<String>,
     pub priority: i64,
+    /// 项目（v2.2），空字符串为未分组。
+    pub project: String,
 }
 
 /// 待办的批量操作（`batch_update_tasks`）。
@@ -17,6 +19,8 @@ pub enum TaskBatchOp {
     /// 在原有标签后追加（规范化、去重，最多 10 个）。
     AddTags(Vec<String>),
     SetPriority(i64),
+    /// 移到项目（空字符串为移出项目）。
+    SetProject(String),
     /// `None` 表示清除提醒。
     SetReminder(Option<String>),
 }
@@ -25,7 +29,7 @@ pub enum TaskBatchOp {
 macro_rules! task_columns {
     () => {
         "id, description, sticky_content, type, status, created_at, completed_at, reminder_time,
-         updated_at, deleted_at, tags, priority, due_at, sticky_color, sort_order"
+         updated_at, deleted_at, tags, priority, due_at, sticky_color, sort_order, project"
     };
 }
 
@@ -91,10 +95,11 @@ impl DbManager {
         let note = sticky_content.unwrap_or("").trim().to_string();
         let tags = tags_to_db(&meta.tags);
         let priority = normalize_priority(meta.priority);
+        let project = normalize_project(&meta.project);
         conn.execute(
-            "INSERT INTO tasks (id, description, type, status, created_at, completed_at, reminder_time, sticky_content, updated_at, deleted_at, tags, priority)
-             VALUES (?, ?, 'ONE_TIME', 'PENDING', ?, NULL, NULL, ?, ?, NULL, ?, ?)",
-            params![id, description, now, note, now, tags, priority],
+            "INSERT INTO tasks (id, description, type, status, created_at, completed_at, reminder_time, sticky_content, updated_at, deleted_at, tags, priority, project)
+             VALUES (?, ?, 'ONE_TIME', 'PENDING', ?, NULL, NULL, ?, ?, NULL, ?, ?, ?)",
+            params![id, description, now, note, now, tags, priority, project],
         )?;
         Ok(Task {
             id,
@@ -112,10 +117,12 @@ impl DbManager {
             due_at: None,
             sticky_color: String::new(),
             sort_order: None,
+            project,
         })
     }
 
-    /// 更新待办。`meta` 为 `None` 时保留原有标签与优先级（如稍后提醒只改时间）。
+    /// 更新待办。`meta` 为 `None` 时保留原有标签与优先级（如稍后提醒只改时间）；
+    /// 项目不经过这里，用 `set_task_project` 单独设置。
     pub fn update_task(
         &self,
         task_id: &str,
@@ -233,6 +240,17 @@ impl DbManager {
         Ok(changed > 0)
     }
 
+    /// 设置项目（空字符串为移出项目）。项目不变时不写库。
+    pub fn set_task_project(&self, task_id: &str, project: &str) -> Result<bool, AppError> {
+        let conn = self.get_conn()?;
+        let changed = conn.execute(
+            "UPDATE tasks SET project = ?1, updated_at = ?2
+             WHERE id = ?3 AND deleted_at IS NULL AND project IS NOT ?1",
+            params![normalize_project(project), now_string(), task_id],
+        )?;
+        Ok(changed > 0)
+    }
+
     /// 写入手动排序位置（拖拽排序，可能同时给多条重新编号），只写确实变化的行。
     pub fn set_task_sort_orders(&self, orders: &[(String, f64)]) -> Result<usize, AppError> {
         let mut conn = self.get_conn()?;
@@ -304,6 +322,10 @@ impl DbManager {
                     "UPDATE tasks SET priority = ?1, updated_at = ?2 WHERE id = ?3 AND priority != ?1",
                     params![normalize_priority(*priority), now, id],
                 )?,
+                TaskBatchOp::SetProject(project) => tx.execute(
+                    "UPDATE tasks SET project = ?1, updated_at = ?2 WHERE id = ?3 AND project IS NOT ?1",
+                    params![normalize_project(project), now, id],
+                )?,
                 TaskBatchOp::SetReminder(reminder) => tx.execute(
                     "UPDATE tasks SET reminder_time = ?1, updated_at = ?2
                      WHERE id = ?3 AND reminder_time IS NOT ?1",
@@ -336,5 +358,6 @@ pub(super) fn task_from_row(row: &rusqlite::Row<'_>) -> Result<Task, rusqlite::E
         due_at: row.get(12)?,
         sticky_color: row.get::<_, Option<String>>(13)?.unwrap_or_default(),
         sort_order: row.get(14)?,
+        project: normalize_project(&row.get::<_, Option<String>>(15)?.unwrap_or_default()),
     })
 }

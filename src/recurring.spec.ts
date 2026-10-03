@@ -11,6 +11,9 @@ import {
   formatRecurringRule,
   validateRecurringDraft,
   firstUncoveredHolidayYear,
+  formatRecurringEnd,
+  isRecurringEnded,
+  recurringStatus,
   workdayDraftWarning,
   workdayHolidayWarning
 } from "./recurring";
@@ -160,5 +163,49 @@ describe("month-end modes and tags", () => {
     const task = { repeatMode: "MONTHLY_LAST_WORKDAY", scheduleTime: "17:00", isPaused: false, nextTrigger: "2026-12-31T17:00:00" } as never;
     expect(formatRecurringRule(task)).toBe("每月最后一个工作日 17:00");
     expect(workdayHolidayWarning(task, [2025, 2026], new Date(2026, 11, 20))).toMatch("2027");
+  });
+});
+
+describe("recurring end condition", () => {
+  const NOW = new Date(2026, 9, 3, 10, 0, 0);
+
+  it("round-trips the end date and count through drafts and payloads", () => {
+    const task: RecurringTask = { ...base, endsOn: "2026-12-31", remainingCount: 3 };
+    const draft = draftFromRecurringTask(task);
+    expect([draft.endsOn, draft.count]).toEqual(["2026-12-31", 3]);
+    expect(buildRecurringPayload(draft)).toMatchObject({ endsOn: "2026-12-31", remainingCount: 3 });
+    // 输入框清空时 v-model.number 给出空字符串。
+    const cleared = { ...draft, endsOn: "", count: "" as unknown as number };
+    expect(buildRecurringPayload(cleared)).toMatchObject({ endsOn: null, remainingCount: null });
+    expect(buildRecurringPayload(createRecurringDraft())).toMatchObject({ endsOn: null, remainingCount: null });
+  });
+
+  it("validates the count and date", () => {
+    const draft = createRecurringDraft();
+    expect(validateRecurringDraft({ ...draft, count: 0 })).toBeNull();
+    expect(validateRecurringDraft({ ...draft, count: 1.5 })).toMatch("整数");
+    expect(validateRecurringDraft({ ...draft, count: -1 })).toMatch("整数");
+    expect(validateRecurringDraft({ ...draft, count: 10000 })).toMatch("整数");
+    expect(validateRecurringDraft({ ...draft, endsOn: "12/31" })).toMatch("结束日期");
+  });
+
+  it("matches the backend's ended rule and labels the status", () => {
+    const running = { ...base, endsOn: "2026-09-26", remainingCount: null };
+    expect(isRecurringEnded(running)).toBe(false);
+    expect(isRecurringEnded({ ...running, nextTrigger: "2026-09-27T09:30:00" })).toBe(true);
+    expect(isRecurringEnded({ ...base, remainingCount: 0 })).toBe(true);
+    expect(isRecurringEnded({ ...base, remainingCount: 1 })).toBe(false);
+
+    expect(recurringStatus({ ...base, remainingCount: 0, isPaused: true })).toBe("ended");
+    expect(recurringStatus({ ...base, remainingCount: 2, isPaused: true })).toBe("paused");
+    expect(recurringStatus({ ...base, repeatMode: "BIWEEKLY" as never })).toBe("unsupported");
+    expect(recurringStatus(base)).toBe("running");
+  });
+
+  it("describes the end condition briefly", () => {
+    expect(formatRecurringEnd(base, NOW)).toBe("");
+    expect(formatRecurringEnd({ endsOn: "2026-12-31" }, NOW)).toBe("到 12月31日");
+    expect(formatRecurringEnd({ endsOn: "2027-01-31", remainingCount: 3 }, NOW)).toBe("到 2027年1月31日，剩 3 次");
+    expect(formatRecurringEnd({ remainingCount: -1 }, NOW)).toBe("剩 0 次");
   });
 });

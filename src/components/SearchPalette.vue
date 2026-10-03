@@ -12,7 +12,7 @@
             v-model="query"
             class="search-palette-input"
             type="text"
-            placeholder="搜索待办、循环提醒、已办与便签内容"
+            placeholder="搜索待办、循环提醒、已办与便签内容，#标签、@项目"
             role="combobox"
             aria-autocomplete="list"
             :aria-expanded="hits.length > 0"
@@ -60,6 +60,7 @@
                   </div>
                 </div>
                 <div class="search-palette-side">
+                  <span v-if="hit.kind !== 'recurring' && hit.item.project" class="search-palette-tag">@{{ hit.item.project }}</span>
                   <span v-for="tag in hit.tags.slice(0, 3)" :key="tag" class="search-palette-tag">#{{ tag }}</span>
                   <span v-if="hitMeta(hit)" class="search-palette-meta">{{ hitMeta(hit) }}</span>
                   <button

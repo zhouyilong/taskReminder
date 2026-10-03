@@ -36,6 +36,8 @@ const crepe = shallowRef<Crepe | null>(null);
 const currentMarkdown = ref(props.modelValue ?? "");
 let lastEmittedMarkdown = props.modelValue ?? "";
 let buildToken = 0;
+// 当前编辑器实例的载入基准，flush() 用它判断是否是用户修改。
+let activeBaseline: MarkdownBaselineState | null = null;
 
 const destroyEditor = async () => {
   const instance = crepe.value;
@@ -78,6 +80,7 @@ const buildEditor = async (markdown: string) => {
 
   // 载入内容的重新序列化不算修改（见 markdownBaseline.ts），否则打开便签就会自动保存一次。
   const baselineState: MarkdownBaselineState = { ready: false, baseline: null, userEdited: false };
+  activeBaseline = baselineState;
   instance.on(listener => {
     listener.markdownUpdated((_ctx, nextMarkdown) => {
       currentMarkdown.value = nextMarkdown;
@@ -107,6 +110,27 @@ const buildEditor = async (markdown: string) => {
 onMounted(() => {
   void buildEditor(props.modelValue ?? "");
 });
+
+/**
+ * 立即同步编辑器的当前内容（v2.2）：Milkdown 的 markdownUpdated 有 200ms 防抖，输入后马上提交会丢掉
+ * 最后的输入。提交前调用，内容有用户修改时同步发出 update:modelValue（父组件的 v-model 随即更新）。
+ */
+const flush = () => {
+  const instance = crepe.value;
+  if (!instance || !activeBaseline) {
+    return;
+  }
+  const nextMarkdown = instance.getMarkdown();
+  currentMarkdown.value = nextMarkdown;
+  if (nextMarkdown === lastEmittedMarkdown || !isUserMarkdownChange(activeBaseline, nextMarkdown)) {
+    return;
+  }
+  activeBaseline.userEdited = true;
+  lastEmittedMarkdown = nextMarkdown;
+  emit("update:modelValue", nextMarkdown);
+};
+
+defineExpose({ flush });
 
 onBeforeUnmount(() => {
   buildToken += 1;

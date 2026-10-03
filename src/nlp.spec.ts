@@ -242,3 +242,43 @@ describe("due time and lead", () => {
     expect(desk.title).toBe("前台取快递");
   });
 });
+
+describe("parseQuickInput projects and end conditions (v2.2)", () => {
+  it("extracts one @project alongside tags and priority", () => {
+    const parsed = parseQuickInput("明天下午3点 买瓷砖 @装修 #采购 !高 @别的", NOW);
+    expect(parsed).toMatchObject({ title: "买瓷砖 @别的", project: "装修", tags: ["采购"], priority: 3 });
+    expect(parseQuickInput("写周报", NOW).project).toBe("");
+    // 词中的 @（如邮箱）不算项目。
+    expect(parseQuickInput("发邮件给 a@b.com", NOW)).toMatchObject({ title: "发邮件给 a@b.com", project: "" });
+  });
+
+  it("recognises repeat counts after a recurring rule", () => {
+    for (const input of ["每天8点 吃药 共7次", "每天8点 吃药 重复七次", "每天8点 吃药 7次后停止"]) {
+      const parsed = parseQuickInput(input, NOW);
+      expect(parsed.title).toBe("吃药");
+      expect(parsed.recurring).toMatchObject({ mode: "DAILY", scheduleTime: "08:00", count: 7, endsOn: "" });
+    }
+    expect(describeParsedSchedule(parseQuickInput("每天8点 吃药 共7次", NOW), NOW)).toBe("每天 08:00 · 共 7 次");
+  });
+
+  it("recognises end dates after a recurring rule", () => {
+    const end = (input: string) => parseQuickInput(input, NOW).recurring?.endsOn;
+    expect(end("每周一 9点 例会 到12月31日")).toBe("2026-12-31");
+    expect(end("每天 打卡 直到 2027-01-31 为止")).toBe("2027-01-31");
+    expect(end("工作日 9点 站会 到年底")).toBe("2026-12-31");
+    expect(end("每天 喝水 到月底")).toBe("2026-09-30");
+    // 没写年份且已过：指明年的这一天。
+    expect(end("每天 跑步 到3月1号")).toBe("2027-03-01");
+    expect(end("每天 跑步 到2月30日")).toBe("");
+    const parsed = parseQuickInput("每周一 9点 例会 到12月31日 共10次", NOW);
+    expect(parsed.title).toBe("例会");
+    expect(parsed.recurring).toMatchObject({ endsOn: "2026-12-31", count: 10 });
+    expect(describeParsedSchedule(parsed, NOW)).toBe("周一 09:00 · 到 12月31日 · 共 10 次");
+  });
+
+  it("leaves 到 in one-time tasks alone", () => {
+    const parsed = parseQuickInput("明天9点 到财务处交报销单 共3张", NOW);
+    expect(parsed.recurring).toBeNull();
+    expect(parsed.title).toBe("到财务处交报销单 共3张");
+  });
+});

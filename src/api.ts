@@ -39,6 +39,8 @@ export const api = {
     reminderTime?: string | null;
     /** 截止时间（v2.1）。 */
     dueAt?: string | null;
+    /** 项目（v2.2）。 */
+    project?: string;
   }): Promise<Task> {
     return invoke("create_task", { payload });
   },
@@ -52,6 +54,8 @@ export const api = {
     priority?: number;
     /** 截止时间：省略时保留，null 清除。 */
     dueAt?: string | null;
+    /** 项目（v2.2）：省略时保留，空字符串移出项目。 */
+    project?: string;
   }): Promise<void> {
     return invoke("update_task", { task });
   },
@@ -87,6 +91,11 @@ export const api = {
     scheduleWeekdays?: number | null;
     scheduleDay?: number | null;
     cronExpression?: string | null;
+    tags?: string[];
+    /** 结束日期（v2.2，YYYY-MM-DD）。 */
+    endsOn?: string | null;
+    /** 共提醒几次（v2.2），空为不限。 */
+    remainingCount?: number | null;
   }): Promise<RecurringTask> {
     return invoke("create_recurring_task", { payload });
   },
@@ -272,6 +281,7 @@ export const api = {
     tags?: string[];
     priority?: number;
     dueAt?: string | null;
+    project?: string;
   }): Promise<Task> {
     return invoke("quick_add_task", { payload });
   },

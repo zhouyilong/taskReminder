@@ -21,6 +21,10 @@
         <label class="field-label">标签</label>
         <TagInput v-model="newRecurring.tags" :suggestions="tagSuggestions" />
       </div>
+      <div class="form-row compact">
+        <label class="field-label">结束条件</label>
+        <RecurringEndFields :draft="newRecurring" />
+      </div>
     </div>
     <div class="task-toolbar">
       <div class="search-field">
@@ -70,18 +74,17 @@
               <td class="col-mode" :title="formatRecurringMode(task.repeatMode)">
                 <span class="chip">{{ formatRecurringMode(task.repeatMode) }}</span>
               </td>
-              <td class="col-rule cell-muted" :title="workdayHolidayWarning(task, holidayYears) || formatRecurringRule(task)">
+              <td
+                class="col-rule cell-muted"
+                :title="workdayHolidayWarning(task, holidayYears) || [formatRecurringRule(task), formatRecurringEnd(task)].filter(Boolean).join(' · ')"
+              >
                 {{ formatRecurringRule(task) }}
+                <span v-if="formatRecurringEnd(task)" class="recurring-end-note">· {{ formatRecurringEnd(task) }}</span>
                 <span v-if="workdayHolidayWarning(task, holidayYears)" class="chip is-warning">节假日待更新</span>
               </td>
               <td class="col-datetime col-next-trigger cell-time" :title="formatDateTime(task.nextTrigger)">{{ formatDateTime(task.nextTrigger) }}</td>
-              <td class="col-status" :title="task.isPaused ? '已暂停' : '运行中'">
-                <span
-                  v-if="!isSupportedRecurringMode(task.repeatMode)"
-                  class="status-pill is-unsupported"
-                  title="来自更新版本的循环模式，本机不会提醒；升级应用后恢复"
-                >需升级</span>
-                <span v-else class="status-pill" :class="task.isPaused ? 'is-paused' : 'is-running'">{{ task.isPaused ? "已暂停" : "运行中" }}</span>
+              <td class="col-status" :title="statusTitle(task)">
+                <span class="status-pill" :class="`is-${recurringStatus(task)}`">{{ RECURRING_STATUS_LABELS[recurringStatus(task)] }}</span>
               </td>
             </tr>
             <tr v-if="!recurringPage.length" class="table-empty-row">
@@ -103,22 +106,26 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import Pagination from "../components/Pagination.vue";
+import RecurringEndFields from "../components/RecurringEndFields.vue";
 import RecurringFields from "../components/RecurringFields.vue";
 import TagInput from "../components/TagInput.vue";
 import TaskBadges from "../components/TaskBadges.vue";
 import { collectTags } from "../tasks";
 import { api } from "../api";
-import { formatDateTime } from "../format";
+import { errorMessage, formatDateTime } from "../format";
 import {
+  RECURRING_STATUS_LABELS,
   buildRecurringPayload,
   createRecurringDraft,
+  formatRecurringEnd,
   formatRecurringMode,
   formatRecurringRule,
-  isSupportedRecurringMode,
   recurringModeOptions,
+  recurringStatus,
   validateRecurringDraft,
   workdayHolidayWarning
 } from "../recurring";
+import type { RecurringTask } from "../types";
 import { matchesKeyword, parseQuery } from "../search";
 import { useAppData } from "../composables/useAppData";
 import { useItemActions } from "../composables/useItemActions";
@@ -139,11 +146,25 @@ const visibleRecurring = computed(() => {
   return recurringTasks.value.filter(task => {
     if (tag && !(task.tags ?? []).some(item => item.toLowerCase() === tag)) return false;
     return matchesKeyword(
-      { text: [task.description, formatRecurringMode(task.repeatMode), formatRecurringRule(task)], tags: task.tags },
+      {
+        text: [
+          task.description,
+          formatRecurringMode(task.repeatMode),
+          formatRecurringRule(task),
+          RECURRING_STATUS_LABELS[recurringStatus(task)]
+        ],
+        tags: task.tags
+      },
       query
     );
   });
 });
+const STATUS_TITLES: Record<string, string> = {
+  unsupported: "来自更新版本的循环模式，本机不会提醒；升级应用后恢复",
+  ended: "已到结束条件，不再提醒；编辑结束条件后自动恢复",
+};
+const statusTitle = (task: RecurringTask) =>
+  STATUS_TITLES[recurringStatus(task)] ?? RECURRING_STATUS_LABELS[recurringStatus(task)];
 const paginationKey = computed(() => `${tagFilter.value}\n${keyword.value}`);
 const toggleTagFilter = (tag: string) => {
   tagFilter.value = tagFilter.value.toLowerCase() === tag.toLowerCase() ? "" : tag;
@@ -172,7 +193,12 @@ const handleAddRecurring = async () => {
     alert(error);
     return;
   }
-  await api.createRecurringTask(buildRecurringPayload(newRecurring));
+  try {
+    await api.createRecurringTask(buildRecurringPayload(newRecurring));
+  } catch (error) {
+    alert(errorMessage(error));
+    return;
+  }
   Object.assign(newRecurring, createRecurringDraft());
   await refreshAll();
 };

@@ -38,6 +38,9 @@ pub struct TaskUpdatePayload {
     /// 截止时间：省略时保留原值，`null` 清除。
     #[serde(default, deserialize_with = "present")]
     due_at: Option<Option<String>>,
+    /// 项目（v2.2）：省略时保留原值，空字符串移出项目。
+    #[serde(default)]
+    project: Option<String>,
 }
 
 /// 区分“字段省略”（外层 `None`，由 `default` 提供）与“显式为 null”（`Some(None)`）。
@@ -67,6 +70,8 @@ impl TaskUpdatePayload {
         Some(TaskMeta {
             tags: self.tags.clone().unwrap_or_default(),
             priority: self.priority.unwrap_or(0),
+            // 更新时项目单独处理（`set_task_project`），这里不使用。
+            project: String::new(),
         })
     }
 }
@@ -86,6 +91,9 @@ pub struct CreateTaskPayload {
     /// 截止时间（v2.1）。
     #[serde(default)]
     due_at: Option<String>,
+    /// 项目（v2.2）。
+    #[serde(default)]
+    project: String,
 }
 
 #[derive(Deserialize)]
@@ -99,6 +107,8 @@ pub struct QuickAddPayload {
     priority: i64,
     #[serde(default)]
     due_at: Option<String>,
+    #[serde(default)]
+    project: String,
 }
 
 #[tauri::command]
@@ -116,6 +126,7 @@ pub fn create_task(state: State<AppState>, payload: CreateTaskPayload) -> ApiRes
     let meta = TaskMeta {
         tags: payload.tags,
         priority: payload.priority,
+        project: payload.project,
     };
     create_task_with_reminder(
         &state,
@@ -137,6 +148,7 @@ pub fn quick_add_task(
     let meta = TaskMeta {
         tags: payload.tags,
         priority: payload.priority,
+        project: payload.project,
     };
     let task = create_task_with_reminder(
         &state,
@@ -211,6 +223,9 @@ pub fn update_task(
     ))?;
     if let Some(due) = due_at {
         into_api(state.db.set_task_due(&task.id, due.as_deref()))?;
+    }
+    if let Some(project) = task.project.as_deref() {
+        into_api(state.db.set_task_project(&task.id, project))?;
     }
     state.scheduler.cancel_task(&task.id);
     if let Some(reminder_time) = reminder_time.clone() {
@@ -300,6 +315,7 @@ pub enum TaskBatchPayload {
     Delete,
     AddTags { tags: Vec<String> },
     SetPriority { priority: i64 },
+    SetProject { project: String },
     SetReminder { reminder_time: Option<String> },
 }
 
@@ -310,6 +326,7 @@ impl TaskBatchPayload {
             TaskBatchPayload::Delete => TaskBatchOp::Delete,
             TaskBatchPayload::AddTags { tags } => TaskBatchOp::AddTags(tags),
             TaskBatchPayload::SetPriority { priority } => TaskBatchOp::SetPriority(priority),
+            TaskBatchPayload::SetProject { project } => TaskBatchOp::SetProject(project),
             TaskBatchPayload::SetReminder { reminder_time } => {
                 TaskBatchOp::SetReminder(normalize_reminder_time(reminder_time))
             }
@@ -352,7 +369,7 @@ pub fn batch_update_tasks(
                 }
                 emit_sticky_note_reminder(&app, id, reminder.clone());
             }
-            TaskBatchOp::AddTags(_) | TaskBatchOp::SetPriority(_) => {}
+            TaskBatchOp::AddTags(_) | TaskBatchOp::SetPriority(_) | TaskBatchOp::SetProject(_) => {}
         }
     }
     if !changed.is_empty() {
@@ -396,6 +413,25 @@ mod tests {
     }
 
     #[test]
+    fn update_payload_keeps_project_when_missing() {
+        let parse = |json: &str| {
+            serde_json::from_str::<TaskUpdatePayload>(json)
+                .unwrap()
+                .project
+        };
+        let base = r#""id":"t","description":"d","stickyContent":null,"reminderTime":null"#;
+        assert_eq!(parse(&format!("{{{}}}", base)), None);
+        assert_eq!(
+            parse(&format!(r#"{{{},"project":""}}"#, base)),
+            Some(String::new())
+        );
+        assert_eq!(
+            parse(&format!(r#"{{{},"project":"装修"}}"#, base)),
+            Some("装修".to_string())
+        );
+    }
+
+    #[test]
     fn batch_payload_matches_frontend_json() {
         assert_eq!(op(r#"{"action":"complete"}"#), TaskBatchOp::Complete);
         assert_eq!(op(r#"{"action":"delete"}"#), TaskBatchOp::Delete);
@@ -406,6 +442,10 @@ mod tests {
         assert_eq!(
             op(r#"{"action":"setPriority","priority":2}"#),
             TaskBatchOp::SetPriority(2)
+        );
+        assert_eq!(
+            op(r#"{"action":"setProject","project":"装修"}"#),
+            TaskBatchOp::SetProject("装修".to_string())
         );
         assert_eq!(
             op(r#"{"action":"setReminder","reminderTime":"2026-10-03T15:00:00"}"#),
