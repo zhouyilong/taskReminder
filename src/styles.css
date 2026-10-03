@@ -3828,6 +3828,10 @@ html.sticky-note-mode.is-linux .paper-note {
   margin-bottom: 0;
 }
 
+.stats-grid + .stats-grid {
+  margin-top: 14px;
+}
+
 .stats-empty {
   padding: 24px 0;
   color: var(--text-faint);
@@ -4069,8 +4073,27 @@ html.sticky-note-mode.is-linux .paper-note {
   font-variant-numeric: tabular-nums;
 }
 
-.habit-table {
+.habit-table,
+.tag-stats-table {
   width: 100%;
+}
+
+/* 行内文字按钮（如统计提示中的“调整”）。 */
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary-text);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 .streak {
