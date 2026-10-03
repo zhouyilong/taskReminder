@@ -14,8 +14,9 @@ use crate::backup::ImportSummary;
 use crate::errors::AppError;
 use crate::kinds::{ReminderAction, ReminderKind, RepeatMode, TaskStatus, TaskType};
 use crate::models::{
-    default_quick_add_shortcut, normalize_priority, tags_from_db, tags_to_db, AppSettings,
-    RecurringTask, ReminderRecord, StickyNote, Task,
+    default_quick_add_shortcut, normalize_completed_retention_days, normalize_priority,
+    tags_from_db, tags_to_db, AppSettings, RecurringTask, ReminderRecord, StickyNote, Task,
+    DEFAULT_COMPLETED_RETENTION_DAYS,
 };
 use crate::quiet_hours;
 use crate::secrets::{self, SecretStore, Secrets};

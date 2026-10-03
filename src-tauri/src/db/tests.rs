@@ -69,7 +69,11 @@ fn cleanup_tombstones_old_completed_tasks_instead_of_deleting() {
         .unwrap();
     }
 
-    db.cleanup_data(TOMBSTONE_RETENTION_DAYS_LOCAL).unwrap();
+    db.cleanup_data(
+        TOMBSTONE_RETENTION_DAYS_LOCAL,
+        DEFAULT_COMPLETED_RETENTION_DAYS,
+    )
+    .unwrap();
 
     // 过期的已完成任务仍保留一行墓碑，云同步才能把删除传播到其他设备。
     let (_, deleted_at) = task_row(&db, &old.id).expect("old task row kept as tombstone");
@@ -706,5 +710,79 @@ fn sort_orders_due_and_sticky_color_roundtrip() {
         Some("blue".to_string())
     );
     assert_eq!(crate::models::normalize_sticky_color("teal"), None);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+fn complete_days_ago(db: &DbManager, title: &str, days: i64) -> String {
+    let task = db.create_task(title, None).unwrap();
+    db.get_conn()
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET status = 'COMPLETED', completed_at = ? WHERE id = ?",
+            params![days_ago(days), task.id],
+        )
+        .unwrap();
+    task.id
+}
+
+fn is_tombstoned(db: &DbManager, id: &str) -> bool {
+    task_row(db, id).unwrap().1.is_some()
+}
+
+#[test]
+fn completed_retention_follows_the_setting() {
+    for (retention, kept_days, cleaned_days) in [(30, 29, 31), (90, 89, 91), (365, 364, 366)] {
+        let (db, dir) = temp_db();
+        let kept = complete_days_ago(&db, "kept", kept_days);
+        let cleaned = complete_days_ago(&db, "cleaned", cleaned_days);
+        db.cleanup_data(TOMBSTONE_RETENTION_DAYS_LOCAL, retention)
+            .unwrap();
+        assert!(!is_tombstoned(&db, &kept), "{} 天", retention);
+        assert!(is_tombstoned(&db, &cleaned), "{} 天", retention);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
+fn permanent_retention_never_cleans_completed_tasks() {
+    let (db, dir) = temp_db();
+    let old = complete_days_ago(&db, "old", 1000);
+    db.cleanup_data(TOMBSTONE_RETENTION_DAYS_LOCAL, 0).unwrap();
+    assert!(!is_tombstoned(&db, &old));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn completed_count_limit_only_applies_to_default_retention() {
+    let (db, dir) = temp_db();
+    let ids: Vec<String> = (0..102)
+        .map(|i| complete_days_ago(&db, &format!("t{}", i), 1))
+        .collect();
+    db.cleanup_data(TOMBSTONE_RETENTION_DAYS_LOCAL, 90).unwrap();
+    assert_eq!(ids.iter().filter(|id| is_tombstoned(&db, id)).count(), 0);
+    db.cleanup_data(TOMBSTONE_RETENTION_DAYS_LOCAL, 30).unwrap();
+    assert_eq!(ids.iter().filter(|id| is_tombstoned(&db, id)).count(), 2);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn completed_retention_setting_roundtrips_and_rejects_unknown_values() {
+    let (db, dir) = temp_db();
+    assert_eq!(db.completed_retention_days().unwrap(), 30);
+    let mut settings = db.load_settings().unwrap();
+    assert_eq!(settings.completed_retention_days, 30);
+    settings.completed_retention_days = 0;
+    db.save_settings(&settings).unwrap();
+    assert_eq!(db.load_settings().unwrap().completed_retention_days, 0);
+    assert_eq!(db.completed_retention_days().unwrap(), 0);
+    settings.completed_retention_days = 45;
+    db.save_settings(&settings).unwrap();
+    assert_eq!(db.completed_retention_days().unwrap(), 30);
+    // 不认识的值（如更新版本写入的档位）读出时按默认处理。
+    db.get_conn()
+        .unwrap()
+        .execute("UPDATE settings SET completed_retention_days = 7", [])
+        .unwrap();
+    assert_eq!(db.completed_retention_days().unwrap(), 30);
     let _ = std::fs::remove_dir_all(dir);
 }

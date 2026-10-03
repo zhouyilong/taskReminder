@@ -27,7 +27,10 @@ const SAMPLE_2_1: &str = include_str!("../../tests/fixtures/sync-sample-2.1.sql"
 const V2_1_SCHEMA: &str = "2.1.0";
 
 fn parse_version(version: &str) -> Vec<u32> {
-    version.split('.').map(|part| part.parse().unwrap()).collect()
+    version
+        .split('.')
+        .map(|part| part.parse().unwrap())
+        .collect()
 }
 
 /// 库结构版本是否已有 v2.1 的同步列。
@@ -170,7 +173,12 @@ fn assert_v2_1_sample(db: &DbManager, release: &str) {
     let future = db.get_task("v21-task-future-color").unwrap().unwrap();
     assert_eq!(future.sticky_color, "teal", "{}", release);
     let last_day = db.get_recurring_task("v21-rec-last-day").unwrap().unwrap();
-    assert_eq!(last_day.repeat_mode, RepeatMode::MonthlyLastDay, "{}", release);
+    assert_eq!(
+        last_day.repeat_mode,
+        RepeatMode::MonthlyLastDay,
+        "{}",
+        release
+    );
     assert_eq!(last_day.tags, vec!["家务"], "{}", release);
     let last_workday = db
         .get_recurring_task("v21-rec-last-workday")

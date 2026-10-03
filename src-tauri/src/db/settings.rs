@@ -40,6 +40,21 @@ impl DbManager {
         Ok(value.unwrap_or(1) == 1)
     }
 
+    /// 已完成待办的保留天数（0 为永久）。只读一列，定期清理时调用，避免 `load_settings` 访问凭据库。
+    pub fn completed_retention_days(&self) -> Result<i64, AppError> {
+        let conn = self.get_conn()?;
+        let value: Option<i64> = conn
+            .query_row(
+                "SELECT completed_retention_days FROM settings WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(normalize_completed_retention_days(
+            value.unwrap_or(DEFAULT_COMPLETED_RETENTION_DAYS),
+        ))
+    }
+
     pub fn load_settings(&self) -> Result<AppSettings, AppError> {
         let conn = self.get_conn()?;
         let sql = "SELECT auto_start_enabled, sound_enabled, snooze_minutes,
@@ -51,7 +66,7 @@ impl DbManager {
                    sync_encryption_enabled, sync_passphrase,
                    quiet_hours_enabled, quiet_hours_start, quiet_hours_end,
                    native_notification_enabled, sticky_toggle_shortcut, secret_storage,
-                   sticky_snap_enabled, holiday_auto_update
+                   sticky_snap_enabled, holiday_auto_update, completed_retention_days
                    FROM settings WHERE id = 1";
         let mut stmt = conn.prepare(sql)?;
         let row = stmt.query_row([], |row| {
@@ -122,6 +137,10 @@ impl DbManager {
                     .unwrap_or_else(|| secrets::STORAGE_DB.to_string()),
                 sticky_snap_enabled: row.get::<_, Option<i64>>(33)?.unwrap_or(1) == 1,
                 holiday_auto_update: row.get::<_, Option<i64>>(34)?.unwrap_or(1) == 1,
+                completed_retention_days: normalize_completed_retention_days(
+                    row.get::<_, Option<i64>>(35)?
+                        .unwrap_or(DEFAULT_COMPLETED_RETENTION_DAYS),
+                ),
             })
         })?;
         let mut settings = row;
@@ -151,7 +170,7 @@ impl DbManager {
                  sync_encryption_enabled = ?, sync_passphrase = ?,
                  quiet_hours_enabled = ?, quiet_hours_start = ?, quiet_hours_end = ?,
                  native_notification_enabled = ?, sticky_toggle_shortcut = ?, secret_storage = ?,
-                 sticky_snap_enabled = ?, holiday_auto_update = ?
+                 sticky_snap_enabled = ?, holiday_auto_update = ?, completed_retention_days = ?
              WHERE id = 1",
             params![
                 if settings.auto_start_enabled { 1 } else { 0 },
@@ -189,6 +208,7 @@ impl DbManager {
                 secret_storage,
                 if settings.sticky_snap_enabled { 1 } else { 0 },
                 if settings.holiday_auto_update { 1 } else { 0 },
+                normalize_completed_retention_days(settings.completed_retention_days),
             ],
         )?;
         Ok(())

@@ -217,6 +217,9 @@ pub struct AppSettings {
     /// 每天从项目仓库检查节假日数据更新。
     #[serde(default = "default_true")]
     pub holiday_auto_update: bool,
+    /// 已完成待办的保留天数（`COMPLETED_RETENTION_OPTIONS`），0 为永久保留。
+    #[serde(default = "default_completed_retention_days")]
+    pub completed_retention_days: i64,
     /// 密码存放位置（`secrets::STORAGE_*`），只读：保存时由后端决定。
     #[serde(default)]
     pub secret_storage: String,
@@ -232,6 +235,23 @@ fn default_quiet_hours_end() -> String {
 
 fn default_true() -> bool {
     true
+}
+
+/// 已完成待办保留天数的可选值：30（默认，另限最近 100 条）、90、365、0（永久保留）。
+pub const COMPLETED_RETENTION_OPTIONS: &[i64] = &[30, 90, 365, 0];
+pub const DEFAULT_COMPLETED_RETENTION_DAYS: i64 = 30;
+
+fn default_completed_retention_days() -> i64 {
+    DEFAULT_COMPLETED_RETENTION_DAYS
+}
+
+/// 不认识的保留天数按默认值处理。
+pub fn normalize_completed_retention_days(value: i64) -> i64 {
+    if COMPLETED_RETENTION_OPTIONS.contains(&value) {
+        value
+    } else {
+        DEFAULT_COMPLETED_RETENTION_DAYS
+    }
 }
 
 pub fn default_quick_add_shortcut() -> String {
