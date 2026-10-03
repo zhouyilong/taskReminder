@@ -9,7 +9,7 @@ impl DbManager {
             "SELECT id, description, type, status, created_at, completed_at,
                     interval_minutes, last_triggered, next_trigger, is_paused, start_time, end_time,
                     repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
-                    updated_at, deleted_at, schedule_weekdays, tags
+                    updated_at, deleted_at, schedule_weekdays, tags, ends_on, remaining_count
              FROM recurring_tasks
              WHERE deleted_at IS NULL
              ORDER BY created_at ASC",
@@ -24,7 +24,7 @@ impl DbManager {
             "SELECT id, description, type, status, created_at, completed_at,
                     interval_minutes, last_triggered, next_trigger, is_paused, start_time, end_time,
                     repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
-                    updated_at, deleted_at, schedule_weekdays, tags
+                    updated_at, deleted_at, schedule_weekdays, tags, ends_on, remaining_count
              FROM recurring_tasks WHERE id = ?",
         )?;
         let task = stmt.query_row([task_id], recurring_from_row).optional()?;
@@ -40,10 +40,10 @@ impl DbManager {
                 id, description, type, status, created_at, completed_at, interval_minutes,
                 last_triggered, next_trigger, is_paused, start_time, end_time,
                 repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
-                updated_at, deleted_at, schedule_weekdays, tags
+                updated_at, deleted_at, schedule_weekdays, tags, ends_on, remaining_count
             )
              VALUES (?, ?, 'RECURRING', 'PENDING', ?, NULL, ?, NULL, ?, 0, ?, ?,
-                     ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+                     ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)",
             params![
                 id,
                 task.description.as_str(),
@@ -59,7 +59,9 @@ impl DbManager {
                 task.cron_expression.as_deref(),
                 now,
                 task.schedule_weekdays,
-                tags_to_db(&task.tags)
+                tags_to_db(&task.tags),
+                task.ends_on.as_deref(),
+                task.remaining_count
             ],
         )?;
         Ok(RecurringTask {
@@ -85,6 +87,8 @@ impl DbManager {
             schedule_day: task.schedule_day,
             cron_expression: task.cron_expression.clone(),
             tags: crate::models::normalize_tags(&task.tags),
+            ends_on: task.ends_on.clone(),
+            remaining_count: task.remaining_count,
         })
     }
 
@@ -95,7 +99,7 @@ impl DbManager {
             "UPDATE recurring_tasks
              SET description = ?, interval_minutes = ?, start_time = ?, end_time = ?,
                  repeat_mode = ?, schedule_time = ?, schedule_weekday = ?, schedule_weekdays = ?,
-                 schedule_day = ?, cron_expression = ?, tags = ?,
+                 schedule_day = ?, cron_expression = ?, tags = ?, ends_on = ?, remaining_count = ?,
                  is_paused = ?, next_trigger = ?, last_triggered = ?, updated_at = ?
              WHERE id = ?",
             params![
@@ -110,6 +114,8 @@ impl DbManager {
                 task.schedule_day,
                 task.cron_expression.as_deref(),
                 tags_to_db(&task.tags),
+                task.ends_on.as_deref(),
+                task.remaining_count,
                 if task.is_paused { 1 } else { 0 },
                 task.next_trigger.as_str(),
                 task.last_triggered.as_deref(),
@@ -149,7 +155,7 @@ impl DbManager {
             "SELECT id, description, type, status, created_at, completed_at,
                     interval_minutes, last_triggered, next_trigger, is_paused, start_time, end_time,
                     repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
-                    updated_at, deleted_at, schedule_weekdays, tags
+                    updated_at, deleted_at, schedule_weekdays, tags, ends_on, remaining_count
              FROM recurring_tasks
              WHERE deleted_at IS NOT NULL AND deleted_at >= ?
              ORDER BY deleted_at DESC",
@@ -200,5 +206,7 @@ pub(super) fn recurring_from_row(
         updated_at: row.get(17)?,
         deleted_at: row.get(18)?,
         tags: tags_from_db(row.get::<_, Option<String>>(20)?),
+        ends_on: row.get(21)?,
+        remaining_count: row.get(22)?,
     })
 }

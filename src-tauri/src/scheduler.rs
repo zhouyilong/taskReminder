@@ -13,10 +13,11 @@ use crate::models::{AppSettings, NotificationPayload, RecurringTask, Task};
 use crate::notification_queue::NotificationQueue;
 use crate::quiet_hours;
 use crate::recurrence::{
-    compute_next_trigger, refreshed_workday_trigger, sanitize_recurring_task, should_trigger_now,
+    advance_after_trigger, apply_end_condition, compute_next_trigger, has_ended,
+    refreshed_workday_trigger, sanitize_recurring_task, should_trigger_now,
 };
 use crate::sync::CloudSyncService;
-use crate::time::{self, now_string, parse_datetime_any};
+use crate::time::{self, parse_datetime_any};
 
 /// 校准巡检间隔：兜底系统休眠/唤醒、修改系统时间、云同步带来的新提醒等
 /// 单次 sleep 计时器覆盖不到的情况。
@@ -213,6 +214,7 @@ impl ReminderScheduler {
                 continue;
             };
             task.next_trigger = next;
+            apply_end_condition(&mut task);
             self.db.update_recurring_task(&task)?;
             self.schedule_recurring(task)?;
             updated += 1;
@@ -276,6 +278,14 @@ impl ReminderScheduler {
         if task.deleted_at.is_some() || task.is_paused || !task.repeat_mode.is_known() {
             return Ok(());
         }
+        // 已到结束条件却仍在运行（例如不认识结束条件的旧版本设备恢复了它）：改回暂停，不弹出。
+        if has_ended(&task) {
+            task.is_paused = true;
+            self.db.update_recurring_task(&task)?;
+            self.sync.notify_local_change()?;
+            self.cancel_recurring(&task.id);
+            return Ok(());
+        }
         let now = time::now();
         // 计时器可能因精度或系统休眠/唤醒而提前触发；若尚未到达本次计划触发时间，
         // 则仅重新排程而不触发提醒，避免在同一秒内反复触发产生大量重复记录。
@@ -287,6 +297,7 @@ impl ReminderScheduler {
         }
         if !should_trigger_now(&task, now)? {
             task.next_trigger = compute_next_trigger(&task, Some(now))?;
+            apply_end_condition(&mut task);
             self.db.update_recurring_task(&task)?;
             self.sync.notify_local_change()?;
             self.schedule_recurring(task)?;
@@ -294,8 +305,7 @@ impl ReminderScheduler {
         }
         sanitize_recurring_task(&mut task)?;
         let scheduled_time = task.next_trigger.clone();
-        task.last_triggered = Some(now_string());
-        task.next_trigger = compute_next_trigger(&task, Some(now))?;
+        advance_after_trigger(&mut task, now)?;
         self.db.update_recurring_task(&task)?;
 
         let record =

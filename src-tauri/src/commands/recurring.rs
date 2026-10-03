@@ -25,6 +25,12 @@ pub struct CreateRecurringPayload {
     cron_expression: Option<String>,
     #[serde(default)]
     tags: Vec<String>,
+    /// 结束日期（v2.2，`YYYY-MM-DD`，含当天）。
+    #[serde(default)]
+    ends_on: Option<String>,
+    /// 共提醒几次（v2.2），空为不限。
+    #[serde(default)]
+    remaining_count: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -72,9 +78,21 @@ pub fn create_recurring_task(
         schedule_day: payload.schedule_day,
         cron_expression: payload.cron_expression,
         tags: crate::models::normalize_tags(&payload.tags),
+        ends_on: payload.ends_on,
+        remaining_count: payload.remaining_count,
     };
     into_api(recurrence::sanitize_recurring_task(&mut draft))?;
     draft.next_trigger = into_api(recurrence::compute_next_trigger(&draft, None))?;
+    if recurrence::has_ended(&draft) {
+        return Err(if draft.remaining_count == Some(0) {
+            "提醒次数需大于 0".to_string()
+        } else {
+            format!(
+                "结束日期早于第一次提醒（{}）",
+                draft.next_trigger.replace('T', " ")
+            )
+        });
+    }
     let task = into_api(state.db.create_recurring_task(&draft))?;
     if !task.is_paused {
         into_api(state.scheduler.schedule_recurring(task.clone()))?;
@@ -86,8 +104,15 @@ pub fn create_recurring_task(
 #[tauri::command]
 pub fn update_recurring_task(state: State<AppState>, task: RecurringTask) -> ApiResult<()> {
     let mut task = task;
+    // 编辑前已结束、改了结束条件后不再结束的，自动恢复运行；其他情况保留原来的暂停状态。
+    let was_ended = into_api(state.db.get_recurring_task(&task.id))?
+        .is_some_and(|previous| previous.is_paused && recurrence::has_ended(&previous));
     into_api(recurrence::sanitize_recurring_task(&mut task))?;
     task.next_trigger = into_api(recurrence::compute_next_trigger(&task, None))?;
+    if was_ended && !recurrence::has_ended(&task) {
+        task.is_paused = false;
+    }
+    recurrence::apply_end_condition(&mut task);
     into_api(state.db.update_recurring_task(&task))?;
     if task.is_paused {
         state.scheduler.cancel_recurring(&task.id);
@@ -114,6 +139,10 @@ pub fn resume_recurring_task(state: State<AppState>, id: String) -> ApiResult<()
     task.is_paused = false;
     into_api(recurrence::sanitize_recurring_task(&mut task))?;
     task.next_trigger = into_api(recurrence::compute_next_trigger(&task, None))?;
+    if recurrence::has_ended(&task) {
+        let reason = recurrence::describe_end(&task).unwrap_or_default();
+        return Err(format!("已到结束条件（{}），请先编辑结束条件", reason));
+    }
     into_api(state.db.update_recurring_task(&task))?;
     into_api(state.scheduler.schedule_recurring(task))?;
     into_api(state.sync.notify_local_change())?;
@@ -127,6 +156,8 @@ pub fn skip_recurring_occurrence(state: State<AppState>, id: String) -> ApiResul
         return Err("循环提醒不存在".to_string());
     };
     task.next_trigger = into_api(recurrence::skipped_trigger(&task, time::now()))?;
+    // 跳过不扣减剩余次数；跳过后超出结束日期时结束。
+    recurrence::apply_end_condition(&mut task);
     into_api(state.db.update_recurring_task(&task))?;
     into_api(state.scheduler.schedule_recurring(task.clone()))?;
     into_api(state.sync.notify_local_change())?;

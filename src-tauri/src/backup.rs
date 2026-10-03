@@ -231,13 +231,16 @@ fn markdown_note(content: Option<&str>) -> String {
         + "\n"
 }
 
-fn markdown_task_line(task: &Task) -> String {
+fn markdown_task_line(task: &Task, show_project: bool) -> String {
     let done = task.status == TaskStatus::Completed;
     let mut parts = vec![format!(
         "- [{}] {}",
         if done { "x" } else { " " },
         task.description.trim()
     )];
+    if show_project && !task.project.is_empty() {
+        parts.push(format!("@{}", task.project));
+    }
     if let Some(due) = task.due_at.as_deref() {
         parts.push(format!("📅 截止 {}", short_time(due)));
     }
@@ -300,8 +303,31 @@ pub fn render_markdown(backup: &BackupFile) -> String {
     if pending.is_empty() {
         out.push_str("暂无待办。\n");
     }
-    for task in &pending {
-        out.push_str(&markdown_task_line(task));
+    // 有项目（v2.2）时按项目分组：项目按名称排序，未分组的排在最后。
+    if pending.iter().any(|task| !task.project.is_empty()) {
+        let mut projects: Vec<&str> = pending.iter().map(|task| task.project.as_str()).collect();
+        projects.sort_by(|a, b| a.is_empty().cmp(&b.is_empty()).then_with(|| a.cmp(b)));
+        projects.dedup();
+        for project in projects {
+            let group: Vec<&&Task> = pending
+                .iter()
+                .filter(|task| task.project == project)
+                .collect();
+            let name = if project.is_empty() {
+                "未分组"
+            } else {
+                project
+            };
+            out.push_str(&format!("### {}（{}）\n\n", name, group.len()));
+            for task in group {
+                out.push_str(&markdown_task_line(task, false));
+            }
+            out.push('\n');
+        }
+    } else {
+        for task in &pending {
+            out.push_str(&markdown_task_line(task, false));
+        }
     }
 
     out.push_str(&format!(
@@ -312,15 +338,22 @@ pub fn render_markdown(backup: &BackupFile) -> String {
         out.push_str("暂无循环提醒。\n");
     }
     for task in &backup.recurring_tasks {
+        let end = recurrence::describe_end(task)
+            .map(|text| format!(" · {}", text))
+            .unwrap_or_default();
+        let state = if !task.is_paused {
+            ""
+        } else if recurrence::has_ended(task) {
+            "（已结束）"
+        } else {
+            "（已暂停）"
+        };
         out.push_str(&format!(
-            "- {} — {}{}\n",
+            "- {} — {}{}{}\n",
             task.description.trim(),
             describe_rule(task),
-            if task.is_paused {
-                "（已暂停）"
-            } else {
-                ""
-            }
+            end,
+            state
         ));
     }
 
@@ -329,7 +362,7 @@ pub fn render_markdown(backup: &BackupFile) -> String {
         out.push_str("暂无已完成的待办。\n");
     }
     for task in &completed {
-        out.push_str(&markdown_task_line(task));
+        out.push_str(&markdown_task_line(task, true));
     }
     out
 }
@@ -406,6 +439,36 @@ fn ics_rrule(task: &RecurringTask) -> Option<String> {
         }
         _ => None,
     }
+    .map(|rule| match ics_end_clause(task) {
+        Some(end) => format!("{};{}", rule, end),
+        None => rule,
+    })
+}
+
+/// 结束条件（v2.2）对应的 `UNTIL` / `COUNT`（两者不能同时出现）：同时设置时按先到的一个。
+fn ics_end_clause(task: &RecurringTask) -> Option<String> {
+    let until = task
+        .ends_on
+        .as_deref()
+        .and_then(time::parse_date)
+        .and_then(|date| date.and_hms_opt(23, 59, 59));
+    let count = task.remaining_count.map(|count| count.max(0) as usize);
+    let until_clause = |value: NaiveDateTime| format!("UNTIL={}", ics_datetime(&value));
+    match (until, count) {
+        (None, None) => None,
+        (Some(until), None) => Some(until_clause(until)),
+        (None, Some(count)) => Some(format!("COUNT={}", count)),
+        (Some(until), Some(count)) => {
+            let before_until = recurrence::upcoming_triggers(task, until, count)
+                .map(|times| times.len())
+                .unwrap_or(count);
+            Some(if before_until < count {
+                until_clause(until)
+            } else {
+                format!("COUNT={}", count)
+            })
+        }
+    }
 }
 
 struct IcsEvent<'a> {
@@ -414,7 +477,7 @@ struct IcsEvent<'a> {
     summary: &'a str,
     description: String,
     rrule: Option<String>,
-    categories: &'a [String],
+    categories: Vec<String>,
     priority: i64,
     /// 提醒相对开始时间提前的分钟数；None 表示不提醒（只有截止时间）。
     alarm_minutes_before: Option<i64>,
@@ -505,7 +568,11 @@ pub fn render_ics(backup: &BackupFile, dtstamp: &str) -> (String, usize) {
                 summary: &task.description,
                 description: task.sticky_content.clone().unwrap_or_default(),
                 rrule: None,
-                categories: &task.tags,
+                // 项目（v2.2）作为第一个分类，其后为标签。
+                categories: std::iter::once(task.project.clone())
+                    .filter(|project| !project.is_empty())
+                    .chain(task.tags.iter().cloned())
+                    .collect(),
                 priority: task.priority,
                 alarm_minutes_before,
             },
@@ -533,7 +600,7 @@ pub fn render_ics(backup: &BackupFile, dtstamp: &str) -> (String, usize) {
                 summary: &task.description,
                 description: describe_rule(task),
                 rrule: Some(rrule),
-                categories: &task.tags,
+                categories: task.tags.clone(),
                 priority: 0,
                 alarm_minutes_before: Some(0),
             },
@@ -695,6 +762,8 @@ mod tests {
             schedule_day: Some(31),
             cron_expression: None,
             tags: Vec::new(),
+            ends_on: None,
+            remaining_count: None,
         }
     }
 
@@ -704,6 +773,7 @@ mod tests {
         let meta = TaskMeta {
             tags: vec!["工作".to_string()],
             priority: 2,
+            project: String::new(),
         };
         let task = source
             .create_task_with_meta("交周报", Some("- 本周进展"), &meta)
@@ -788,6 +858,7 @@ mod tests {
         let meta = TaskMeta {
             tags: vec!["工作".to_string()],
             priority: 3,
+            project: String::new(),
         };
         let task = db
             .create_task_with_meta("交周报", Some("第一行\n\n第二行"), &meta)
@@ -842,6 +913,7 @@ mod tests {
                 due_at: None,
                 sticky_color: String::new(),
                 sort_order: None,
+                project: String::new(),
             }],
             recurring_tasks: vec![weekly, monthly, interval, paused],
             reminder_records: Vec::new(),
@@ -884,6 +956,7 @@ mod tests {
             due_at: due.map(str::to_string),
             sticky_color: String::new(),
             sort_order: None,
+            project: String::new(),
         };
         let backup = BackupFile {
             app: BACKUP_APP_ID.to_string(),
@@ -972,6 +1045,63 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1);
         assert!(resolve_backup(&db_path, "../test.db").is_err());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ics_rrule_carries_end_condition() {
+        let mut task = sample_recurring("DAILY");
+        assert_eq!(ics_rrule(&task).as_deref(), Some("FREQ=DAILY"));
+        task.remaining_count = Some(5);
+        assert_eq!(ics_rrule(&task).as_deref(), Some("FREQ=DAILY;COUNT=5"));
+        // 两者都有时按先到的：10-02 起到 10-04 只有 3 次，早于 10 次。
+        task.ends_on = Some("2026-10-04".to_string());
+        task.remaining_count = Some(10);
+        assert_eq!(
+            ics_rrule(&task).as_deref(),
+            Some("FREQ=DAILY;UNTIL=20261004T235959")
+        );
+        task.ends_on = Some("2026-12-31".to_string());
+        task.remaining_count = Some(2);
+        assert_eq!(ics_rrule(&task).as_deref(), Some("FREQ=DAILY;COUNT=2"));
+        task.remaining_count = None;
+        assert_eq!(
+            ics_rrule(&task).as_deref(),
+            Some("FREQ=DAILY;UNTIL=20261231T235959")
+        );
+    }
+
+    #[test]
+    fn markdown_groups_pending_by_project_and_marks_ended_rules() {
+        let (db, dir) = temp_db();
+        let meta = |project: &str| TaskMeta {
+            project: project.to_string(),
+            ..TaskMeta::default()
+        };
+        db.create_task_with_meta("买瓷砖", None, &meta("装修"))
+            .unwrap();
+        db.create_task_with_meta("交周报", None, &meta("")).unwrap();
+        let done = db
+            .create_task_with_meta("量尺寸", None, &meta("装修"))
+            .unwrap();
+        db.complete_task(&done.id).unwrap();
+        let mut ended = sample_recurring("DAILY");
+        ended.remaining_count = Some(0);
+        ended.is_paused = true;
+        let ended = db.create_recurring_task(&ended).unwrap();
+        db.update_recurring_task(&RecurringTask {
+            is_paused: true,
+            ..ended
+        })
+        .unwrap();
+
+        let markdown = render_markdown(&build_backup(&db, "2.2.0").unwrap());
+        let decor = markdown.find("### 装修（1）").unwrap();
+        let none = markdown.find("### 未分组（1）").unwrap();
+        assert!(decor < none);
+        assert!(markdown.contains("### 装修（1）\n\n- [ ] 买瓷砖\n"));
+        assert!(markdown.contains("- [x] 量尺寸 · @装修 · ✓ "));
+        assert!(markdown.contains("- 周报 — 每天 17:30 · 还剩 0 次（已结束）\n"));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

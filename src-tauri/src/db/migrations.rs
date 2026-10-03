@@ -182,6 +182,11 @@ pub(super) fn migration_scripts() -> Vec<MigrationScript> {
             description: "add completed retention".to_string(),
             sql: include_str!("../../migrations/V2.1.1__add_completed_retention.sql"),
         },
+        MigrationScript {
+            version: "2.2.0".to_string(),
+            description: "add recurring end condition and task project".to_string(),
+            sql: include_str!("../../migrations/V2.2.0__add_recurring_end_and_task_project.sql"),
+        },
     ]
 }
 

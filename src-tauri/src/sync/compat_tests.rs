@@ -1,5 +1,5 @@
 //! 跨版本同步测试：按各发布版本的迁移建库并写入示例数据（`tests/fixtures/sync-sample-2.0.sql`，
-//! 2.1.0 起再加 `sync-sample-2.1.sql`），检查与当前版本双向合并、从旧版本升级都不丢数据；
+//! 2.1.0 起再加 `sync-sample-2.1.sql`，2.2.0 起再加 `sync-sample-2.2.sql`），检查与当前版本双向合并、从旧版本升级都不丢数据；
 //! 再用“模拟更新的版本”（多同步列、多一种循环模式）的库检查不认识的列与值原样保留。
 //!
 //! 发布新版本时：把它的库结构版本加到 `RELEASES`；若新增了同步列，为它另写一份夹具。
@@ -11,6 +11,7 @@ use rusqlite::{types::Value, Connection};
 use super::{export_local_snapshot_bytes, merge_databases, merge_snapshot_bytes};
 use crate::db::{create_schema_up_to, DbManager};
 use crate::kinds::RepeatMode;
+use crate::models::RecurringTask;
 use crate::sync_schema::{table_columns, SYNC_TABLES};
 
 /// （应用版本，发布时的库结构版本）。
@@ -21,11 +22,15 @@ const RELEASES: &[(&str, &str)] = &[
     ("2.0.3", "2.0.5"),
     ("2.1.0", "2.1.0"),
     ("2.1.1", "2.1.1"),
+    ("2.2.0", "2.2.0"),
 ];
 const SAMPLE: &str = include_str!("../../tests/fixtures/sync-sample-2.0.sql");
 /// v2.1 新增同步列的示例数据，只写入库结构 2.1.0 起的库。
 const SAMPLE_2_1: &str = include_str!("../../tests/fixtures/sync-sample-2.1.sql");
 const V2_1_SCHEMA: &str = "2.1.0";
+/// v2.2 新增同步列的示例数据，只写入库结构 2.2.0 起的库。
+const SAMPLE_2_2: &str = include_str!("../../tests/fixtures/sync-sample-2.2.sql");
+const V2_2_SCHEMA: &str = "2.2.0";
 
 fn parse_version(version: &str) -> Vec<u32> {
     version
@@ -37,6 +42,11 @@ fn parse_version(version: &str) -> Vec<u32> {
 /// 库结构版本是否已有 v2.1 的同步列。
 fn has_v2_1(schema_version: &str) -> bool {
     parse_version(schema_version) >= parse_version(V2_1_SCHEMA)
+}
+
+/// 库结构版本是否已有 v2.2 的同步列。
+fn has_v2_2(schema_version: &str) -> bool {
+    parse_version(schema_version) >= parse_version(V2_2_SCHEMA)
 }
 
 struct TempDir(PathBuf);
@@ -70,6 +80,9 @@ fn release_db(path: &Path, schema_version: &str) {
     conn.execute_batch(SAMPLE).unwrap();
     if has_v2_1(schema_version) {
         conn.execute_batch(SAMPLE_2_1).unwrap();
+    }
+    if has_v2_2(schema_version) {
+        conn.execute_batch(SAMPLE_2_2).unwrap();
     }
 }
 
@@ -131,33 +144,68 @@ const RECORD_IDS: &[&str] = &["old-record-1", "old-record-2"];
 const V2_1_TASK_IDS: &[&str] = &["v21-task-due", "v21-task-due-only", "v21-task-future-color"];
 const V2_1_RECURRING_IDS: &[&str] = &["v21-rec-last-day", "v21-rec-last-workday"];
 const V2_1_RECORD_IDS: &[&str] = &["v21-record-1"];
+const V2_2_TASK_IDS: &[&str] = &["v22-task-project", "v22-task-done-project"];
+const V2_2_RECURRING_IDS: &[&str] = &["v22-rec-until", "v22-rec-count", "v22-rec-ended"];
 
-/// 示例数据中的全部行。2.0.x 的库只比较 2.0 示例数据已有的列；2.1.0 起的库再加上 v2.1 的行与列。
+/// 示例数据中的全部行。2.0.x 的库只比较 2.0 示例数据已有的列；2.1.0 起的库再加上 v2.1 的行与列，
+/// 2.2.0 起再加上 v2.2 的行与列。
 fn all_rows(path: &Path, schema_version: &str) -> (Rows, Rows, Rows) {
     let v2_1 = has_v2_1(schema_version);
-    let columns_at = if v2_1 { V2_1_SCHEMA } else { "2.0.5" };
-    let ids = |base: &[&'static str], added: &[&'static str]| -> Vec<&'static str> {
+    let v2_2 = has_v2_2(schema_version);
+    let columns_at = if v2_2 {
+        V2_2_SCHEMA
+    } else if v2_1 {
+        V2_1_SCHEMA
+    } else {
+        "2.0.5"
+    };
+    let ids = |base: &[&'static str],
+               added: &[&'static str],
+               added_2_2: &[&'static str]|
+     -> Vec<&'static str> {
         let mut ids = base.to_vec();
         if v2_1 {
             ids.extend_from_slice(added);
         }
+        if v2_2 {
+            ids.extend_from_slice(added_2_2);
+        }
         ids
     };
     (
-        sync_rows(path, "tasks", &ids(TASK_IDS, V2_1_TASK_IDS), columns_at),
+        sync_rows(
+            path,
+            "tasks",
+            &ids(TASK_IDS, V2_1_TASK_IDS, V2_2_TASK_IDS),
+            columns_at,
+        ),
         sync_rows(
             path,
             "recurring_tasks",
-            &ids(RECURRING_IDS, V2_1_RECURRING_IDS),
+            &ids(RECURRING_IDS, V2_1_RECURRING_IDS, V2_2_RECURRING_IDS),
             columns_at,
         ),
         sync_rows(
             path,
             "reminder_records",
-            &ids(RECORD_IDS, V2_1_RECORD_IDS),
+            &ids(RECORD_IDS, V2_1_RECORD_IDS, &[]),
             columns_at,
         ),
     )
+}
+
+/// 2.2.0 起的示例数据：项目与结束条件读出来都对，已结束的提醒仍是暂停。
+fn assert_v2_2_sample(db: &DbManager, release: &str) {
+    let task = db.get_task("v22-task-project").unwrap().unwrap();
+    assert_eq!(task.project, "装修", "{}", release);
+    let until = db.get_recurring_task("v22-rec-until").unwrap().unwrap();
+    assert_eq!(until.ends_on.as_deref(), Some("2026-10-14"), "{}", release);
+    assert_eq!(until.remaining_count, None, "{}", release);
+    let count = db.get_recurring_task("v22-rec-count").unwrap().unwrap();
+    assert_eq!(count.remaining_count, Some(3), "{}", release);
+    let ended = db.get_recurring_task("v22-rec-ended").unwrap().unwrap();
+    assert!(ended.is_paused, "{}", release);
+    assert!(crate::recurrence::has_ended(&ended), "{}", release);
 }
 
 /// 2.1.0 起的示例数据：v2.1 字段（含不认识的便签颜色）与两种月末模式读出来都对。
@@ -253,6 +301,9 @@ fn current_device_merges_release_snapshots_without_loss() {
         if has_v2_1(schema) {
             assert_v2_1_sample(&current, release);
         }
+        if has_v2_2(schema) {
+            assert_v2_2_sample(&current, release);
+        }
     }
 }
 
@@ -270,6 +321,8 @@ fn release_database_receives_current_snapshot() {
         current
             .set_task_due(&new_id, Some("2026-10-09T18:00:00"))
             .unwrap();
+        current.set_task_project(&new_id, "收纳").unwrap();
+        let ended_id = ended_recurring(&current);
         let snapshot = export_local_snapshot_bytes(&current.db_path()).unwrap();
         merge_snapshot_bytes(&old, &snapshot).unwrap();
 
@@ -291,6 +344,21 @@ fn release_database_receives_current_snapshot() {
             })
             .unwrap();
         assert_eq!(due.as_deref(), Some("2026-10-09T18:00:00"), "{}", release);
+        let project: String = conn
+            .query_row("SELECT project FROM tasks WHERE id = ?", [&new_id], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(project, "收纳", "{}", release);
+        // 已结束的循环提醒以暂停到达旧版本：不认识结束条件的设备也不会再提醒。
+        let ended: (i64, Option<i64>) = conn
+            .query_row(
+                "SELECT is_paused, remaining_count FROM recurring_tasks WHERE id = ?",
+                [&ended_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(ended, (1, Some(0)), "{}", release);
     }
 }
 
@@ -318,8 +386,28 @@ fn upgrading_release_database_keeps_data() {
         if has_v2_1(schema) {
             assert_v2_1_sample(&db, release);
         }
+        if has_v2_2(schema) {
+            assert_v2_2_sample(&db, release);
+        }
         assert_eq!(all_rows(&path, schema), expected, "{}", release);
     }
+}
+
+/// 当前版本新建一条“共 1 次”的循环提醒并模拟触发一次：剩余次数为 0、写入暂停。
+fn ended_recurring(db: &DbManager) -> String {
+    let _now = crate::time::fix_now("2026-10-03T09:00");
+    let task: RecurringTask = serde_json::from_value(serde_json::json!({
+        "id": "", "description": "只提醒一次", "type": "RECURRING", "status": "PENDING",
+        "createdAt": "", "intervalMinutes": 60, "nextTrigger": "2026-10-03T09:00:00",
+        "isPaused": false, "repeatMode": "DAILY", "scheduleTime": "09:00",
+        "scheduleWeekday": null, "scheduleDay": null, "cronExpression": null,
+        "remainingCount": 1
+    }))
+    .unwrap();
+    let mut created = db.create_recurring_task(&task).unwrap();
+    assert!(crate::recurrence::advance_after_trigger(&mut created, crate::time::now()).unwrap());
+    db.update_recurring_task(&created).unwrap();
+    created.id
 }
 
 /// “模拟更新的版本”：在 2.0.2 的库上多两个同步列，并把一条待办改得比本机新。
@@ -487,4 +575,46 @@ fn pre_2_0_device_edits_keep_tags_and_priority() {
     assert_eq!(task.description, "旧设备改过");
     assert_eq!(task.tags, vec!["工作"]);
     assert_eq!(task.priority, 3);
+}
+
+#[test]
+fn v2_2_fields_survive_edits_from_2_1_devices() {
+    let dir = TempDir::new("v22");
+    let (current, _) = current_db(&dir.path("current.db"));
+    let old = dir.path("old.db");
+    release_db(&old, "2.1.1");
+    merge_databases(&current.db_path(), &old).unwrap();
+
+    // 本机（v2.2）给待办设置项目，给循环提醒加结束条件。
+    current.set_task_project("v21-task-due", "季度").unwrap();
+    let mut weekly = current
+        .get_recurring_task("old-rec-weekly")
+        .unwrap()
+        .unwrap();
+    weekly.ends_on = Some("2026-12-31".to_string());
+    weekly.remaining_count = Some(4);
+    current.update_recurring_task(&weekly).unwrap();
+
+    // 2.1.1 设备随后修改了同一条待办与循环提醒（它的库没有这些列），并上传。
+    let conn = Connection::open(&old).unwrap();
+    conn.execute_batch(
+        "UPDATE tasks SET description = '交季度报告（旧设备改）', updated_at = '2999-01-01T00:00:00'
+          WHERE id = 'v21-task-due';
+         UPDATE recurring_tasks SET description = '健身（旧设备改）', updated_at = '2999-01-01T00:00:00'
+          WHERE id = 'old-rec-weekly';",
+    )
+    .unwrap();
+    drop(conn);
+    merge_databases(&current.db_path(), &old).unwrap();
+
+    let task = current.get_task("v21-task-due").unwrap().unwrap();
+    assert_eq!(task.description, "交季度报告（旧设备改）");
+    assert_eq!(task.project, "季度");
+    let weekly = current
+        .get_recurring_task("old-rec-weekly")
+        .unwrap()
+        .unwrap();
+    assert_eq!(weekly.description, "健身（旧设备改）");
+    assert_eq!(weekly.ends_on.as_deref(), Some("2026-12-31"));
+    assert_eq!(weekly.remaining_count, Some(4));
 }

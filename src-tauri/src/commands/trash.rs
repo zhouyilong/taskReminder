@@ -70,6 +70,7 @@ pub fn restore_recurring_task(state: State<AppState>, id: String) -> ApiResult<(
     // 删除期间错过的触发不补发，从现在起重新计算下次触发时间。
     into_api(recurrence::sanitize_recurring_task(&mut task))?;
     task.next_trigger = into_api(recurrence::compute_next_trigger(&task, None))?;
+    recurrence::apply_end_condition(&mut task);
     into_api(state.db.update_recurring_task(&task))?;
     if !task.is_paused {
         into_api(state.scheduler.schedule_recurring(task))?;

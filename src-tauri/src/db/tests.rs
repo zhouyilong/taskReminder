@@ -47,6 +47,8 @@ fn sample_recurring() -> RecurringTask {
         schedule_day: None,
         cron_expression: None,
         tags: Vec::new(),
+        ends_on: None,
+        remaining_count: None,
     }
 }
 
@@ -263,6 +265,7 @@ fn task_tags_and_priority_roundtrip() {
             String::new(),
         ],
         priority: 7,
+        project: String::new(),
     };
     let task = db.create_task_with_meta("写周报", None, &meta).unwrap();
     assert_eq!(task.tags, vec!["工作", "周报", "ab"]);
@@ -282,6 +285,7 @@ fn task_tags_and_priority_roundtrip() {
     let cleared = TaskMeta {
         tags: Vec::new(),
         priority: -1,
+        project: String::new(),
     };
     db.update_task(&task.id, "写周报 v2", None, None, Some(&cleared))
         .unwrap();
@@ -617,6 +621,7 @@ fn batch_update_tasks_changes_only_live_rows_that_differ() {
             &TaskMeta {
                 tags: vec!["工作".to_string()],
                 priority: 1,
+                project: String::new(),
             },
         )
         .unwrap();
@@ -784,5 +789,87 @@ fn completed_retention_setting_roundtrips_and_rejects_unknown_values() {
         .execute("UPDATE settings SET completed_retention_days = 7", [])
         .unwrap();
     assert_eq!(db.completed_retention_days().unwrap(), 30);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn task_project_roundtrip_batch_and_import() {
+    let (db, dir) = temp_db();
+    let meta = TaskMeta {
+        project: "  @装修  ".to_string(),
+        ..TaskMeta::default()
+    };
+    let a = db.create_task_with_meta("买瓷砖", None, &meta).unwrap();
+    assert_eq!(a.project, "装修");
+    assert_eq!(db.get_task(&a.id).unwrap().unwrap().project, "装修");
+    let b = db.create_task("写周报", None).unwrap();
+    assert_eq!(b.project, "");
+
+    // 只改时间的更新（meta 为 None）不影响项目。
+    db.update_task(&a.id, "买瓷砖", None, None, None).unwrap();
+    assert_eq!(db.get_task(&a.id).unwrap().unwrap().project, "装修");
+    assert!(!db.set_task_project(&a.id, "装修").unwrap(), "不变不写");
+    assert!(db.set_task_project(&a.id, "").unwrap());
+    assert_eq!(db.get_task(&a.id).unwrap().unwrap().project, "");
+
+    let ids = vec![a.id.clone(), b.id.clone()];
+    let changed = db
+        .batch_update_tasks(&ids, &TaskBatchOp::SetProject("工作".to_string()))
+        .unwrap();
+    assert_eq!(changed.len(), 2);
+    let changed = db
+        .batch_update_tasks(&ids, &TaskBatchOp::SetProject("＠工作".to_string()))
+        .unwrap();
+    assert!(changed.is_empty(), "规范化后相同不写");
+
+    let mut imported = db.get_task(&b.id).unwrap().unwrap();
+    imported.project = "家务".to_string();
+    imported.updated_at = Some("2099-01-01T00:00:00".to_string());
+    db.import_rows(&[imported], &[], &[]).unwrap();
+    assert_eq!(db.get_task(&b.id).unwrap().unwrap().project, "家务");
+
+    assert_eq!(
+        crate::models::normalize_project(&"长".repeat(40))
+            .chars()
+            .count(),
+        32
+    );
+    assert_eq!(crate::models::normalize_project(" @ "), "");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn recurring_end_condition_roundtrip_and_import() {
+    let (db, dir) = temp_db();
+    let mut draft = sample_recurring();
+    draft.ends_on = Some("2026-12-31".to_string());
+    draft.remaining_count = Some(5);
+    let created = db.create_recurring_task(&draft).unwrap();
+    assert_eq!(created.remaining_count, Some(5));
+    let mut loaded = db.get_recurring_task(&created.id).unwrap().unwrap();
+    assert_eq!(loaded.ends_on.as_deref(), Some("2026-12-31"));
+    assert_eq!(loaded.remaining_count, Some(5));
+
+    loaded.ends_on = None;
+    loaded.remaining_count = Some(0);
+    loaded.is_paused = true;
+    db.update_recurring_task(&loaded).unwrap();
+    let mut loaded = db.get_recurring_task(&created.id).unwrap().unwrap();
+    assert_eq!(
+        (loaded.ends_on.clone(), loaded.remaining_count),
+        (None, Some(0))
+    );
+    assert!(crate::recurrence::has_ended(&loaded));
+
+    loaded.remaining_count = Some(-2);
+    loaded.updated_at = Some("2099-01-01T00:00:00".to_string());
+    db.import_rows(&[], &[loaded], &[]).unwrap();
+    assert_eq!(
+        db.get_recurring_task(&created.id)
+            .unwrap()
+            .unwrap()
+            .remaining_count,
+        Some(0)
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
