@@ -106,13 +106,13 @@ test("便签清单进度", async ({ app }) => {
   await app.keyboard.type("- [ ] 擦窗户");
   await app.keyboard.press("Enter");
   await app.keyboard.type("拖地");
-  // Milkdown 的内容变更事件有 200ms 防抖，等它把内容同步到输入框的 v-model。
-  await app.waitForTimeout(400);
+  // 不等 Milkdown 的 200ms 防抖：提交前会先取编辑器的当前内容（v2.2），最后输入的“拖地”也要在。
   await app.getByRole("button", { name: "添加任务" }).click();
 
   await expect(taskRow(app, "周末大扫除").locator(".checklist-chip")).toHaveText("0/2");
   const [call] = await invokeCalls(app, "create_task");
   expect((call.args.payload as { stickyContent: string }).stickyContent).toMatch(/[-*] \[ \] 擦窗户/);
+  expect((call.args.payload as { stickyContent: string }).stickyContent).toMatch(/[-*] \[ \] 拖地/);
 });
 
 test("统计：近 12 周按周显示，并按标签汇总", async ({ app }) => {
@@ -139,4 +139,92 @@ test("设置已完成待办的保留期", async ({ app }) => {
 
   const calls = await invokeCalls(app, "save_settings");
   expect((calls.at(-1)!.args.settings as { completedRetentionDays: number }).completedRetentionDays).toBe(365);
+});
+
+test("按项目筛选，点击徽标切换，批量移到项目", async ({ app }) => {
+  await expect(taskRow(app, "买菜").locator(".task-project")).toHaveText("家务");
+  const projectFilter = app.locator(".task-toolbar select[title='按项目筛选']");
+  await projectFilter.selectOption({ label: "家务（1）" });
+  await expect(app.locator(".tasks-table .table-row")).toHaveCount(1);
+  // 再点一次项目徽标取消筛选。
+  await taskRow(app, "买菜").locator(".task-project").click();
+  await expect(projectFilter.locator("option:checked")).toHaveText("全部项目");
+  await expect(taskRow(app, "预约牙医")).toBeVisible();
+
+  // 未分组（选项依次为：全部项目、家务、季度总结、未分组）。
+  await projectFilter.selectOption({ index: 3 });
+  await expect(taskRow(app, "预约牙医")).toBeVisible();
+  await expect(taskRow(app, "买菜")).toHaveCount(0);
+  await projectFilter.selectOption({ label: "全部项目" });
+
+  await app.getByRole("button", { name: "多选" }).click();
+  await taskRow(app, "预约牙医").click();
+  await taskRow(app, "读书笔记").click();
+  const bar = app.locator(".batch-bar");
+  await bar.getByRole("button", { name: "移到项目" }).click();
+  await bar.locator("input").fill("@装修");
+  await bar.getByRole("button", { name: "移到项目" }).click();
+
+  await expect(taskRow(app, "预约牙医").locator(".task-project")).toHaveText("装修");
+  const [call] = await invokeCalls(app, "batch_update_tasks");
+  expect(call.args).toEqual({ ids: ["t-dentist", "t-ideas"], payload: { action: "setProject", project: "装修" } });
+});
+
+test("编辑待办的项目，自然语言 @项目", async ({ app }) => {
+  await taskRow(app, "预约牙医").dblclick();
+  const modal = app.locator(".modal", { has: app.locator(".modal-header", { hasText: "编辑任务" }) });
+  await modal.locator(".form-row", { hasText: "项目" }).locator("input").fill("健康管理");
+  await modal.getByRole("button", { name: "确认" }).click();
+  await expect(modal).toBeHidden();
+  const [update] = await invokeCalls(app, "update_task");
+  expect(update.args.task).toMatchObject({ id: "t-dentist", project: "健康管理" });
+
+  await app.locator(".composer-input").fill("买瓷砖 @装修 #采购");
+  await expect(app.locator(".composer-parse .task-project")).toHaveText("装修");
+  await app.locator(".composer-input").press("Enter");
+  await expect(taskRow(app, "买瓷砖").locator(".task-project")).toHaveText("装修");
+  const [create] = await invokeCalls(app, "create_task");
+  expect(create.args.payload).toMatchObject({ description: "买瓷砖", project: "装修", tags: ["采购"] });
+
+  // 列表搜索与全局搜索都支持 @项目。
+  await app.locator(".task-toolbar .search-field input").fill("@装");
+  await expect(app.locator(".tasks-table .table-row")).toHaveCount(1);
+});
+
+test("循环提醒的结束条件", async ({ app }) => {
+  await app.locator(".sidebar").getByText("循环提醒").click();
+  const ended = app.locator(".table-row", { hasText: "训练营打卡" });
+  await expect(ended.locator(".status-pill")).toHaveText("已结束");
+  await expect(ended).toContainText("剩 0 次");
+  await expect(app.locator(".table-row", { hasText: "交房租" })).toContainText("到 ");
+
+  // 已结束的提醒右键菜单是“修改结束条件”，改为还剩 3 次后自动恢复。
+  await ended.click({ button: "right" });
+  await app.getByText("修改结束条件").click();
+  const modal = app.locator(".modal", { has: app.locator(".modal-header", { hasText: "编辑循环提醒" }) });
+  await modal.locator("input[placeholder='不限']").fill("3");
+  await modal.getByRole("button", { name: "确认" }).click();
+  await expect(ended.locator(".status-pill")).toHaveText("运行中");
+  const [update] = await invokeCalls(app, "update_recurring_task");
+  expect(update.args.task).toMatchObject({ id: "r-camp", remainingCount: 3, endsOn: null });
+
+  // 新建：每天提醒，共 7 次、到某天为止。
+  const form = app.locator(".form-card");
+  await form.locator("input[data-shortcut='new']").fill("吃药");
+  await form.locator("select").first().selectOption({ label: "每天固定时间" });
+  await form.locator("input[type='date']").fill("2099-12-31");
+  await form.locator("input[placeholder='不限']").fill("7");
+  await form.getByRole("button", { name: "添加提醒" }).click();
+  await expect(app.locator(".table-row", { hasText: "吃药" })).toContainText("剩 7 次");
+  const [create] = await invokeCalls(app, "create_recurring_task");
+  expect(create.args.payload).toMatchObject({ description: "吃药", repeatMode: "DAILY", endsOn: "2099-12-31", remainingCount: 7 });
+});
+
+test("自然语言识别循环提醒的次数", async ({ app }) => {
+  const input = app.locator(".composer-input");
+  await input.fill("每天8点 吃药 共7次");
+  await expect(app.locator(".composer-parse")).toContainText("每天 08:00 · 共 7 次");
+  await input.press("Enter");
+  const [call] = await invokeCalls(app, "create_recurring_task");
+  expect(call.args.payload).toMatchObject({ description: "吃药", repeatMode: "DAILY", scheduleTime: "08:00", remainingCount: 7, endsOn: null });
 });

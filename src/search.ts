@@ -1,7 +1,8 @@
 // 全局搜索（Ctrl+K）与各列表的关键词搜索：纯函数，便于测试。
 //
 // 规则：查询按空白拆成多个词，全部命中才算匹配（且）；不区分大小写。
-// 以 # 开头的词只匹配标签（前缀，“#工”可命中“#工作”），其余的词在标题、标签、正文中任一处命中即可。
+// 以 # 开头的词只匹配标签（前缀，“#工”可命中“#工作”），以 @ 开头的词只匹配项目（前缀，v2.2），
+// 其余的词在标题、标签、项目、正文中任一处命中即可。
 import { taskAnchorTime } from "./due";
 import { markdownToPlainText } from "./markdown";
 import type { RecurringTask, Task } from "./types";
@@ -11,32 +12,48 @@ export interface ParsedQuery {
   terms: string[];
   /** # 开头的标签词（去掉 #，已转小写）。 */
   tags: string[];
+  /** @ 开头的项目词（去掉 @，已转小写，v2.2）。 */
+  projects: string[];
 }
 
 export const parseQuery = (query: string): ParsedQuery => {
   const terms: string[] = [];
   const tags: string[] = [];
+  const projects: string[] = [];
   for (const part of query.trim().toLowerCase().split(/\s+/)) {
     if (!part) continue;
     const tag = /^[#＃]+(.*)$/.exec(part);
+    const project = /^[@＠]+(.*)$/.exec(part);
     if (tag) {
       if (tag[1]) tags.push(tag[1]);
+    } else if (project) {
+      if (project[1]) projects.push(project[1]);
     } else {
       terms.push(part);
     }
   }
-  return { terms, tags };
+  return { terms, tags, projects };
 };
 
-export const isEmptyQuery = (query: ParsedQuery) => query.terms.length === 0 && query.tags.length === 0;
+export const isEmptyQuery = (query: ParsedQuery) =>
+  query.terms.length === 0 && query.tags.length === 0 && query.projects.length === 0;
 
-/** 关键词搜索：每个词都要在某个字段中出现；标签词只与标签比较（前缀）。 */
-export const matchesKeyword = (fields: { text: Array<string | null | undefined>; tags?: string[] }, query: string | ParsedQuery) => {
+/** 标签词、项目词（都是前缀匹配）是否全部命中。 */
+const matchesMeta = (tags: string[], project: string, query: ParsedQuery) =>
+  query.tags.every(tag => tags.some(item => item.startsWith(tag))) &&
+  query.projects.every(item => project.startsWith(item));
+
+/** 关键词搜索：每个词都要在某个字段中出现；标签词只与标签比较、项目词只与项目比较（前缀）。 */
+export const matchesKeyword = (
+  fields: { text: Array<string | null | undefined>; tags?: string[]; project?: string | null },
+  query: string | ParsedQuery
+) => {
   const parsed = typeof query === "string" ? parseQuery(query) : query;
   if (isEmptyQuery(parsed)) return true;
   const tags = (fields.tags ?? []).map(tag => tag.toLowerCase());
-  if (!parsed.tags.every(tag => tags.some(item => item.startsWith(tag)))) return false;
-  const haystack = [...fields.text, ...tags.map(tag => `#${tag}`)]
+  const project = (fields.project ?? "").toLowerCase();
+  if (!matchesMeta(tags, project, parsed)) return false;
+  const haystack = [...fields.text, ...tags.map(tag => `#${tag}`), project ? `@${project}` : ""]
     .filter(Boolean)
     .join("\n")
     .toLowerCase();
@@ -110,17 +127,24 @@ export const excerpt = (text: string, terms: string[], radius = 24) => {
 interface Candidate {
   title: string;
   tags: string[];
+  /** 项目（v2.2），与标签同一档。 */
+  project: string;
   body: string;
 }
 
 /** 判断是否命中并找出最靠前的字段；不命中返回 null。 */
 const matchCandidate = (candidate: Candidate, query: ParsedQuery): SearchField | null => {
   const tags = candidate.tags.map(tag => tag.toLowerCase());
-  if (!query.tags.every(tag => tags.some(item => item.startsWith(tag)))) return null;
+  const project = candidate.project.toLowerCase();
+  if (!matchesMeta(tags, project, query)) return null;
   const title = candidate.title.toLowerCase();
-  const tagText = tags.map(tag => `#${tag}`).join(" ");
+  const tagText = [...tags.map(tag => `#${tag}`), project ? `@${project}` : ""].join(" ");
   const body = candidate.body.toLowerCase();
-  let best: SearchField | null = query.terms.length ? null : query.tags.length ? "tag" : null;
+  let best: SearchField | null = query.terms.length
+    ? null
+    : query.tags.length || query.projects.length
+      ? "tag"
+      : null;
   for (const term of query.terms) {
     const field: SearchField | null = title.includes(term) ? "title" : tagText.includes(term) ? "tag" : body.includes(term) ? "body" : null;
     if (!field) return null;
@@ -149,7 +173,7 @@ export const searchAll = (
     tasks.flatMap(task => {
       const body = markdownToPlainText(task.stickyContent);
       const tags = task.tags ?? [];
-      const field = matchCandidate({ title: task.description, tags, body }, query);
+      const field = matchCandidate({ title: task.description, tags, project: task.project ?? "", body }, query);
       if (!field) return [];
       const snippetSource = field === "body" ? excerpt(body, terms) : null;
       return [
@@ -168,7 +192,7 @@ export const searchAll = (
 
   const recurringHits = input.recurringTasks.flatMap(task => {
     const tags = task.tags ?? [];
-    const field = matchCandidate({ title: task.description, tags, body: "" }, query);
+    const field = matchCandidate({ title: task.description, tags, project: "", body: "" }, query);
     if (!field) return [];
     return [
       {

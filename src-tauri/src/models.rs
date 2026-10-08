@@ -31,6 +31,24 @@ pub struct Task {
     /// 手动排序位置（v2.1），越小越靠前；空表示未手动排序。
     #[serde(default)]
     pub sort_order: Option<f64>,
+    /// 项目（v2.2），空字符串为未分组；读写经 `normalize_project`。
+    #[serde(default)]
+    pub project: String,
+}
+
+pub const MAX_PROJECT_CHARS: usize = 32;
+
+/// 规范化项目名：去掉首尾空白、前导 `@`、控制字符，截断过长的名字。前端 `normalizeProject` 与之一致。
+pub fn normalize_project(value: &str) -> String {
+    value
+        .trim()
+        .trim_start_matches(['@', '＠'])
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_PROJECT_CHARS)
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 pub const PRIORITY_MAX: i64 = 3;
@@ -124,6 +142,12 @@ pub struct RecurringTask {
     /// 标签（v2.1），与待办相同的规范化。
     #[serde(default)]
     pub tags: Vec<String>,
+    /// 结束日期（v2.2，`YYYY-MM-DD`，含当天）；空为不限。
+    #[serde(default)]
+    pub ends_on: Option<String>,
+    /// 剩余提醒次数（v2.2），每次触发减一，到 0 时结束；空为不限。
+    #[serde(default)]
+    pub remaining_count: Option<i64>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

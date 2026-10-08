@@ -2,7 +2,7 @@
 import { api } from "../api";
 import { markdownToPlainText } from "../markdown";
 import { errorMessage, formatAction, formatDateTime, recordDescription } from "../format";
-import { canSkipRecurring } from "../recurring";
+import { canSkipRecurring, recurringStatus } from "../recurring";
 import { priorityLabel, priorityOf } from "../tasks";
 import type { RecurringTask, ReminderRecord, Task } from "../types";
 import { useAppData } from "./useAppData";
@@ -53,6 +53,7 @@ export const useItemActions = () => {
       { label: "提醒时间", value: formatDateTime(task.reminderTime) },
       { label: "优先级", value: priorityLabel(priorityOf(task)) },
       { label: "标签", value: task.tags?.length ? task.tags.map(tag => `#${tag}`).join(" ") : "-" },
+      { label: "项目", value: task.project || "-" },
     ]);
   };
 
@@ -77,10 +78,14 @@ export const useItemActions = () => {
   };
 
   const toggleRecurring = async (task: RecurringTask) => {
-    if (task.isPaused) {
-      await api.resumeRecurringTask(task.id);
-    } else {
-      await api.pauseRecurringTask(task.id);
+    try {
+      if (task.isPaused) {
+        await api.resumeRecurringTask(task.id);
+      } else {
+        await api.pauseRecurringTask(task.id);
+      }
+    } catch (error) {
+      alert(errorMessage(error));
     }
     await refreshAll();
   };
@@ -111,7 +116,10 @@ export const useItemActions = () => {
       ...(canSkipRecurring(task)
         ? [{ label: `跳过本次（${formatDateTime(task.nextTrigger)}）`, action: () => skipRecurring(task) }]
         : []),
-      { label: task.isPaused ? "恢复" : "暂停", action: () => toggleRecurring(task) },
+      // 已结束的提醒（v2.2）不能直接恢复，改结束条件后自动恢复。
+      recurringStatus(task) === "ended"
+        ? { label: "修改结束条件", action: () => openRecurringEditor(task) }
+        : { label: task.isPaused ? "恢复" : "暂停", action: () => toggleRecurring(task) },
       { label: "删除", action: () => confirmDeleteRecurring(task), danger: true },
     ]);
   };

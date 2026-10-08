@@ -1,4 +1,4 @@
-// 待办列表的标签、优先级、筛选与排序。纯函数，便于测试。
+// 待办列表的标签、优先级、项目、筛选与排序。纯函数，便于测试。
 import { taskAnchorTime } from "./due";
 import { matchesKeyword } from "./search";
 import type { Task } from "./types";
@@ -51,6 +51,38 @@ export const collectTags = (tasks: ReadonlyArray<Pick<Task, "tags">>) => {
   return [...counts.values()].sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, "zh-CN"));
 };
 
+/** 项目名最长字数，与后端 MAX_PROJECT_CHARS 一致。 */
+export const MAX_PROJECT_CHARS = 32;
+
+/** 与后端 normalize_project 一致：去掉首尾空白、前导 @、控制字符，截断过长的名字。 */
+export const normalizeProject = (value: string | null | undefined) =>
+  Array.from(
+    (value ?? "")
+      .trim()
+      .replace(/^[@＠]+/, "")
+      .replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
+  )
+    .slice(0, MAX_PROJECT_CHARS)
+    .join("")
+    .trim();
+
+/** 所有项目及待办数量，按数量降序、再按名称排序（不含未分组）。 */
+export const collectProjects = (tasks: ReadonlyArray<Pick<Task, "project">>) => {
+  const counts = new Map<string, { project: string; count: number }>();
+  for (const task of tasks) {
+    const project = task.project ?? "";
+    if (!project) continue;
+    const key = project.toLowerCase();
+    const entry = counts.get(key);
+    if (entry) {
+      entry.count += 1;
+    } else {
+      counts.set(key, { project, count: 1 });
+    }
+  }
+  return [...counts.values()].sort((a, b) => b.count - a.count || a.project.localeCompare(b.project, "zh-CN"));
+};
+
 export type TaskSortKey = "created" | "reminder" | "priority" | "manual";
 
 export const TASK_SORT_OPTIONS: { value: TaskSortKey; label: string }[] = [
@@ -67,6 +99,8 @@ export interface TaskFilter {
   tag: string;
   /** -1 表示全部优先级。 */
   priority: number;
+  /** 项目（v2.2）：null 表示全部项目，空字符串表示未分组。 */
+  project?: string | null;
 }
 
 export const matchesTaskFilter = (task: Task, filter: TaskFilter) => {
@@ -76,7 +110,13 @@ export const matchesTaskFilter = (task: Task, filter: TaskFilter) => {
   if (filter.priority >= 0 && priorityOf(task) !== filter.priority) {
     return false;
   }
-  return matchesKeyword({ text: [task.description, task.stickyContent], tags: task.tags }, filter.query);
+  if (typeof filter.project === "string" && (task.project ?? "").toLowerCase() !== filter.project.toLowerCase()) {
+    return false;
+  }
+  return matchesKeyword(
+    { text: [task.description, task.stickyContent], tags: task.tags, project: task.project },
+    filter.query
+  );
 };
 
 const compareOptionalTime = (a?: string | null, b?: string | null) => {

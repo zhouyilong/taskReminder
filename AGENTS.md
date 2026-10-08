@@ -9,24 +9,24 @@
   - 桌面便签：`sticky-note-item.html` → `src/stickyNoteItem.ts` → `src/StickyNoteItemApp.vue`（每张便签一个独立窗口，窗口标签为 `sticky-note-item-<编码后的 id>`）。
   - 快速添加：`quick-add.html` → `src/quickAdd.ts` → `src/QuickAddApp.vue`（窗口标签 `quick-add`，由全局快捷键或托盘菜单打开）。
 - `src/components/` 存放可复用 UI 组件：
-  - `MarkdownNoteEditor.vue`：基于 Milkdown Crepe 的 Markdown 所见即所得编辑器，`variant` 支持 `card`（带边框）与 `ghost`（无边框，嵌入卡片或便签）。
+  - `MarkdownNoteEditor.vue`：基于 Milkdown Crepe 的 Markdown 所见即所得编辑器，`variant` 支持 `card`（带边框）与 `ghost`（无边框，嵌入卡片或便签）。内容变更有 200ms 防抖，提交表单前先调用组件的 `flush()`（`ref` 取得），否则会丢掉最后的输入。
   - `Modal.vue`：通用弹窗（带进出过渡动画）。
   - `AppTitlebar.vue` / `AppSidebar.vue`：主窗口标题栏与侧边栏。
   - `SettingsModal.vue` / `WebdavModal.vue`：应用设置与云同步设置。
   - `SharedDialogs.vue`：挂在 App.vue 的共享弹窗（`TaskEditModal`、`RecurringEditModal`、详情、确认框、右键菜单），由 `useDialogs` 驱动，任何视图都可打开。
-  - `RecurringFields.vue`：循环提醒各模式的规则字段，新建表单与编辑弹窗共用。
+  - `RecurringFields.vue`：循环提醒各模式的规则字段，新建表单与编辑弹窗共用；`RecurringEndFields.vue`：结束条件（结束日期、次数，v2.2），同样两处共用。
   - `Pagination.vue`：表格分页条，配合 `usePagination`。
   - `WeekdayPicker.vue`：每周多天选择（位掩码 `v-model`，含工作日/周末/每天预设）。
-  - `TaskBadges.vue`（优先级与标签徽标）、`TagInput.vue`（标签输入）、`PriorityPicker.vue`（优先级分段选择）、`SmartParseHint.vue`（自然语言识别结果提示）。
+  - `TaskBadges.vue`（项目、优先级与标签徽标）、`TagInput.vue`（标签输入）、`PriorityPicker.vue`（优先级分段选择）、`SmartParseHint.vue`（自然语言识别结果提示）。
   - `DataModal.vue`：导入导出与本地备份（从设置打开）。
-  - `TaskBatchBar.vue`：待办多选后的批量操作栏（完成、删除、加标签、优先级、改提醒时间）。
+  - `TaskBatchBar.vue`：待办多选后的批量操作栏（完成、删除、加标签、移到项目、优先级、改提醒时间）。
   - `SearchPalette.vue`：全局搜索面板（`Ctrl+K` / 标题栏按钮），挂在 App.vue，回车跳到对应页面并打开编辑或详情。
   - `StatsBarChart.vue`：统计面板的堆叠柱状图（提醒与完成趋势共用）。
   - `ChecklistProgress.vue`：正文中勾选清单的进度徽标（如 2/5）。
 - `src/api.ts` 封装所有 Tauri `invoke` 命令；`src/types.ts` 为前后端共享的数据类型。
 - `src/markdown.ts` Markdown 转纯文本/预览文本工具（列表描述、提醒记录去掉前导列表标记）与勾选清单进度（`checklistProgress`，Crepe 保存为 `* [ ]`）。
 - `src/format.ts` 主窗口共用的时间与文案格式化；`src/recurring.ts` 循环规则展示、表单草稿、校验与提交载荷。
-- `src/timeline.ts`（“今天”时间线）、`src/stats.ts`（统计面板）、`src/calendar.ts`（日历网格与按天归类）、`src/tasks.ts`（标签、优先级、筛选排序）、`src/stickies.ts`（便签列表状态、筛选排序）、`src/nlp.ts`（自然语言时间/标签/优先级/循环规则识别）、`src/search.ts`（全局搜索与各列表关键词搜索的统一规则：多词为“且”，`#标签` 只与标签前缀匹配）、`src/retention.ts`（已完成待办保留期选项与说明）为纯函数，测试在同名 `*.spec.ts`。
+- `src/timeline.ts`（“今天”时间线）、`src/stats.ts`（统计面板）、`src/calendar.ts`（日历网格与按天归类）、`src/tasks.ts`（标签、优先级、项目、筛选排序）、`src/stickies.ts`（便签列表状态、筛选排序）、`src/nlp.ts`（自然语言时间/标签/项目/优先级/循环规则与结束条件识别）、`src/search.ts`（全局搜索与各列表关键词搜索的统一规则：多词为“且”，`#标签` 只与标签前缀匹配，`@项目` 只与项目前缀匹配）、`src/retention.ts`（已完成待办保留期选项与说明）为纯函数，测试在同名 `*.spec.ts`。
 - `src/syncStatus.ts` 云同步状态码到文案与色调的映射（兼容旧版中文状态）；`src/quietHours.ts` 勿扰时段说明文案。
 - `src/safeStorage.ts` 带异常保护的 `localStorage` 封装；`src/startupError.ts` 启动失败时渲染错误页。
 - `src/styles.css` 为三个窗口共用的全局样式表（设计令牌、主窗口、提醒弹窗、便签）；组件私有样式放在 `.vue` 文件内。
@@ -154,6 +154,12 @@
 - 便签颜色只接受 `models::STICKY_COLORS`（与 `src/stickies.ts` 的 `STICKY_COLOR_OPTIONS` 一致），不认识的值按默认显示、原样保存。颜色令牌 `--sticky-<颜色>-top/bottom/border/accent` 在 `:root` 与 `.light-theme` 中各一套，`.sticky-color-<颜色>` 映射到纸面令牌，放在样式表末尾。
 - `sort_order` 越小越靠前，空值排在后面；只在“手动顺序”下可拖动。
 
+### 循环提醒结束条件与待办项目（v2.2）
+- 结束条件存于同步列 `recurring_tasks.ends_on`（`YYYY-MM-DD`，含当天）与 `remaining_count`（剩余次数，空为不限）。`recurrence::has_ended`：剩余次数为 0，或 `next_trigger` 的日期晚于结束日期；前端 `isRecurringEnded` 与之一致。
+- **规则**：到达结束条件时一律经 `apply_end_condition` 写入 `is_paused = 1`（旧版本不认识结束条件，靠暂停停止提醒）。凡是改了 `next_trigger` 的路径（调度器触发、区间外顺延、跳过本次、编辑、回收站恢复、节假日重算）都要调用；剩余次数只在 `advance_after_trigger`（真正触发一次）中扣减，跳过本次不扣。
+- `handle_recurring` 触发前先检查 `has_ended`：旧设备“恢复”了已结束的提醒时改回暂停，不弹出。`resume_recurring_task` 对已结束的提醒报错；`update_recurring_task` 在编辑前已结束、编辑后不再结束时自动恢复，其他情况保留原暂停状态。界面上“已结束”= 暂停且 `isRecurringEnded`（`recurringStatus`）。
+- 待办项目存于同步列 `tasks.project`（空 = 未分组），读写统一经过 `models::normalize_project`（去掉前导 `@`、控制字符，最多 32 字），前端 `normalizeProject` 与之一致。`update_task` 的 `project` 省略时保留、空字符串移出项目：只改时间的调用不要传。项目列表由已有待办汇总（`collectProjects`），没有单独的项目表（不认识的表会在旧设备上传时丢失）。
+
 ### 循环模式的兼容性
 - 每周多天存于 `schedule_weekdays` 位掩码，`schedule_weekday` 始终写入掩码中最早的一天，供旧版本读取；读取时掩码为空则回退到 `schedule_weekday`。
 - 状态与模式字段用 `kinds.rs` 的枚举（`TaskStatus`、`TaskType`、`ReminderKind`、`ReminderAction`、`RepeatMode`）；库中文本与 JSON 不变，**不认识的值原样保留**（`Unknown`），不要回退成已知值再写回。
@@ -216,11 +222,11 @@
 ## 测试指南
 - 前端使用 Vitest：测试与被测模块同目录，命名为 `*.spec.ts`（`scripts/` 下的脚本为 `*.spec.mjs`），运行 `pnpm test`。前端改动至少执行 `pnpm build`（含 `vue-tsc` 类型检查）与 `pnpm test`。
 - 视图里的计算逻辑（如时间线、统计）优先抽成 `src/` 下的纯函数再写测试，组件只做展示。
-- Rust 测试位于 `src-tauri/src/` 各模块的 `#[cfg(test)]` 中（便签窗口标签/URL、提醒队列、墓碑清理、同步合并、时间解析、节假日、循环规则）；跨版本同步测试在 `sync/compat_tests.rs`，按各发布版本的迁移建库（`db::create_schema_up_to`，仅测试）并写入 `src-tauri/tests/fixtures/` 中的示例数据（`sync-sample-2.0.sql`；库结构 2.1.0 起再加 `sync-sample-2.1.sql`），发布新版本时把它的库结构版本加到 `RELEASES`，通过 `cargo test` 运行；需要数据库的测试用临时目录创建 `DbManager`，会自动执行迁移。
+- Rust 测试位于 `src-tauri/src/` 各模块的 `#[cfg(test)]` 中（便签窗口标签/URL、提醒队列、墓碑清理、同步合并、时间解析、节假日、循环规则）；跨版本同步测试在 `sync/compat_tests.rs`，按各发布版本的迁移建库（`db::create_schema_up_to`，仅测试）并写入 `src-tauri/tests/fixtures/` 中的示例数据（`sync-sample-2.0.sql`；库结构 2.1.0 起再加 `sync-sample-2.1.sql`，2.2.0 起再加 `sync-sample-2.2.sql`），发布新版本时把它的库结构版本加到 `RELEASES`，通过 `cargo test` 运行；需要数据库的测试用临时目录创建 `DbManager`，会自动执行迁移。
 - 提交前运行 `cargo fmt` 与 `cargo clippy --all-targets -- -D warnings`，CI 会执行 `cargo fmt --check` 并在 clippy 有告警时失败。只在 Windows 编译的代码（`#[cfg(target_os = "windows")]`）在 Linux 上检查不到，可用 `rustup target add x86_64-pc-windows-gnu`（需 `mingw-w64`）后执行 `cargo clippy --target x86_64-pc-windows-gnu --all-targets` 预检。
 - 在 Linux 上构建会改写 `src-tauri/gen/schemas/`，这些生成文件的无关变动不要提交。
 - 仅调整前端 UI 时，可用 `pnpm dev` 在浏览器中预览；浏览器中没有 Tauri 运行时，需要在页面加载前注入 `window.__TAURI_INTERNALS__`，直接复用 `e2e/tauri-mock.js`（Playwright 的 `page.addInitScript({ path })`，内存示例数据、调用记录在 `window.__TAURI_MOCK__.calls`；可先设 `window.__TAURI_MOCK_SEED__` 覆盖数据）。新增后端命令时若界面依赖它，同步在模拟中补上。
-- 端到端测试（`e2e/`）只断言 DOM 与 `invoke` 参数，不做截图比对；用 `e2e/fixtures.ts` 的 `test` / `invokeCalls`。Milkdown 编辑器的内容变更事件有 200ms 防抖，输入后要稍等再提交。本地环境若已预装 Chromium，`@playwright/test` 的版本需与之匹配（当前 1.56）。
+- 端到端测试（`e2e/`）只断言 DOM 与 `invoke` 参数，不做截图比对；用 `e2e/fixtures.ts` 的 `test` / `invokeCalls`。Milkdown 编辑器的内容变更事件有 200ms 防抖，界面提交前会调用 `flush()`，用例中输入后可以直接提交（“便签清单进度”用例守护这一点）。本地环境若已预装 Chromium，`@playwright/test` 的版本需与之匹配（当前 1.56）。
 
 ## 提交与合并请求指南
 - 提交信息使用简短祈使句，例如：`feat: 新增托盘开关`、`fix: 修复更新安装失败`。

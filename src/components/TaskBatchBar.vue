@@ -13,6 +13,25 @@
       <button class="button" :disabled="!parsedTags.length || busy" @click="applyTags">添加</button>
       <button class="button secondary" @click="mode = null">返回</button>
     </template>
+    <template v-else-if="mode === 'project'">
+      <input
+        ref="projectInputEl"
+        v-model="projectText"
+        class="input batch-input"
+        list="batch-project-suggestions"
+        :maxlength="MAX_PROJECT_CHARS"
+        placeholder="项目名称，留空移出项目"
+        @keydown.enter.prevent="applyProject"
+        @keydown.esc.stop.prevent="mode = null"
+      />
+      <datalist id="batch-project-suggestions">
+        <option v-for="item in projectSuggestions" :key="item.project" :value="item.project" />
+      </datalist>
+      <button class="button" :disabled="busy" @click="applyProject">
+        {{ normalizeProject(projectText) ? "移到项目" : "移出项目" }}
+      </button>
+      <button class="button secondary" @click="mode = null">返回</button>
+    </template>
     <template v-else-if="mode === 'reminder'">
       <input
         ref="reminderInputEl"
@@ -31,6 +50,7 @@
     <template v-else>
       <button class="button" :disabled="!ids.length || busy" @click="run({ action: 'complete' })">完成</button>
       <button class="button secondary" :disabled="!ids.length" @click="openMode('tags')">添加标签</button>
+      <button class="button secondary" :disabled="!ids.length" @click="openMode('project')">移到项目</button>
       <select class="select batch-select" :disabled="!ids.length || busy" title="设置优先级" @change="applyPriority">
         <option value="" selected disabled>优先级…</option>
         <option v-for="option in priorityOptions" :key="option.value" :value="option.value">
@@ -50,7 +70,7 @@ import { computed, nextTick, ref } from "vue";
 import { api } from "../api";
 import { formatDateTime, toLocalDateTimeString } from "../format";
 import { parseRescheduleTime } from "../nlp";
-import { PRIORITY_OPTIONS, normalizeTags } from "../tasks";
+import { MAX_PROJECT_CHARS, PRIORITY_OPTIONS, collectProjects, normalizeProject, normalizeTags } from "../tasks";
 import type { TaskBatchPayload } from "../types";
 import { useAppData } from "../composables/useAppData";
 import { useDialogs } from "../composables/useDialogs";
@@ -58,16 +78,19 @@ import { useDialogs } from "../composables/useDialogs";
 const props = defineProps<{ ids: string[] }>();
 const emit = defineEmits<{ (event: "done"): void; (event: "cancel"): void }>();
 
-const { refreshAll } = useAppData();
+const { tasks, completedTasks, refreshAll } = useAppData();
 const { confirmAction } = useDialogs();
 
 const priorityOptions = [...PRIORITY_OPTIONS].reverse();
-const mode = ref<null | "tags" | "reminder">(null);
+const mode = ref<null | "tags" | "project" | "reminder">(null);
 const busy = ref(false);
 const tagText = ref("");
 const reminderText = ref("");
 const tagInputEl = ref<HTMLInputElement | null>(null);
 const reminderInputEl = ref<HTMLInputElement | null>(null);
+const projectText = ref("");
+const projectInputEl = ref<HTMLInputElement | null>(null);
+const projectSuggestions = computed(() => collectProjects([...tasks.value, ...completedTasks.value]));
 
 const parsedTags = computed(() => normalizeTags(tagText.value.split(/[\s,，]+/)));
 const reminder = computed(() => parseRescheduleTime(reminderText.value));
@@ -77,12 +100,13 @@ const reminderHint = computed(() => {
   return "";
 });
 
-const openMode = async (next: "tags" | "reminder") => {
+const openMode = async (next: "tags" | "project" | "reminder") => {
   mode.value = next;
   tagText.value = "";
   reminderText.value = "";
+  projectText.value = "";
   await nextTick();
-  (next === "tags" ? tagInputEl.value : reminderInputEl.value)?.focus();
+  ({ tags: tagInputEl, project: projectInputEl, reminder: reminderInputEl })[next].value?.focus();
 };
 
 const run = async (payload: TaskBatchPayload) => {
@@ -102,6 +126,10 @@ const run = async (payload: TaskBatchPayload) => {
 
 const applyTags = () => {
   if (parsedTags.value.length) void run({ action: "addTags", tags: parsedTags.value });
+};
+
+const applyProject = () => {
+  void run({ action: "setProject", project: normalizeProject(projectText.value) });
 };
 
 const applyPriority = (event: Event) => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectTags, filterAndSortTasks, normalizeTags, sortTasks } from "./tasks";
+import { collectProjects, collectTags, filterAndSortTasks, normalizeProject, normalizeTags, sortTasks } from "./tasks";
 import type { Task } from "./types";
 
 const task = (id: string, extra: Partial<Task> = {}): Task => ({
@@ -48,5 +48,31 @@ describe("tasks helpers", () => {
     expect(ids(sortTasks(list, "reminder"))).toEqual(["ccc", "a", "bb", "dddd"]);
     expect(ids(sortTasks(list, "priority"))).toEqual(["ccc", "dddd", "a", "bb"]);
     expect(ids(sortTasks(list, "created"))).toEqual(["a", "bb", "ccc", "dddd"]);
+  });
+
+  it("normalizes project names like the backend", () => {
+    expect(normalizeProject("  @装修  ")).toBe("装修");
+    expect(normalizeProject("＠＠家\u0007务")).toBe("家务");
+    expect(normalizeProject(" @ ")).toBe("");
+    expect(normalizeProject(null)).toBe("");
+    expect(Array.from(normalizeProject("长".repeat(40)))).toHaveLength(32);
+  });
+
+  it("collects projects and filters by project or ungrouped", () => {
+    const list = [
+      task("a", { project: "装修" }),
+      task("bb", { project: "工作" }),
+      task("ccc", { project: "装修" }),
+      task("dddd")
+    ];
+    expect(collectProjects(list)).toEqual([
+      { project: "装修", count: 2 },
+      { project: "工作", count: 1 }
+    ]);
+    const filter = { query: "", tag: "", priority: -1 };
+    expect(ids(filterAndSortTasks(list, { ...filter, project: "装修" }, "created"))).toEqual(["a", "ccc"]);
+    expect(ids(filterAndSortTasks(list, { ...filter, project: "" }, "created"))).toEqual(["dddd"]);
+    expect(ids(filterAndSortTasks(list, { ...filter, project: null }, "created"))).toHaveLength(4);
+    expect(ids(filterAndSortTasks(list, { ...filter, query: "@工" }, "created"))).toEqual(["bb"]);
   });
 });

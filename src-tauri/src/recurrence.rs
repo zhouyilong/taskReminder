@@ -9,6 +9,9 @@ use crate::kinds::RepeatMode;
 use crate::models::RecurringTask;
 use crate::time;
 
+/// 重复次数的上限（“共 N 次”）。
+pub const MAX_REPEAT_COUNT: i64 = 9999;
+
 /// 每周多天的位掩码：周一 = bit0 … 周日 = bit6。
 pub const WEEKDAY_MASK_ALL: i64 = 0b111_1111;
 
@@ -50,6 +53,10 @@ pub fn sanitize_recurring_task(task: &mut RecurringTask) -> Result<(), AppError>
     task.end_time = normalize_time_field(task.end_time.as_deref(), "结束时间")?;
     task.schedule_time = normalize_time_field(task.schedule_time.as_deref(), "触发时间")?;
     task.cron_expression = normalize_text(task.cron_expression.as_deref());
+    task.ends_on = normalize_end_date(task.ends_on.as_deref())?;
+    task.remaining_count = task
+        .remaining_count
+        .map(|count| count.clamp(0, MAX_REPEAT_COUNT));
 
     if let (Some(start), Some(end)) = (task.start_time.as_deref(), task.end_time.as_deref()) {
         if parse_time(start)? > parse_time(end)? {
@@ -179,6 +186,55 @@ pub fn compute_next_trigger(
     Ok(time::format_datetime(&next))
 }
 
+/// 结束日期（含当天）；没有设置或无法解析时返回 None。
+fn end_date(task: &RecurringTask) -> Option<NaiveDate> {
+    task.ends_on.as_deref().and_then(time::parse_date)
+}
+
+/// 是否已到结束条件（v2.2）：剩余次数用完，或下次触发晚于结束日期当天。
+pub fn has_ended(task: &RecurringTask) -> bool {
+    if task.remaining_count.is_some_and(|count| count <= 0) {
+        return true;
+    }
+    match (end_date(task), time::parse_datetime_any(&task.next_trigger)) {
+        (Some(end), Some(next)) => next.date() > end,
+        _ => false,
+    }
+}
+
+/// 到达结束条件时写入暂停：不认识结束条件的旧版本也会因暂停而停止提醒。返回是否已结束。
+pub fn apply_end_condition(task: &mut RecurringTask) -> bool {
+    let ended = has_ended(task);
+    if ended {
+        task.is_paused = true;
+    }
+    ended
+}
+
+/// 触发一次之后推进：记下触发时间、扣减剩余次数、计算下次触发，下一次超出结束条件时
+/// 写入暂停。返回是否已结束。
+pub fn advance_after_trigger(
+    task: &mut RecurringTask,
+    now: NaiveDateTime,
+) -> Result<bool, AppError> {
+    task.last_triggered = Some(time::format_datetime(&now));
+    task.remaining_count = task.remaining_count.map(|count| (count - 1).max(0));
+    task.next_trigger = compute_next_trigger(task, Some(now))?;
+    Ok(apply_end_condition(task))
+}
+
+/// 结束条件的说明，如“到 2026-12-31 为止”“还剩 3 次”；没有结束条件时返回 None。
+pub fn describe_end(task: &RecurringTask) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(end) = end_date(task) {
+        parts.push(format!("到 {} 为止", time::format_date(&end)));
+    }
+    if let Some(count) = task.remaining_count {
+        parts.push(format!("还剩 {} 次", count.max(0)));
+    }
+    (!parts.is_empty()).then(|| parts.join("，"))
+}
+
 /// “跳过本次”：返回跳过即将到来的这一次之后的下一次触发时间。
 ///
 /// 要跳过的是当前的 `next_trigger`（已过期还没触发的也算这一次）；按当前规则从
@@ -233,13 +289,21 @@ pub fn upcoming_triggers(
 ) -> Result<Vec<String>, AppError> {
     let mut result = Vec::new();
     // 不认识的模式本机不会触发，也不预估。
-    if task.is_paused || limit == 0 || !task.repeat_mode.is_known() {
+    if task.is_paused || limit == 0 || !task.repeat_mode.is_known() || has_ended(task) {
         return Ok(result);
     }
     let Some(mut current) = time::parse_datetime_any(&task.next_trigger) else {
         return Ok(result);
     };
+    // 结束条件：结束日期之后、剩余次数用完后不再预估。
+    let end = end_date(task);
+    let limit = task
+        .remaining_count
+        .map_or(limit, |count| limit.min(count.max(0) as usize));
     while current <= until && result.len() < limit {
+        if end.is_some_and(|end| current.date() > end) {
+            break;
+        }
         result.push(time::format_datetime(&current));
         let next = compute_next_trigger(task, Some(current))?;
         match time::parse_datetime_any(&next) {
@@ -573,6 +637,17 @@ fn normalize_time_field(value: Option<&str>, field: &str) -> Result<Option<Strin
     Ok(Some(time::format_clock(&parsed)))
 }
 
+/// 结束日期规范化为 `YYYY-MM-DD`（也接受带时间的写法，只取日期）；空为不限。
+fn normalize_end_date(value: Option<&str>) -> Result<Option<String>, AppError> {
+    let Some(raw) = normalize_text(value) else {
+        return Ok(None);
+    };
+    time::parse_date(&raw)
+        .or_else(|| time::parse_datetime_any(&raw).map(|value| value.date()))
+        .map(|date| Some(time::format_date(&date)))
+        .ok_or_else(|| AppError::Invalid("结束日期格式无效".to_string()))
+}
+
 fn normalize_text(value: Option<&str>) -> Option<String> {
     value.and_then(|raw| {
         let trimmed = raw.trim();
@@ -661,6 +736,8 @@ mod tests {
             schedule_day: None,
             cron_expression: None,
             tags: Vec::new(),
+            ends_on: None,
+            remaining_count: None,
         }
     }
 
@@ -1093,5 +1170,119 @@ mod tests {
         assert_eq!((t.schedule_day, t.cron_expression.as_deref()), (None, None));
         t.schedule_time = None;
         assert!(sanitize_recurring_task(&mut t).is_err());
+    }
+
+    #[test]
+    fn end_condition_by_count_and_date() {
+        let mut t = task(RepeatMode::Daily);
+        t.next_trigger = "2026-10-05T09:00:00".to_string();
+        assert!(!has_ended(&t));
+        assert_eq!(describe_end(&t), None);
+
+        t.remaining_count = Some(1);
+        assert!(!has_ended(&t));
+        t.remaining_count = Some(0);
+        assert!(has_ended(&t));
+        assert!(apply_end_condition(&mut t));
+        assert!(t.is_paused);
+
+        // 结束日期含当天：当天的提醒照常，下一次落在次日时结束。
+        let mut t = task(RepeatMode::Daily);
+        t.ends_on = Some("2026-10-05".to_string());
+        t.next_trigger = "2026-10-05T09:00:00".to_string();
+        assert!(!apply_end_condition(&mut t));
+        assert!(!t.is_paused);
+        t.next_trigger = "2026-10-06T09:00:00".to_string();
+        assert!(apply_end_condition(&mut t));
+        assert!(t.is_paused);
+        assert_eq!(describe_end(&t).as_deref(), Some("到 2026-10-05 为止"));
+    }
+
+    #[test]
+    fn sanitize_normalizes_end_condition() {
+        let mut t = task(RepeatMode::Daily);
+        t.ends_on = Some(" 2026-12-31T00:00:00 ".to_string());
+        t.remaining_count = Some(-3);
+        sanitize_recurring_task(&mut t).unwrap();
+        assert_eq!(t.ends_on.as_deref(), Some("2026-12-31"));
+        assert_eq!(t.remaining_count, Some(0));
+
+        t.ends_on = Some("  ".to_string());
+        t.remaining_count = Some(MAX_REPEAT_COUNT + 1);
+        sanitize_recurring_task(&mut t).unwrap();
+        assert_eq!(t.ends_on, None);
+        assert_eq!(t.remaining_count, Some(MAX_REPEAT_COUNT));
+
+        t.ends_on = Some("年底".to_string());
+        assert!(sanitize_recurring_task(&mut t).is_err());
+    }
+
+    #[test]
+    fn upcoming_triggers_stop_at_end_condition() {
+        let mut t = task(RepeatMode::Daily);
+        t.next_trigger = "2026-10-05T09:00:00".to_string();
+        t.ends_on = Some("2026-10-07".to_string());
+        let times = upcoming_triggers(&t, dt("2026-10-31T23:59"), 50).unwrap();
+        assert_eq!(
+            times,
+            vec![
+                "2026-10-05T09:00:00",
+                "2026-10-06T09:00:00",
+                "2026-10-07T09:00:00"
+            ]
+        );
+
+        t.ends_on = None;
+        t.remaining_count = Some(2);
+        assert_eq!(
+            upcoming_triggers(&t, dt("2026-10-31T23:59"), 50)
+                .unwrap()
+                .len(),
+            2
+        );
+        t.remaining_count = Some(0);
+        assert!(upcoming_triggers(&t, dt("2026-10-31T23:59"), 50)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn triggering_consumes_count_and_respects_end_date() {
+        let mut t = task(RepeatMode::Daily);
+        t.remaining_count = Some(2);
+        t.next_trigger = "2026-10-05T09:00:00".to_string();
+        assert!(!advance_after_trigger(&mut t, dt("2026-10-05T09:00")).unwrap());
+        assert_eq!(t.remaining_count, Some(1));
+        assert_eq!(t.next_trigger, "2026-10-06T09:00:00");
+        assert_eq!(t.last_triggered.as_deref(), Some("2026-10-05T09:00:00"));
+        assert!(!t.is_paused);
+        // 最后一次：触发后次数为 0，写入暂停。
+        assert!(advance_after_trigger(&mut t, dt("2026-10-06T09:00")).unwrap());
+        assert_eq!(t.remaining_count, Some(0));
+        assert!(t.is_paused);
+
+        let mut t = task(RepeatMode::Weekly);
+        t.schedule_weekdays = Some(weekday_bit(1)); // 每周一
+        t.ends_on = Some("2026-10-12".to_string());
+        // 2026-10-05 周一触发后下一次是 10-12，仍在结束日期当天。
+        assert!(!advance_after_trigger(&mut t, dt("2026-10-05T09:00")).unwrap());
+        assert_eq!(t.next_trigger, "2026-10-12T09:00:00");
+        assert!(advance_after_trigger(&mut t, dt("2026-10-12T09:00")).unwrap());
+        assert_eq!(t.next_trigger, "2026-10-19T09:00:00");
+        assert!(t.is_paused);
+    }
+
+    #[test]
+    fn skipping_does_not_consume_count_but_can_pass_end_date() {
+        let mut t = task(RepeatMode::Daily);
+        t.remaining_count = Some(3);
+        t.ends_on = Some("2026-10-06".to_string());
+        t.next_trigger = "2026-10-05T09:00:00".to_string();
+        t.next_trigger = skipped_trigger(&t, dt("2026-10-04T12:00")).unwrap();
+        assert_eq!(t.next_trigger, "2026-10-06T09:00:00");
+        assert_eq!(t.remaining_count, Some(3));
+        assert!(!apply_end_condition(&mut t));
+        t.next_trigger = skipped_trigger(&t, dt("2026-10-04T12:00")).unwrap();
+        assert!(apply_end_condition(&mut t));
     }
 }
