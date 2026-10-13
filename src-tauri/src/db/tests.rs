@@ -793,6 +793,57 @@ fn completed_retention_setting_roundtrips_and_rejects_unknown_values() {
 }
 
 #[test]
+fn attention_settings_roundtrip_with_defaults_and_light_read() {
+    let (db, dir) = temp_db();
+    let mut settings = db.load_settings().unwrap();
+    assert_eq!(settings.attention_effect, "banner");
+    assert!(!settings.attention_until_handled);
+    assert_eq!(settings.attention_repeat_minutes, 0);
+    assert_eq!(settings.notification_screen, "cursor");
+
+    settings.attention_effect = "edge".to_string();
+    settings.attention_until_handled = true;
+    settings.attention_repeat_minutes = 5;
+    settings.notification_screen = "primary".to_string();
+    settings.sound_enabled = false;
+    settings.quiet_hours_enabled = true;
+    db.save_settings(&settings).unwrap();
+    let loaded = db.load_settings().unwrap();
+    assert_eq!(loaded.attention_effect, "edge");
+    assert!(loaded.attention_until_handled);
+    assert_eq!(loaded.attention_repeat_minutes, 5);
+    assert_eq!(loaded.notification_screen, "primary");
+
+    // 巡检用的轻量读取与完整设置一致。
+    let prefs = db.notification_prefs().unwrap();
+    assert_eq!(prefs.attention_effect, "edge");
+    assert!(prefs.attention_until_handled);
+    assert_eq!(prefs.attention_repeat_minutes, 5);
+    assert_eq!(prefs.notification_screen, "primary");
+    assert!(!prefs.sound_enabled);
+    assert!(prefs.quiet_hours_enabled);
+    assert_eq!(prefs.quiet_hours_start, "22:00");
+
+    // 不认识的值（如更新版本写入的选项）按默认处理。
+    settings.attention_repeat_minutes = 7;
+    settings.attention_effect = "fireworks".to_string();
+    db.save_settings(&settings).unwrap();
+    db.get_conn()
+        .unwrap()
+        .execute("UPDATE settings SET notification_screen = 'left'", [])
+        .unwrap();
+    let loaded = db.load_settings().unwrap();
+    assert_eq!(loaded.attention_repeat_minutes, 0);
+    assert_eq!(loaded.attention_effect, "banner");
+    assert_eq!(loaded.notification_screen, "cursor");
+    assert_eq!(
+        db.notification_prefs().unwrap().notification_screen,
+        "cursor"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn task_project_roundtrip_batch_and_import() {
     let (db, dir) = temp_db();
     let meta = TaskMeta {

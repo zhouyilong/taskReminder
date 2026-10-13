@@ -55,6 +55,48 @@ impl DbManager {
         ))
     }
 
+    /// 提醒弹出与再次提醒用到的设置。只读这几列，巡检时调用，避免 `load_settings` 访问凭据库。
+    pub fn notification_prefs(&self) -> Result<NotificationPrefs, AppError> {
+        let conn = self.get_conn()?;
+        let prefs = conn
+            .query_row(
+                "SELECT sound_enabled, quiet_hours_enabled, quiet_hours_start, quiet_hours_end,
+                        notification_theme, attention_effect, attention_until_handled,
+                        attention_repeat_minutes, notification_screen
+                 FROM settings WHERE id = 1",
+                [],
+                |row| {
+                    Ok(NotificationPrefs {
+                        sound_enabled: row.get::<_, Option<i64>>(0)?.unwrap_or(1) == 1,
+                        quiet_hours_enabled: row.get::<_, Option<i64>>(1)?.unwrap_or(0) == 1,
+                        quiet_hours_start: quiet_hours::normalize_clock(
+                            &row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                            quiet_hours::DEFAULT_START,
+                        ),
+                        quiet_hours_end: quiet_hours::normalize_clock(
+                            &row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                            quiet_hours::DEFAULT_END,
+                        ),
+                        notification_theme: row
+                            .get::<_, Option<String>>(4)?
+                            .unwrap_or_else(|| "app".to_string()),
+                        attention_effect: attention::normalize_effect(
+                            &row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                        ),
+                        attention_until_handled: row.get::<_, Option<i64>>(6)?.unwrap_or(0) == 1,
+                        attention_repeat_minutes: normalize_attention_repeat_minutes(
+                            row.get::<_, Option<i64>>(7)?.unwrap_or(0),
+                        ),
+                        notification_screen: attention::normalize_screen(
+                            &row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+                        ),
+                    })
+                },
+            )
+            .optional()?;
+        Ok(prefs.unwrap_or_default())
+    }
+
     pub fn load_settings(&self) -> Result<AppSettings, AppError> {
         let conn = self.get_conn()?;
         let sql = "SELECT auto_start_enabled, sound_enabled, snooze_minutes,
@@ -66,7 +108,9 @@ impl DbManager {
                    sync_encryption_enabled, sync_passphrase,
                    quiet_hours_enabled, quiet_hours_start, quiet_hours_end,
                    native_notification_enabled, sticky_toggle_shortcut, secret_storage,
-                   sticky_snap_enabled, holiday_auto_update, completed_retention_days
+                   sticky_snap_enabled, holiday_auto_update, completed_retention_days,
+                   attention_effect, attention_until_handled, attention_repeat_minutes,
+                   notification_screen
                    FROM settings WHERE id = 1";
         let mut stmt = conn.prepare(sql)?;
         let row = stmt.query_row([], |row| {
@@ -141,6 +185,16 @@ impl DbManager {
                     row.get::<_, Option<i64>>(35)?
                         .unwrap_or(DEFAULT_COMPLETED_RETENTION_DAYS),
                 ),
+                attention_effect: attention::normalize_effect(
+                    &row.get::<_, Option<String>>(36)?.unwrap_or_default(),
+                ),
+                attention_until_handled: row.get::<_, Option<i64>>(37)?.unwrap_or(0) == 1,
+                attention_repeat_minutes: normalize_attention_repeat_minutes(
+                    row.get::<_, Option<i64>>(38)?.unwrap_or(0),
+                ),
+                notification_screen: attention::normalize_screen(
+                    &row.get::<_, Option<String>>(39)?.unwrap_or_default(),
+                ),
             })
         })?;
         let mut settings = row;
@@ -170,7 +224,9 @@ impl DbManager {
                  sync_encryption_enabled = ?, sync_passphrase = ?,
                  quiet_hours_enabled = ?, quiet_hours_start = ?, quiet_hours_end = ?,
                  native_notification_enabled = ?, sticky_toggle_shortcut = ?, secret_storage = ?,
-                 sticky_snap_enabled = ?, holiday_auto_update = ?, completed_retention_days = ?
+                 sticky_snap_enabled = ?, holiday_auto_update = ?, completed_retention_days = ?,
+                 attention_effect = ?, attention_until_handled = ?, attention_repeat_minutes = ?,
+                 notification_screen = ?
              WHERE id = 1",
             params![
                 if settings.auto_start_enabled { 1 } else { 0 },
@@ -209,6 +265,10 @@ impl DbManager {
                 if settings.sticky_snap_enabled { 1 } else { 0 },
                 if settings.holiday_auto_update { 1 } else { 0 },
                 normalize_completed_retention_days(settings.completed_retention_days),
+                attention::normalize_effect(&settings.attention_effect),
+                if settings.attention_until_handled { 1 } else { 0 },
+                normalize_attention_repeat_minutes(settings.attention_repeat_minutes),
+                attention::normalize_screen(&settings.notification_screen),
             ],
         )?;
         Ok(())

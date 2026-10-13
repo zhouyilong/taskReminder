@@ -6,10 +6,11 @@ use chrono::{Duration, NaiveDateTime};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tokio::time::sleep;
 
+use crate::attention::{self, AttentionPayload, Screen};
 use crate::db::DbManager;
 use crate::errors::AppError;
 use crate::kinds::{ReminderAction, ReminderKind, TaskStatus};
-use crate::models::{AppSettings, NotificationPayload, RecurringTask, Task};
+use crate::models::{AppSettings, NotificationPayload, NotificationPrefs, RecurringTask, Task};
 use crate::notification_queue::NotificationQueue;
 use crate::quiet_hours;
 use crate::recurrence::{
@@ -18,6 +19,7 @@ use crate::recurrence::{
 };
 use crate::sync::CloudSyncService;
 use crate::time::{self, parse_datetime_any};
+use crate::tray;
 
 /// 校准巡检间隔：兜底系统休眠/唤醒、修改系统时间、云同步带来的新提醒等
 /// 单次 sleep 计时器覆盖不到的情况。
@@ -29,6 +31,13 @@ const WATCHDOG_STARTUP_DELAY_SECONDS: u64 = 5;
 const MISSED_REMINDER_LOOKBACK_DAYS: i64 = 7;
 /// 弹窗队列更新事件。
 pub const NOTIFICATION_QUEUE_EVENT: &str = "notification-queue";
+/// 提醒未处理、到了再次提醒的时间：弹窗轻摇一下并按设置再响一次。
+pub const NOTIFICATION_NUDGE_EVENT: &str = "notification-nudge";
+/// 队列变化时更新已打开的全屏效果（“直到处理”时展示队首与数量）。
+pub const ATTENTION_QUEUE_EVENT: &str = "attention-queue";
+/// 提醒弹窗的逻辑尺寸与距工作区边缘的距离。
+const NOTIFICATION_WIDTH: f64 = 392.0;
+const NOTIFICATION_MARGIN: f64 = 16.0;
 
 #[derive(Clone)]
 pub struct ReminderScheduler {
@@ -43,6 +52,8 @@ pub struct ReminderScheduler {
     fire_lock: Arc<Mutex<()>>,
     /// 勿扰时段内有提醒进入队列但没有弹窗；勿扰结束后由巡检弹出。
     quiet_held: Arc<AtomicBool>,
+    /// 上一次提醒（弹出、勿扰结束弹出、再次提醒）的时间，用于“未处理时再次提醒”。
+    last_alert: Arc<Mutex<Option<NaiveDateTime>>>,
 }
 
 impl ReminderScheduler {
@@ -61,6 +72,7 @@ impl ReminderScheduler {
             queue,
             fire_lock: Arc::new(Mutex::new(())),
             quiet_held: Arc::new(AtomicBool::new(false)),
+            last_alert: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -79,6 +91,9 @@ impl ReminderScheduler {
                 }
                 if let Err(err) = scheduler.release_quiet_hold() {
                     eprintln!("[scheduler] 勿扰结束弹出提醒失败: {}", err);
+                }
+                if let Err(err) = scheduler.nudge_pending() {
+                    eprintln!("[scheduler] 再次提醒失败: {}", err);
                 }
                 sleep(std::time::Duration::from_secs(WATCHDOG_INTERVAL_SECONDS)).await;
             }
@@ -130,7 +145,7 @@ impl ReminderScheduler {
         self.quiet_held.store(false, Ordering::SeqCst);
         let queue = self.queue.snapshot();
         if !queue.is_empty() {
-            emit_notification(&self.app, &queue)?;
+            self.alert(&queue, &NotificationPrefs::from(&settings), false)?;
             if settings.native_notification_enabled {
                 send_native_notification(
                     &self.app,
@@ -159,10 +174,65 @@ impl ReminderScheduler {
             publish_queue(&self.app, &queue);
             return Ok(());
         }
-        emit_notification(&self.app, &queue)?;
+        self.alert(&queue, &NotificationPrefs::from(settings), false)?;
         if settings.native_notification_enabled {
             send_native_notification(&self.app, &title, &body);
         }
+        Ok(())
+    }
+
+    /// 弹出（或再次弹出）提醒弹窗并在各屏幕播放全屏效果，记下提醒时间供“再次提醒”判断。
+    /// 再次提醒时不抢焦点（用户可能正在打字）。
+    fn alert(
+        &self,
+        queue: &[NotificationPayload],
+        prefs: &NotificationPrefs,
+        repeat: bool,
+    ) -> Result<(), AppError> {
+        let popup = emit_notification(&self.app, queue, &prefs.notification_screen, !repeat)?;
+        if let Some(payload) = AttentionPayload::for_queue(queue, &prefs.effect_options(), repeat) {
+            attention::play(&self.app, payload, popup);
+        }
+        *self.last_alert.lock().unwrap_or_else(|e| e.into_inner()) = Some(time::now());
+        tray::request_refresh(&self.app);
+        Ok(())
+    }
+
+    /// 提醒未处理且到了再次提醒的时间（设置中的间隔，勿扰时段内不提醒）：
+    /// 把弹窗移到当前所在屏幕并置前、重播全屏效果，弹窗轻摇并按设置再响一次。
+    pub fn nudge_pending(&self) -> Result<(), AppError> {
+        let queue = self.queue.snapshot();
+        if queue.is_empty() || self.quiet_held.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let prefs = self.db.notification_prefs()?;
+        if prefs.is_quiet_now() {
+            return Ok(());
+        }
+        let last = *self.last_alert.lock().unwrap_or_else(|e| e.into_inner());
+        if !attention::nudge_due(last, time::now(), prefs.attention_repeat_minutes) {
+            return Ok(());
+        }
+        self.alert(&queue, &prefs, true)?;
+        if let Some(window) = self.app.get_webview_window("notification") {
+            window
+                .emit(
+                    NOTIFICATION_NUDGE_EVENT,
+                    serde_json::json!({ "sound": prefs.sound_enabled }),
+                )
+                .ok();
+        }
+        Ok(())
+    }
+
+    /// 托盘“查看待处理提醒”：把弹窗移到当前所在屏幕并置前（不播放全屏效果）。
+    pub fn reveal_pending(&self) -> Result<(), AppError> {
+        let queue = self.queue.snapshot();
+        if queue.is_empty() {
+            return Ok(());
+        }
+        let prefs = self.db.notification_prefs()?;
+        emit_notification(&self.app, &queue, &prefs.notification_screen, true)?;
         Ok(())
     }
 
@@ -393,8 +463,24 @@ fn send_native_notification(app: &AppHandle, title: &str, body: &str) {
     }
 }
 
-/// 把当前队列推送给提醒弹窗。队列为空时隐藏弹窗。
+/// 把当前队列推送给提醒弹窗与全屏效果。队列为空时隐藏弹窗、关闭全屏效果。
 pub fn publish_queue(app: &AppHandle, queue: &[NotificationPayload]) {
+    tray::request_refresh(app);
+    if queue.is_empty() {
+        attention::dismiss(app);
+    } else {
+        let update = serde_json::json!({
+            "reminderType": queue[0].reminder_type.as_str(),
+            "description": queue[0].description,
+            "scheduledTime": queue[0].scheduled_time,
+            "count": queue.len(),
+        });
+        for (label, window) in app.webview_windows() {
+            if label.starts_with(attention::LABEL_PREFIX) {
+                window.emit(ATTENTION_QUEUE_EVENT, &update).ok();
+            }
+        }
+    }
     let Some(window) = app.get_webview_window("notification") else {
         return;
     };
@@ -404,13 +490,22 @@ pub fn publish_queue(app: &AppHandle, queue: &[NotificationPayload]) {
     }
 }
 
-fn emit_notification(app: &AppHandle, queue: &[NotificationPayload]) -> Result<(), AppError> {
-    let notification_width = 392.0;
-    let notification_height = if cfg!(target_os = "linux") {
+fn notification_height() -> f64 {
+    if cfg!(target_os = "linux") {
         228.0
     } else {
         248.0
-    };
+    }
+}
+
+/// 显示提醒弹窗：按设置放在鼠标所在屏幕或主屏幕工作区的右下角，返回所在屏幕。
+fn emit_notification(
+    app: &AppHandle,
+    queue: &[NotificationPayload],
+    screen_setting: &str,
+    focus: bool,
+) -> Result<Option<Screen>, AppError> {
+    let notification_height = notification_height();
     let window = if let Some(existing) = app.get_webview_window("notification") {
         existing
     } else {
@@ -425,32 +520,43 @@ fn emit_notification(app: &AppHandle, queue: &[NotificationPayload]) -> Result<(
         .shadow(false)
         .always_on_top(true)
         .resizable(false)
-        .inner_size(notification_width, notification_height)
+        .inner_size(NOTIFICATION_WIDTH, notification_height)
         .build()
         .map_err(|e| AppError::System(e.to_string()))?
     };
-    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
-        notification_width,
-        notification_height,
-    )));
     let _ = window.set_shadow(false);
 
-    if let Ok(Some(monitor)) = window.current_monitor() {
-        let size = monitor.size();
-        let bottom_margin = if cfg!(target_os = "windows") { 84 } else { 48 };
-        let pos_x =
-            size.width
-                .saturating_sub((notification_width as u32).saturating_add(16)) as f64;
-        let pos_y = size
-            .height
-            .saturating_sub(notification_height as u32 + bottom_margin) as f64;
-        let _ = window.set_position(tauri::LogicalPosition { x: pos_x, y: pos_y });
+    let screen = attention::target_screen(app, screen_setting);
+    if let Some(screen) = screen {
+        // 先移到目标屏幕再按逻辑尺寸设大小（跨缩放比例的屏幕时系统会调整窗口大小），
+        // 最后按目标屏幕的缩放把右下角对齐工作区。
+        let (x, y) = attention::popup_position(
+            &screen,
+            NOTIFICATION_WIDTH,
+            notification_height,
+            NOTIFICATION_MARGIN,
+        );
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+        let _ = window.set_size(tauri::LogicalSize::new(
+            NOTIFICATION_WIDTH,
+            notification_height,
+        ));
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    } else {
+        let _ = window.set_size(tauri::LogicalSize::new(
+            NOTIFICATION_WIDTH,
+            notification_height,
+        ));
     }
 
     window.emit(NOTIFICATION_QUEUE_EVENT, queue).ok();
     window.show().ok();
-    window.set_focus().ok();
-    Ok(())
+    // 重新置顶：弹窗已在显示、又被其他置顶窗口盖住时提到最上层。
+    window.set_always_on_top(true).ok();
+    if focus {
+        window.set_focus().ok();
+    }
+    Ok(screen)
 }
 
 fn seconds_until(value: &str) -> Result<u64, AppError> {

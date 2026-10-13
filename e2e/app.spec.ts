@@ -141,6 +141,41 @@ test("设置已完成待办的保留期", async ({ app }) => {
   expect((calls.at(-1)!.args.settings as { completedRetentionDays: number }).completedRetentionDays).toBe(365);
 });
 
+test("全屏提醒效果设置与预览", async ({ app }) => {
+  await app.getByRole("button", { name: "设置", exact: true }).click();
+  const modal = app.locator(".modal", { has: app.locator(".modal-header", { hasText: "应用设置" }) });
+  const effectRow = modal.locator(".form-row", { hasText: "全屏提醒效果" });
+  await expect(effectRow.locator("select")).toHaveValue("banner");
+  await effectRow.locator("select").selectOption({ label: "边缘光晕" });
+  await effectRow.getByLabel("持续到处理").check();
+  await expect(modal).toContainText("每块屏幕边缘亮起柔光，直到处理完提醒");
+  await effectRow.getByRole("button", { name: "预览" }).click();
+  const previews = await invokeCalls(app, "preview_attention");
+  expect(previews.at(-1)!.args.payload).toEqual({
+    effect: "edge",
+    untilHandled: true,
+    screen: "cursor",
+    theme: "app"
+  });
+
+  await modal.locator(".form-row", { hasText: "未处理时再次提醒" }).locator("select").selectOption({ label: "每 5 分钟" });
+  await expect(modal).toContainText("每 5 分钟把弹窗移到鼠标所在屏幕");
+  await modal.locator(".form-row", { hasText: "提醒弹窗位置" }).locator("select").selectOption({ label: "主屏幕" });
+  // 关闭效果时“持续到处理”与预览不可用。
+  await effectRow.locator("select").selectOption({ label: "关闭" });
+  await expect(effectRow.getByLabel("持续到处理")).toBeDisabled();
+  await expect(effectRow.getByRole("button", { name: "预览" })).toBeDisabled();
+  await effectRow.locator("select").selectOption({ label: "光晕 + 顶部横幅" });
+  await modal.getByRole("button", { name: "确认" }).click();
+
+  const calls = await invokeCalls(app, "save_settings");
+  const saved = calls.at(-1)!.args.settings as Record<string, unknown>;
+  expect(saved.attentionEffect).toBe("banner");
+  expect(saved.attentionUntilHandled).toBe(true);
+  expect(saved.attentionRepeatMinutes).toBe(5);
+  expect(saved.notificationScreen).toBe("primary");
+});
+
 test("按项目筛选，点击徽标切换，批量移到项目", async ({ app }) => {
   await expect(taskRow(app, "买菜").locator(".task-project")).toHaveText("家务");
   const projectFilter = app.locator(".task-toolbar select[title='按项目筛选']");

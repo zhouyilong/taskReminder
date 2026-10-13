@@ -38,7 +38,11 @@ const settingsDraft = reactive<AppSettings>({
   stickyToggleShortcut: "",
   stickySnapEnabled: true,
   holidayAutoUpdate: true,
-  completedRetentionDays: 30
+  completedRetentionDays: 30,
+  attentionEffect: "banner",
+  attentionUntilHandled: false,
+  attentionRepeatMinutes: 0,
+  notificationScreen: "cursor"
 });
 const syncStatus = ref<SyncStatus | null>(null);
 const quickAddShortcutError = ref("");

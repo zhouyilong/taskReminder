@@ -10,13 +10,15 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
+use crate::attention;
 use crate::backup::ImportSummary;
 use crate::errors::AppError;
 use crate::kinds::{ReminderAction, ReminderKind, RepeatMode, TaskStatus, TaskType};
 use crate::models::{
-    default_quick_add_shortcut, normalize_completed_retention_days, normalize_priority,
-    normalize_project, tags_from_db, tags_to_db, AppSettings, RecurringTask, ReminderRecord,
-    StickyNote, Task, DEFAULT_COMPLETED_RETENTION_DAYS,
+    default_quick_add_shortcut, normalize_attention_repeat_minutes,
+    normalize_completed_retention_days, normalize_priority, normalize_project, tags_from_db,
+    tags_to_db, AppSettings, NotificationPrefs, RecurringTask, ReminderRecord, StickyNote, Task,
+    DEFAULT_COMPLETED_RETENTION_DAYS,
 };
 use crate::quiet_hours;
 use crate::secrets::{self, SecretStore, Secrets};

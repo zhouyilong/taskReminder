@@ -187,6 +187,11 @@ pub(super) fn migration_scripts() -> Vec<MigrationScript> {
             description: "add recurring end condition and task project".to_string(),
             sql: include_str!("../../migrations/V2.2.0__add_recurring_end_and_task_project.sql"),
         },
+        MigrationScript {
+            version: "2.2.1".to_string(),
+            description: "add attention effect settings".to_string(),
+            sql: include_str!("../../migrations/V2.2.1__add_attention_settings.sql"),
+        },
     ]
 }
 

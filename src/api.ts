@@ -15,7 +15,9 @@ import type {
   RecurringPreview,
   ExportResult,
   ImportSummary,
-  BackupListPayload
+  BackupListPayload,
+  AttentionEffect,
+  NotificationScreen
 } from "./types";
 
 export const api = {
@@ -290,6 +292,15 @@ export const api = {
   },
   async getSyncStatus(): Promise<SyncStatus> {
     return invoke("get_sync_status");
+  },
+  /** 按设置草稿在每块屏幕上播放一次全屏提醒效果（不弹提醒、不写记录）。 */
+  async previewAttention(payload: {
+    effect: AttentionEffect;
+    untilHandled: boolean;
+    screen: NotificationScreen;
+    theme: string;
+  }): Promise<void> {
+    return invoke("preview_attention", { payload });
   },
   async getNotificationQueue(): Promise<NotificationPayload[]> {
     return invoke("get_notification_queue");

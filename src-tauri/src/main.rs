@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod attention;
 mod autostart;
 mod backup;
 mod commands;
@@ -98,6 +99,7 @@ fn main() {
             settings::set_autostart,
             notification::ack_notification,
             notification::ack_all_notifications,
+            notification::preview_attention,
             notification::complete_notification,
             tasks::quick_add_task,
             settings::apply_quick_add_shortcut,

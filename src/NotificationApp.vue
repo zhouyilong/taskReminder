@@ -1,6 +1,6 @@
 <template>
   <div class="notification-shell" :class="{ 'light-theme': isLightTheme, 'linux-platform': isLinuxPlatform }">
-    <div class="notification-window" v-if="visible">
+    <div class="notification-window" :class="{ 'is-nudging': nudging }" v-if="visible">
       <div class="notification-header">
         <div class="notification-heading">
           <div class="notification-eyebrow">
@@ -121,6 +121,8 @@ let unlistenTheme: (() => void) | null = null;
 let unlistenThemeEvent: (() => void) | null = null;
 let unlistenDataUpdated: (() => void) | null = null;
 let unlistenQueue: (() => void) | null = null;
+let unlistenNudge: (() => void) | null = null;
+let nudgeTimer: number | null = null;
 let mediaQuery: MediaQueryList | null = null;
 let mediaHandler: ((event: MediaQueryListEvent) => void) | null = null;
 let themePoll: number | null = null;
@@ -448,6 +450,26 @@ const applyQueue = async (items: NotificationPayload[] | null | undefined) => {
   }
 };
 
+// 提醒未处理、到了再次提醒的时间：轻摇一下，按提示音设置再响一次。
+const nudging = ref(false);
+const nudge = (sound: boolean) => {
+  if (sound) {
+    void playChime();
+  }
+  nudging.value = false;
+  if (nudgeTimer !== null) {
+    clearTimeout(nudgeTimer);
+  }
+  // 先移除再加回，连续两次再次提醒时动画也会重播。
+  requestAnimationFrame(() => {
+    nudging.value = true;
+    nudgeTimer = window.setTimeout(() => {
+      nudging.value = false;
+      nudgeTimer = null;
+    }, 900);
+  });
+};
+
 const runAction = async (action: () => Promise<NotificationPayload[] | void>) => {
   try {
     const remaining = await action();
@@ -557,6 +579,13 @@ onMounted(async () => {
     console.error("[notification] 监听 notification-queue 失败", error);
   }
   try {
+    unlistenNudge = await listen<{ sound?: boolean }>("notification-nudge", event => {
+      nudge(event.payload?.sound === true);
+    });
+  } catch (error) {
+    console.error("[notification] 监听 notification-nudge 失败", error);
+  }
+  try {
     unlistenDataUpdated = await listen("data-updated", async () => {
       await loadNotificationTheme();
       await applyThemeByMode();
@@ -584,6 +613,10 @@ onBeforeUnmount(() => {
   }
   if (unlistenQueue) {
     unlistenQueue();
+  }
+  unlistenNudge?.();
+  if (nudgeTimer !== null) {
+    clearTimeout(nudgeTimer);
   }
   if (mediaQuery && mediaHandler) {
     if (typeof mediaQuery.removeEventListener === "function") {
