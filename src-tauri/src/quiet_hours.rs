@@ -32,12 +32,15 @@ pub fn is_quiet_at(start: &str, end: &str, now: NaiveTime) -> bool {
 }
 
 pub fn is_quiet_now(settings: &AppSettings) -> bool {
-    settings.quiet_hours_enabled
-        && is_quiet_at(
-            &settings.quiet_hours_start,
-            &settings.quiet_hours_end,
-            time::now().time(),
-        )
+    is_quiet_window_now(
+        settings.quiet_hours_enabled,
+        &settings.quiet_hours_start,
+        &settings.quiet_hours_end,
+    )
+}
+
+pub fn is_quiet_window_now(enabled: bool, start: &str, end: &str) -> bool {
+    enabled && is_quiet_at(start, end, time::now().time())
 }
 
 #[cfg(test)]

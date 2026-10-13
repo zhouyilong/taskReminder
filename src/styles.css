@@ -31,6 +31,16 @@
   --chart-dismissed: #4f7cff;
   --chart-snoozed: #c98212;
   --chart-pending: #66748e;
+  /* 全屏提醒效果（v2.2.1）：屏幕边缘的光晕与顶部横幅；错过的提醒用警示色。 */
+  --attention-ring: rgba(143, 176, 255, 0.9);
+  --attention-glow: rgba(79, 124, 255, 0.6);
+  --attention-glow-soft: rgba(79, 124, 255, 0.24);
+  --attention-missed-ring: rgba(255, 200, 117, 0.92);
+  --attention-missed-glow: rgba(245, 165, 36, 0.6);
+  --attention-missed-glow-soft: rgba(245, 165, 36, 0.24);
+  --attention-banner-bg: rgba(21, 30, 46, 0.94);
+  --attention-banner-border: rgba(143, 176, 255, 0.38);
+  --attention-banner-shadow: 0 18px 48px rgba(0, 0, 0, 0.5), 0 0 32px rgba(79, 124, 255, 0.28);
   --border: #222d42;
   --border-strong: #324059;
   --row-stripe: transparent;
@@ -125,6 +135,13 @@ body.notification-mode {
 
 body.notification-mode {
   overflow: hidden;
+}
+
+html.attention-mode,
+body.attention-mode {
+  margin: 0;
+  overflow: hidden;
+  background: transparent !important;
 }
 
 html.quick-add-mode,
@@ -2077,6 +2094,55 @@ label:has(> input[type="checkbox"]) {
     0 0 0 1px rgba(255, 196, 109, 0.08) inset;
 }
 
+/* 再次提醒（v2.2.1）：在窗口范围内轻摇并闪一下描边（不放大，避免被窗口边缘裁掉）。 */
+.notification-window.is-nudging {
+  animation: notification-nudge 0.8s ease-in-out;
+}
+
+.notification-window.is-nudging::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 2px var(--warning);
+  pointer-events: none;
+  animation: notification-nudge-ring 0.8s ease-out forwards;
+}
+
+@keyframes notification-nudge {
+  0%,
+  100% {
+    transform: none;
+  }
+  20% {
+    transform: scale(0.965) rotate(-1.2deg);
+  }
+  40% {
+    transform: scale(0.97) rotate(1.2deg);
+  }
+  60% {
+    transform: scale(0.98) rotate(-0.8deg);
+  }
+  80% {
+    transform: scale(0.99) rotate(0.4deg);
+  }
+}
+
+@keyframes notification-nudge-ring {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notification-window.is-nudging {
+    animation: none;
+  }
+}
+
 .notification-window::before {
   content: "";
   position: absolute;
@@ -3432,6 +3498,15 @@ html.sticky-note-mode.is-linux .paper-note {
   --chart-dismissed: #3b6cf6;
   --chart-snoozed: #c97a06;
   --chart-pending: #8a95a8;
+  --attention-ring: rgba(59, 108, 246, 0.9);
+  --attention-glow: rgba(59, 108, 246, 0.5);
+  --attention-glow-soft: rgba(59, 108, 246, 0.2);
+  --attention-missed-ring: rgba(232, 147, 12, 0.92);
+  --attention-missed-glow: rgba(232, 147, 12, 0.5);
+  --attention-missed-glow-soft: rgba(232, 147, 12, 0.2);
+  --attention-banner-bg: rgba(255, 255, 255, 0.96);
+  --attention-banner-border: rgba(59, 108, 246, 0.3);
+  --attention-banner-shadow: 0 18px 48px rgba(16, 24, 40, 0.22), 0 0 32px rgba(59, 108, 246, 0.22);
   --border: #e5e9f0;
   --border-strong: #d5dbe6;
   --row-stripe: transparent;

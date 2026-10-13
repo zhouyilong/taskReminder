@@ -244,6 +244,18 @@ pub struct AppSettings {
     /// 已完成待办的保留天数（`COMPLETED_RETENTION_OPTIONS`），0 为永久保留。
     #[serde(default = "default_completed_retention_days")]
     pub completed_retention_days: i64,
+    /// 到点时的全屏注意效果（`attention::EFFECT_*`）。
+    #[serde(default = "default_attention_effect")]
+    pub attention_effect: String,
+    /// 全屏注意效果持续到提醒处理完；否则约 6 秒后淡出。
+    #[serde(default)]
+    pub attention_until_handled: bool,
+    /// 提醒未处理时每隔几分钟再次提醒（`ATTENTION_REPEAT_OPTIONS`），0 为不重复。
+    #[serde(default)]
+    pub attention_repeat_minutes: i64,
+    /// 提醒弹窗出现的屏幕（`attention::SCREEN_*`）。
+    #[serde(default = "default_notification_screen")]
+    pub notification_screen: String,
     /// 密码存放位置（`secrets::STORAGE_*`），只读：保存时由后端决定。
     #[serde(default)]
     pub secret_storage: String,
@@ -275,6 +287,74 @@ pub fn normalize_completed_retention_days(value: i64) -> i64 {
         value
     } else {
         DEFAULT_COMPLETED_RETENTION_DAYS
+    }
+}
+
+/// 提醒弹出与再次提醒用到的本机设置（`DbManager::notification_prefs` 只读这几列）。
+#[derive(Clone, Debug, Default)]
+pub struct NotificationPrefs {
+    pub sound_enabled: bool,
+    pub quiet_hours_enabled: bool,
+    pub quiet_hours_start: String,
+    pub quiet_hours_end: String,
+    pub notification_theme: String,
+    pub attention_effect: String,
+    pub attention_until_handled: bool,
+    pub attention_repeat_minutes: i64,
+    pub notification_screen: String,
+}
+
+impl From<&AppSettings> for NotificationPrefs {
+    fn from(settings: &AppSettings) -> Self {
+        Self {
+            sound_enabled: settings.sound_enabled,
+            quiet_hours_enabled: settings.quiet_hours_enabled,
+            quiet_hours_start: settings.quiet_hours_start.clone(),
+            quiet_hours_end: settings.quiet_hours_end.clone(),
+            notification_theme: settings.notification_theme.clone(),
+            attention_effect: settings.attention_effect.clone(),
+            attention_until_handled: settings.attention_until_handled,
+            attention_repeat_minutes: settings.attention_repeat_minutes,
+            notification_screen: settings.notification_screen.clone(),
+        }
+    }
+}
+
+impl NotificationPrefs {
+    pub fn is_quiet_now(&self) -> bool {
+        crate::quiet_hours::is_quiet_window_now(
+            self.quiet_hours_enabled,
+            &self.quiet_hours_start,
+            &self.quiet_hours_end,
+        )
+    }
+
+    pub fn effect_options(&self) -> crate::attention::EffectOptions {
+        crate::attention::EffectOptions {
+            effect: self.attention_effect.clone(),
+            until_handled: self.attention_until_handled,
+            theme: self.notification_theme.clone(),
+        }
+    }
+}
+
+fn default_attention_effect() -> String {
+    crate::attention::EFFECT_BANNER.to_string()
+}
+
+fn default_notification_screen() -> String {
+    crate::attention::SCREEN_CURSOR.to_string()
+}
+
+/// 未处理时再次提醒的间隔（分钟）可选值，0 为不重复。
+pub const ATTENTION_REPEAT_OPTIONS: &[i64] = &[0, 2, 5, 10];
+
+/// 不认识的间隔按“不重复”处理。
+pub fn normalize_attention_repeat_minutes(value: i64) -> i64 {
+    if ATTENTION_REPEAT_OPTIONS.contains(&value) {
+        value
+    } else {
+        0
     }
 }
 

@@ -2,6 +2,7 @@ use std::sync::{Mutex, OnceLock};
 
 use chrono::{Datelike, Duration, NaiveDateTime};
 use tauri::{
+    image::Image,
     menu::{Menu, MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Listener, Manager, WebviewUrl, WebviewWindowBuilder, Wry,
@@ -113,7 +114,7 @@ fn next_line(next: Option<&NextReminder>, now: NaiveDateTime) -> String {
     }
 }
 
-/// 托盘提示文字。勿扰时段内附带积压的提醒数量。
+/// 托盘提示文字。有待处理的提醒时附带数量（勿扰时段内为“待查看”）。
 pub fn tooltip_text(
     title: &str,
     next: Option<&NextReminder>,
@@ -128,6 +129,8 @@ pub fn tooltip_text(
         } else {
             "勿扰中".to_string()
         });
+    } else if pending > 0 {
+        lines.push(format!("{} 条提醒待处理", pending));
     }
     lines.join("\n")
 }
@@ -152,8 +155,15 @@ fn build_menu(
     app: &AppHandle,
     next: Option<&NextReminder>,
     now: NaiveDateTime,
+    pending: usize,
 ) -> tauri::Result<Menu<Wry>> {
-    let mut builder = MenuBuilder::new(app).item(
+    let mut builder = MenuBuilder::new(app);
+    if pending > 0 {
+        builder = builder
+            .text("show_pending", format!("查看待处理提醒（{}）", pending))
+            .separator();
+    }
+    builder = builder.item(
         &MenuItemBuilder::with_id("next_info", next_line(next, now))
             .enabled(false)
             .build(app)?,
@@ -184,6 +194,65 @@ fn build_menu(
 struct TrayCache {
     tooltip: String,
     menu_key: String,
+    /// 当前图标是否带待处理角标；`None` 表示还没设置过。
+    badged: Option<bool>,
+}
+
+/// 角标颜色（红）与描边（白）。
+const BADGE_COLOR: [u8; 3] = [0xe5, 0x48, 0x4d];
+const BADGE_RING: [u8; 3] = [0xff, 0xff, 0xff];
+
+/// 在图标右上角画一个带白边的红点，返回新的 RGBA 像素（边缘做抗锯齿）。
+pub fn add_badge(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let mut out = rgba.to_vec();
+    if out.len() != (width as usize) * (height as usize) * 4 {
+        return out;
+    }
+    let size = width.min(height) as f64;
+    let radius = size * 0.22;
+    let ring = (size * 0.06).max(1.0);
+    let outer = radius + ring;
+    let cx = width as f64 - outer;
+    let cy = outer;
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f64 + 0.5 - cx;
+            let dy = y as f64 + 0.5 - cy;
+            let distance = (dx * dx + dy * dy).sqrt();
+            let coverage = (outer + 0.5 - distance).clamp(0.0, 1.0);
+            if coverage <= 0.0 {
+                continue;
+            }
+            let inner = (radius + 0.5 - distance).clamp(0.0, 1.0);
+            let index = ((y * width + x) * 4) as usize;
+            let dst_alpha = out[index + 3] as f64 / 255.0;
+            let out_alpha = coverage + dst_alpha * (1.0 - coverage);
+            for channel in 0..3 {
+                let color = BADGE_COLOR[channel] as f64 * inner
+                    + BADGE_RING[channel] as f64 * (1.0 - inner);
+                let dst = out[index + channel] as f64;
+                let value = if out_alpha > 0.0 {
+                    (color * coverage + dst * dst_alpha * (1.0 - coverage)) / out_alpha
+                } else {
+                    0.0
+                };
+                out[index + channel] = value.round().clamp(0.0, 255.0) as u8;
+            }
+            out[index + 3] = (out_alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+    out
+}
+
+/// 托盘图标：有待处理的提醒时在默认图标上加角标。
+fn tray_icon(app: &AppHandle, badged: bool) -> Option<Image<'static>> {
+    let icon = app.default_window_icon()?;
+    let rgba = if badged {
+        add_badge(icon.rgba(), icon.width(), icon.height())
+    } else {
+        icon.rgba().to_vec()
+    };
+    Some(Image::new_owned(rgba, icon.width(), icon.height()))
 }
 
 fn tray_cache() -> &'static Mutex<TrayCache> {
@@ -208,7 +277,8 @@ fn refresh(app: &AppHandle) {
     let pending = state.scheduler.queue().snapshot().len();
     let tooltip = tooltip_text(&app_title(), next.as_ref(), now, quiet, pending);
     let menu_key = format!(
-        "{}|{}",
+        "{}|{}|{}",
+        pending,
         next_line(next.as_ref(), now),
         next.as_ref()
             .filter(|item| item.is_task)
@@ -221,9 +291,20 @@ fn refresh(app: &AppHandle) {
         cache.tooltip = tooltip;
     }
     if cache.menu_key != menu_key {
-        match build_menu(app, next.as_ref(), now).and_then(|menu| tray.set_menu(Some(menu))) {
+        match build_menu(app, next.as_ref(), now, pending)
+            .and_then(|menu| tray.set_menu(Some(menu)))
+        {
             Ok(()) => cache.menu_key = menu_key,
             Err(err) => eprintln!("[tray] 更新托盘菜单失败: {}", err),
+        }
+    }
+    let badged = pending > 0;
+    if cache.badged != Some(badged) {
+        if let Some(icon) = tray_icon(app, badged) {
+            match tray.set_icon(Some(icon)) {
+                Ok(()) => cache.badged = Some(badged),
+                Err(err) => eprintln!("[tray] 更新托盘图标失败: {}", err),
+            }
         }
     }
 }
@@ -290,7 +371,7 @@ fn snooze_next(app: &AppHandle, task_id: &str) {
 }
 
 pub fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
-    let menu = build_menu(app, None, time::now())?;
+    let menu = build_menu(app, None, time::now(), 0)?;
 
     let mut tray_builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
@@ -299,6 +380,17 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => {
                 show_main(app);
+            }
+            "show_pending" => {
+                if let Some(state) = app.try_state::<AppState>() {
+                    // 弹窗可能还没创建（勿扰中积压），不在菜单事件所在的主线程中创建窗口。
+                    let scheduler = state.scheduler.clone();
+                    std::thread::spawn(move || {
+                        if let Err(err) = scheduler.reveal_pending() {
+                            eprintln!("[tray] 显示待处理提醒失败: {}", err);
+                        }
+                    });
+                }
             }
             "quick_add" => {
                 if let Err(err) = crate::quick_add::show_window(app) {
@@ -492,5 +584,36 @@ mod tests {
             tooltip_text("任务提醒", None, now, true, 0),
             "任务提醒\n暂无待提醒事项\n勿扰中"
         );
+        assert_eq!(
+            tooltip_text("任务提醒", None, now, false, 2),
+            "任务提醒\n暂无待提醒事项\n2 条提醒待处理"
+        );
+    }
+
+    #[test]
+    fn badge_paints_the_top_right_corner_only() {
+        let (width, height) = (32u32, 32u32);
+        // 半透明的蓝色图标。
+        let icon: Vec<u8> = (0..width * height)
+            .flat_map(|_| [0x40, 0x80, 0xff, 0x80])
+            .collect();
+        let badged = add_badge(&icon, width, height);
+        assert_eq!(badged.len(), icon.len());
+        let pixel = |x: u32, y: u32| {
+            let i = ((y * width + x) * 4) as usize;
+            [badged[i], badged[i + 1], badged[i + 2], badged[i + 3]]
+        };
+        // 角标中心为不透明的红色。
+        let size = 32.0_f64;
+        let center = (size - size * 0.28) as u32;
+        assert_eq!(
+            pixel(center, (size * 0.28) as u32),
+            [0xe5, 0x48, 0x4d, 0xff]
+        );
+        // 左下角与图标中心不变。
+        assert_eq!(pixel(0, 31), [0x40, 0x80, 0xff, 0x80]);
+        assert_eq!(pixel(12, 16), [0x40, 0x80, 0xff, 0x80]);
+        // 尺寸不符的数据原样返回。
+        assert_eq!(add_badge(&icon[..8], width, height), icon[..8].to_vec());
     }
 }

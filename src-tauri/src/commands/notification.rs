@@ -3,6 +3,7 @@
 use serde::Deserialize;
 use tauri::{Emitter, State};
 
+use crate::attention::{self, AttentionPayload, EffectOptions};
 use crate::commands::{into_api, ApiResult};
 use crate::kinds::{ReminderAction, ReminderKind, TaskStatus};
 use crate::models::{NotificationPayload, ReminderRecord};
@@ -173,6 +174,34 @@ pub fn snooze_notification(
     }
     into_api(state.sync.notify_local_change())?;
     Ok(finish_notification(&app, &state, &payload.record_id))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttentionPreviewPayload {
+    effect: String,
+    until_handled: bool,
+    screen: String,
+    theme: String,
+}
+
+/// 设置中的“预览”：按草稿在每块屏幕上播放一次全屏效果（不弹提醒、不写记录）。
+#[tauri::command]
+pub async fn preview_attention(
+    app: tauri::AppHandle,
+    payload: AttentionPreviewPayload,
+) -> ApiResult<()> {
+    if !attention::supported() {
+        return Err("全屏提醒效果目前只支持 Windows".to_string());
+    }
+    let options = EffectOptions {
+        effect: payload.effect,
+        until_handled: payload.until_handled,
+        theme: payload.theme,
+    };
+    let popup = attention::target_screen(&app, &payload.screen);
+    attention::play(&app, AttentionPayload::preview(&options), popup);
+    Ok(())
 }
 
 #[tauri::command]

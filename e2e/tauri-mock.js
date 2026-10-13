@@ -152,6 +152,10 @@
       stickySnapEnabled: true,
       holidayAutoUpdate: true,
       completedRetentionDays: 30,
+      attentionEffect: "banner",
+      attentionUntilHandled: false,
+      attentionRepeatMinutes: 0,
+      notificationScreen: "cursor",
       secretStorage: "db",
       ...(seed.settings ?? {})
     }
@@ -351,6 +355,7 @@
     get_holiday_years: () => [2025, 2026],
     check_holiday_updates: () => ({ changed: false, years: [2025, 2026] }),
     get_notification_queue: () => [],
+    preview_attention: () => null,
     is_dev_mode: () => false,
     get_ui_state: () => null,
     emit_ui_state_changed: () => null,

@@ -148,9 +148,20 @@ export interface AppSettings {
   holidayAutoUpdate: boolean;
   /** 已完成待办的保留天数：30（默认，另限最近 100 条）/ 90 / 365 / 0（永久），本机设置。 */
   completedRetentionDays: number;
+  /** 到点时在每块屏幕上播放的全屏注意效果（本机设置，仅 Windows）。 */
+  attentionEffect: AttentionEffect;
+  /** 全屏效果持续到提醒处理完；否则约 6 秒后淡出。 */
+  attentionUntilHandled: boolean;
+  /** 提醒未处理时每隔几分钟再次提醒：0（不重复）/ 2 / 5 / 10。 */
+  attentionRepeatMinutes: number;
+  /** 提醒弹窗出现的屏幕：鼠标所在屏幕 / 主屏幕。 */
+  notificationScreen: NotificationScreen;
   /** 密码存放位置（只读）：keyring 为 Windows 凭据管理器，db 为本机数据库。 */
   secretStorage?: "db" | "keyring" | string;
 }
+
+export type AttentionEffect = "off" | "edge" | "banner";
+export type NotificationScreen = "cursor" | "primary";
 
 export interface UiStatePayload {
   uiScale: number;

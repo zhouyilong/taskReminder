@@ -142,6 +142,46 @@
     </div>
     <div class="modal-section">
       <div class="form-row compact">
+        <label>全屏提醒效果</label>
+        <select class="select" v-model="settingsDraft.attentionEffect" aria-label="全屏提醒效果">
+          <option v-for="item in ATTENTION_EFFECT_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
+        </select>
+        <label title="闪烁结束后保留边缘的柔光（横幅收起），处理完提醒才消失">
+          <input
+            type="checkbox"
+            v-model="settingsDraft.attentionUntilHandled"
+            :disabled="settingsDraft.attentionEffect === 'off'"
+          />
+          持续到处理
+        </label>
+        <button
+          type="button"
+          class="button secondary"
+          title="按当前选择在每块屏幕上播放一次"
+          :disabled="settingsDraft.attentionEffect === 'off' || attentionPreviewing"
+          @click="handlePreviewAttention"
+        >
+          预览
+        </button>
+      </div>
+      <div class="form-row compact">
+        <span class="field-hint" :class="{ 'is-error': !!attentionPreviewError }">{{ attentionHint }}</span>
+      </div>
+      <div class="form-row compact">
+        <label>未处理时再次提醒</label>
+        <select class="select" v-model.number="settingsDraft.attentionRepeatMinutes" aria-label="未处理时再次提醒">
+          <option v-for="item in ATTENTION_REPEAT_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
+        </select>
+        <span class="field-hint">{{ attentionRepeatHint(settingsDraft.attentionRepeatMinutes, settingsDraft.attentionEffect) }}</span>
+      </div>
+      <div class="form-row compact">
+        <label>提醒弹窗位置</label>
+        <select class="select" v-model="settingsDraft.notificationScreen" aria-label="提醒弹窗位置">
+          <option v-for="item in NOTIFICATION_SCREEN_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
+        </select>
+        <span class="field-hint">显示在该屏幕右下角，避开任务栏</span>
+      </div>
+      <div class="form-row compact">
         <label>提醒弹窗主题</label>
         <select class="select" v-model="settingsDraft.notificationTheme">
           <option value="system">跟随系统</option>
@@ -238,7 +278,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import Modal from "./Modal.vue";
 import { api } from "../api";
 import { errorMessage, formatDateTime } from "../format";
@@ -253,6 +293,13 @@ import { useUpdater } from "../composables/useUpdater";
 import { playChime } from "../notificationSound";
 import { SHORTCUT_HELP } from "../keyboard";
 import { COMPLETED_RETENTION_OPTIONS, completedRetentionHint } from "../retention";
+import {
+  ATTENTION_EFFECT_OPTIONS,
+  ATTENTION_REPEAT_OPTIONS,
+  NOTIFICATION_SCREEN_OPTIONS,
+  attentionEffectHint,
+  attentionRepeatHint
+} from "../attentionEffect";
 
 const props = defineProps<{ appVersion: string }>();
 
@@ -329,6 +376,37 @@ const isWindows = typeof navigator !== "undefined" && /windows/i.test(navigator.
 const stickySnapHint = isWindows
   ? "拖到屏幕边缘或其他便签旁时自动对齐，松开时按住 Alt 不吸附"
   : "仅在 Windows 上生效";
+// 全屏提醒效果：Linux 的透明窗口首帧后不重绘，目前只在 Windows 上播放。
+const attentionPreviewing = ref(false);
+const attentionPreviewError = ref("");
+const attentionHint = computed(() => {
+  if (attentionPreviewError.value) {
+    return attentionPreviewError.value;
+  }
+  const hint = attentionEffectHint(settingsDraft.attentionEffect, settingsDraft.attentionUntilHandled);
+  return isWindows || settingsDraft.attentionEffect === "off" ? hint : `${hint}（目前只支持 Windows）`;
+});
+const handlePreviewAttention = async () => {
+  attentionPreviewing.value = true;
+  attentionPreviewError.value = "";
+  try {
+    await api.previewAttention({
+      effect: settingsDraft.attentionEffect,
+      untilHandled: settingsDraft.attentionUntilHandled,
+      screen: settingsDraft.notificationScreen,
+      theme: settingsDraft.notificationTheme
+    });
+  } catch (error) {
+    attentionPreviewError.value = `预览失败：${errorMessage(error)}`;
+  } finally {
+    // 防止连点重复播放。
+    window.setTimeout(() => (attentionPreviewing.value = false), 1500);
+  }
+};
+watch(
+  () => [settingsDraft.attentionEffect, settingsDraft.attentionUntilHandled],
+  () => (attentionPreviewError.value = "")
+);
 const quietHoursHint = computed(() =>
   formatQuietHoursHint(settingsDraft.quietHoursStart, settingsDraft.quietHoursEnd)
 );
