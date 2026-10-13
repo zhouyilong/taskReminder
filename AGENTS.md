@@ -6,6 +6,7 @@
     - `src/views/`：每个 Tab 一个视图——`TodayView`（今天时间线）、`CalendarView`（日历月视图 / 周视图，可拖动待办改期到某天或某个时段）、`TasksView`（含搜索、标签/优先级筛选与排序）、`CompletedView`、`RecurringView`、`StickiesView`（便签管理列表：显示中 / 已隐藏 / 已关闭，打开、置前、关闭）、`RecordsView`、`StatsView`（统计）、`TrashView`（回收站）。Tab 键定义在 `src/navigation.ts`，上次打开的 Tab 记在 `localStorage.activeTab`。
     - `src/composables/`：模块级单例的共享状态——`useAppData`（四个列表、`refreshAll`、`dataVersion`）、`useSettings`（设置草稿、同步状态、设置/云同步弹窗开关）、`useUpdater`、`useUiPrefs`（主题、缩放、透明度、侧边栏）、`useDialogs`（确认框、详情、编辑待办/循环提醒）、`useItemActions`（完成、删除、右键菜单等通用操作）、`useSmartAdd`（带自然语言识别的新建待办/循环提醒）、`useContextMenu`、`usePagination`、`useNow`、`useSearchPalette`（全局搜索面板开关）。
   - 提醒弹窗：`notification.html` → `src/notification.ts` → `src/NotificationApp.vue`。
+  - 全屏提醒效果：`attention.html` → `src/attention.ts` → `src/AttentionApp.vue`（每块屏幕一个透明、鼠标穿透、不可聚焦的置顶窗口，标签为 `attention-<批次>-<序号>`，内容由后端注入到 `window.__ATTENTION__`）。
   - 桌面便签：`sticky-note-item.html` → `src/stickyNoteItem.ts` → `src/StickyNoteItemApp.vue`（每张便签一个独立窗口，窗口标签为 `sticky-note-item-<编码后的 id>`）。
   - 快速添加：`quick-add.html` → `src/quickAdd.ts` → `src/QuickAddApp.vue`（窗口标签 `quick-add`，由全局快捷键或托盘菜单打开）。
 - `src/components/` 存放可复用 UI 组件：
@@ -27,6 +28,7 @@
 - `src/markdown.ts` Markdown 转纯文本/预览文本工具（列表描述、提醒记录去掉前导列表标记）与勾选清单进度（`checklistProgress`，Crepe 保存为 `* [ ]`）。
 - `src/format.ts` 主窗口共用的时间与文案格式化；`src/recurring.ts` 循环规则展示、表单草稿、校验与提交载荷。
 - `src/timeline.ts`（“今天”时间线）、`src/stats.ts`（统计面板）、`src/calendar.ts`（日历网格与按天归类）、`src/tasks.ts`（标签、优先级、项目、筛选排序）、`src/stickies.ts`（便签列表状态、筛选排序）、`src/nlp.ts`（自然语言时间/标签/项目/优先级/循环规则与结束条件识别）、`src/search.ts`（全局搜索与各列表关键词搜索的统一规则：多词为“且”，`#标签` 只与标签前缀匹配，`@项目` 只与项目前缀匹配）、`src/retention.ts`（已完成待办保留期选项与说明）为纯函数，测试在同名 `*.spec.ts`。
+- `src/attentionEffect.ts` 全屏提醒效果的设置选项、说明文案与横幅文字、主题（纯函数，测试在 `attentionEffect.spec.ts`）。
 - `src/syncStatus.ts` 云同步状态码到文案与色调的映射（兼容旧版中文状态）；`src/quietHours.ts` 勿扰时段说明文案。
 - `src/safeStorage.ts` 带异常保护的 `localStorage` 封装；`src/startupError.ts` 启动失败时渲染错误页。
 - `src/styles.css` 为三个窗口共用的全局样式表（设计令牌、主窗口、提醒弹窗、便签）；组件私有样式放在 `.vue` 文件内。
@@ -34,7 +36,7 @@
 - `src/due.ts`（截止时间与提前提醒、`taskAnchorTime`、拖动改期时平移提醒）、`src/reorder.ts`（拖拽排序的位置计算）、`src/selection.ts`（列表多选）、`src/keyboard.ts`（主窗口快捷键映射）、`src/modalStack.ts`（Esc 关闭最上层弹窗）、`src/notificationSound.ts`（提醒弹窗提示音）为纯函数或小工具，测试在同名 `*.spec.ts`。
 - `src/weekdays.ts` 每周位掩码工具（与后端一致：周一 = bit0 … 周日 = bit6）；`src/shortcut.ts` 全局快捷键录制与展示。
 - `src-tauri/` 存放 Tauri 应用的 Rust 后端。
-  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（插件、命令注册与启动流程）、`commands/`（前端 `invoke` 的命令，按业务分为 `tasks`、`recurring`、`notification`、`trash`、`settings`、`sticky`、`system`、`data`，公共的 `ApiResult` / `into_api` 在 `commands/mod.rs`）、`windows/`（窗口事件；`windows/sticky.rs` 为便签窗口的标签编码、创建显示、层级与 UI 状态注入，以及 Windows 上的贴边吸附；`windows/placement.rs` 为便签位置的纯几何计算：越界校正、吸附）、`db/`（SQLite 读写：`mod.rs` 为连接池、初始化与凭据库，业务表按 `tasks`、`recurring`、`records`、`sticky`、`settings`、`tombstones`、`import`、`migrations` 拆分，测试在 `db/tests.rs`）、`scheduler.rs`（提醒调度与弹窗）、`recurrence.rs`（循环规则计算）、`sync/`（WebDAV 同步：`service.rs` 调度与入口、`remote.rs` 同步主流程与加密、`merge.rs` 快照导出与按行合并、`webdav.rs` 客户端与同步锁，测试在 `sync/tests.rs`）、`sync_schema.rs`（参与同步的表与列的唯一定义、合并时保留不认识的列）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（时间的唯一入口：`now()`、数据库时间格式与各固定格式的解析与格式化）、`holidays.rs`（中国法定节假日与调休：内置数据、在线更新缓存与用户覆盖文件的合并与校验）、`holiday_update.rs`（每天从仓库拉取节假日数据）、`quick_add.rs`（快速添加窗口）、`shortcuts.rs`（全局快捷键统一注册：快速添加、显示/隐藏全部便签）、`quiet_hours.rs`（勿扰时段判断）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单与提示：下一条提醒、完成/推迟、显示/隐藏全部便签）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`kinds.rs`（状态、类型、处理结果、循环模式的强类型枚举，未知值原样保留）、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
+  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（插件、命令注册与启动流程）、`commands/`（前端 `invoke` 的命令，按业务分为 `tasks`、`recurring`、`notification`、`trash`、`settings`、`sticky`、`system`、`data`，公共的 `ApiResult` / `into_api` 在 `commands/mod.rs`）、`windows/`（窗口事件；`windows/sticky.rs` 为便签窗口的标签编码、创建显示、层级与 UI 状态注入，以及 Windows 上的贴边吸附；`windows/placement.rs` 为便签位置的纯几何计算：越界校正、吸附）、`db/`（SQLite 读写：`mod.rs` 为连接池、初始化与凭据库，业务表按 `tasks`、`recurring`、`records`、`sticky`、`settings`、`tombstones`、`import`、`migrations` 拆分，测试在 `db/tests.rs`）、`scheduler.rs`（提醒调度与弹窗）、`attention.rs`（全屏提醒效果窗口、弹窗所在屏幕的定位、再次提醒的判断）、`recurrence.rs`（循环规则计算）、`sync/`（WebDAV 同步：`service.rs` 调度与入口、`remote.rs` 同步主流程与加密、`merge.rs` 快照导出与按行合并、`webdav.rs` 客户端与同步锁，测试在 `sync/tests.rs`）、`sync_schema.rs`（参与同步的表与列的唯一定义、合并时保留不认识的列）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（时间的唯一入口：`now()`、数据库时间格式与各固定格式的解析与格式化）、`holidays.rs`（中国法定节假日与调休：内置数据、在线更新缓存与用户覆盖文件的合并与校验）、`holiday_update.rs`（每天从仓库拉取节假日数据）、`quick_add.rs`（快速添加窗口）、`shortcuts.rs`（全局快捷键统一注册：快速添加、显示/隐藏全部便签）、`quiet_hours.rs`（勿扰时段判断）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单与提示：下一条提醒、完成/推迟、显示/隐藏全部便签）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`kinds.rs`（状态、类型、处理结果、循环模式的强类型枚举，未知值原样保留）、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
   - `src-tauri/migrations/` 存放数据库迁移文件；新增迁移后需在 `db/migrations.rs` 的 `migration_scripts()` 中登记；新增同步列还要登记到 `sync_schema.rs` 的 `SYNC_TABLES`（测试会检查迁移结果与登记一致）。
   - `src-tauri/data/holidays-cn.json` 为内置法定节假日数据（`off` 放假日、`work` 调休上班日，支持 `[开始, 结束]` 区间），每年国务院发布次年安排后追加，并补充 `holidays.rs` 中的测试。
   - **该文件同时是在线更新的数据源**：客户端每天从 `main` 分支拉取（jsDelivr / GitHub raw），推送到 `main` 后已发布的应用即可获得新年份。客户端只采用内置数据没有的年份，且拒绝删减已下载年份的文件，因此**只能追加年份**；已发布年份的更正需随应用版本发布（内置数据优先）。CI 的 `holidays` 任务用 `scripts/check-holidays.mjs` 与基准版本比较：删除年份或日期一律失败；已有年份新增日期视为更正，需在提交信息或 PR 标题中加入 `holidays-correction`。
@@ -210,6 +212,13 @@
 - 托盘通过 `listen_any("data-updated")` 与每 30 秒的定时器刷新，刷新在后台线程执行（`tray::request_refresh`），不要在持有锁时同步调用菜单 API。托盘中的“完成 / 推迟”复用 `commands::tasks::complete_task_by_id` / `reschedule_task_reminder`。
 - “隐藏全部便签”只隐藏窗口，不写 `sticky_is_open`，避免产生同步改动。
 
+### 全屏提醒效果、弹窗位置与再次提醒（v2.2.1）
+- 提醒弹出统一经 `ReminderScheduler::alert`：显示弹窗（按 `notification_screen` 放在鼠标所在屏幕或主屏幕工作区的右下角）、在每块屏幕播放全屏效果（`attention::play`）、记下 `last_alert` 并刷新托盘。巡检中的 `nudge_pending` 按 `attention_repeat_minutes` 再次提醒（不抢焦点，向弹窗发 `notification-nudge`）。勿扰时段内都不播放、不再次提醒。
+- 队列清空时 `publish_queue` 调用 `attention::dismiss` 关闭全部效果窗口；队列变化时向效果窗口推送 `attention-queue`。
+- **规则**：效果窗口只在 Windows 上创建（`attention::supported`，Linux 透明窗口不重绘）；创建窗口一律放在后台线程（`attention::play` 内部已处理），不要在同步命令或菜单事件所在的主线程中直接创建窗口（Windows 上会死锁），托盘“查看待处理提醒”同理。
+- 弹窗与效果窗口的定位用物理像素：`attention::popup_position` 按目标屏幕的缩放换算，先移到目标屏幕再设逻辑尺寸、再对齐一次。不要再用屏幕的物理尺寸设置逻辑坐标（旧实现在缩放不是 100% 时偏出屏幕）。
+- 这些都是本机设置（`settings` 表，迁移 `V2.2.1`）；巡检读取用 `DbManager::notification_prefs`（不访问凭据库）。前端效果时长 `ATTENTION_DURATION_MS` 与后端 `EFFECT_DURATION_MS` 保持一致。
+
 ### onMounted 中异步操作的异常隔离
 - **问题**：多个异步操作放在同一个 `try` 块中，前面的操作抛异常会导致后面的操作被跳过（如自动更新检查被数据初始化异常阻断）。
 - **解决**：将相互独立的异步操作放在各自独立的 `try/catch` 块中。
@@ -234,5 +243,5 @@
 
 ## 配置与资源
 - 在 `src-tauri/tauri.conf.json` 中更新窗口行为、打包标识符与应用元数据。
-- 保持静态 HTML 入口文件（`index.html`、`notification.html`、`quick-add.html`、`sticky-note-item.html`）简洁，并与 Vue 入口保持同步；新增入口时同时更新 `vite.config.ts` 的多页面配置。
+- 保持静态 HTML 入口文件（`index.html`、`notification.html`、`attention.html`、`quick-add.html`、`sticky-note-item.html`）简洁，并与 Vue 入口保持同步；新增入口时同时更新 `vite.config.ts` 的多页面配置。
 - 更新器配置在 `src-tauri/tauri.conf.json` 的 `plugins.updater` 节点，包含公钥和 GitHub Releases 端点。
