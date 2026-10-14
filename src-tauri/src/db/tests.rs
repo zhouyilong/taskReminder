@@ -800,8 +800,10 @@ fn attention_settings_roundtrip_with_defaults_and_light_read() {
     assert!(!settings.attention_until_handled);
     assert_eq!(settings.attention_repeat_minutes, 0);
     assert_eq!(settings.notification_screen, "cursor");
+    assert_eq!(settings.attention_intensity, 2);
 
     settings.attention_effect = "edge".to_string();
+    settings.attention_intensity = 5;
     settings.attention_until_handled = true;
     settings.attention_repeat_minutes = 5;
     settings.notification_screen = "primary".to_string();
@@ -813,6 +815,7 @@ fn attention_settings_roundtrip_with_defaults_and_light_read() {
     assert!(loaded.attention_until_handled);
     assert_eq!(loaded.attention_repeat_minutes, 5);
     assert_eq!(loaded.notification_screen, "primary");
+    assert_eq!(loaded.attention_intensity, 5);
 
     // 巡检用的轻量读取与完整设置一致。
     let prefs = db.notification_prefs().unwrap();
@@ -820,6 +823,7 @@ fn attention_settings_roundtrip_with_defaults_and_light_read() {
     assert!(prefs.attention_until_handled);
     assert_eq!(prefs.attention_repeat_minutes, 5);
     assert_eq!(prefs.notification_screen, "primary");
+    assert_eq!(prefs.attention_intensity, 5);
     assert!(!prefs.sound_enabled);
     assert!(prefs.quiet_hours_enabled);
     assert_eq!(prefs.quiet_hours_start, "22:00");
@@ -830,9 +834,14 @@ fn attention_settings_roundtrip_with_defaults_and_light_read() {
     db.save_settings(&settings).unwrap();
     db.get_conn()
         .unwrap()
-        .execute("UPDATE settings SET notification_screen = 'left'", [])
+        .execute(
+            "UPDATE settings SET notification_screen = 'left', attention_intensity = 9",
+            [],
+        )
         .unwrap();
     let loaded = db.load_settings().unwrap();
+    assert_eq!(loaded.attention_intensity, 2);
+    assert_eq!(db.notification_prefs().unwrap().attention_intensity, 2);
     assert_eq!(loaded.attention_repeat_minutes, 0);
     assert_eq!(loaded.attention_effect, "banner");
     assert_eq!(loaded.notification_screen, "cursor");

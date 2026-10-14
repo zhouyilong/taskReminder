@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  ATTENTION_INTENSITY_OPTIONS,
+  attentionEdgeVars,
   attentionEffectHint,
   attentionEyebrow,
+  attentionIntensityLabel,
   attentionRepeatHint,
   attentionTitle,
   formatScheduledClock,
   missedLabel,
+  normalizeAttentionIntensity,
   normalizeAttentionPayload,
   popupHint,
   resolveAttentionTheme
@@ -80,6 +84,7 @@ describe("normalizeAttentionPayload", () => {
     expect(normalizeAttentionPayload({ effect: "fireworks", count: 0 })).toEqual({
       effect: "banner",
       untilHandled: false,
+      intensity: 2,
       reminderType: "TASK",
       description: "",
       scheduledTime: null,
@@ -92,6 +97,7 @@ describe("normalizeAttentionPayload", () => {
     const payload = normalizeAttentionPayload({
       effect: "edge",
       untilHandled: true,
+      intensity: 5,
       reminderType: "RECURRING",
       description: "喝水",
       scheduledTime: "2026-10-13T10:00:00",
@@ -103,7 +109,49 @@ describe("normalizeAttentionPayload", () => {
     });
     expect(payload?.effect).toBe("edge");
     expect(payload?.untilHandled).toBe(true);
+    expect(payload?.intensity).toBe(5);
     expect(payload?.count).toBe(2);
     expect(payload?.popupDirection).toBe("left");
+  });
+});
+
+describe("attention intensity", () => {
+  it("keeps known levels and falls back to standard", () => {
+    expect(ATTENTION_INTENSITY_OPTIONS.map(item => item.value)).toEqual([1, 2, 3, 4, 5]);
+    expect(normalizeAttentionIntensity(4)).toBe(4);
+    expect(normalizeAttentionIntensity(0)).toBe(2);
+    expect(normalizeAttentionIntensity(9)).toBe(2);
+    expect(normalizeAttentionIntensity(2.5)).toBe(2);
+    expect(normalizeAttentionIntensity("5")).toBe(2);
+    expect(attentionIntensityLabel(5)).toBe("最强");
+    expect(attentionIntensityLabel(7)).toBe("标准");
+  });
+
+  it("keeps the 2.2.1 look at the standard level", () => {
+    expect(attentionEdgeVars(2)).toEqual({
+      "--attention-ring-width": "3px",
+      "--attention-glow-blur": "48px",
+      "--attention-glow-spread": "12px",
+      "--attention-soft-blur": "180px",
+      "--attention-soft-spread": "56px",
+      "--attention-deep-blur": "0vmin",
+      "--attention-deep-spread": "0vmin"
+    });
+  });
+
+  it("reaches further toward the center at higher levels", () => {
+    const reach = (level: number) => {
+      const vars = attentionEdgeVars(level);
+      return ["--attention-soft-blur", "--attention-soft-spread", "--attention-deep-blur", "--attention-deep-spread"].map(
+        key => parseFloat(vars[key])
+      );
+    };
+    for (let level = 2; level <= 5; level += 1) {
+      const lower = reach(level - 1);
+      const higher = reach(level);
+      higher.forEach((value, index) => expect(value).toBeGreaterThanOrEqual(lower[index]));
+      expect(higher[0]).toBeGreaterThan(lower[0]);
+    }
+    expect(parseFloat(attentionEdgeVars(5)["--attention-deep-spread"])).toBeGreaterThan(0);
   });
 });

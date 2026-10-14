@@ -17,6 +17,11 @@ pub const EFFECT_OFF: &str = "off";
 pub const EFFECT_EDGE: &str = "edge";
 pub const EFFECT_BANNER: &str = "banner";
 
+/// 光晕强度：1 柔和 … 5 最强，默认 2（标准）。与前端 `ATTENTION_INTENSITY_OPTIONS` 一致。
+pub const INTENSITY_MIN: i64 = 1;
+pub const INTENSITY_MAX: i64 = 5;
+pub const INTENSITY_DEFAULT: i64 = 2;
+
 pub const SCREEN_CURSOR: &str = "cursor";
 pub const SCREEN_PRIMARY: &str = "primary";
 
@@ -28,6 +33,15 @@ pub const EFFECT_DURATION_MS: u64 = 6_000;
 const CLOSE_GRACE_MS: u64 = 600;
 /// 预览“直到处理”时额外展示的时长，让设置中能看到收起后的样子。
 const PREVIEW_PERSIST_EXTRA_MS: u64 = 5_000;
+
+/// 超出范围的光晕强度按默认（标准）处理。
+pub fn normalize_intensity(value: i64) -> i64 {
+    if (INTENSITY_MIN..=INTENSITY_MAX).contains(&value) {
+        value
+    } else {
+        INTENSITY_DEFAULT
+    }
+}
 
 /// 不认识的效果按默认（光晕 + 横幅）处理。
 pub fn normalize_effect(value: &str) -> String {
@@ -174,6 +188,8 @@ pub fn nudge_due(
 pub struct AttentionPayload {
     pub effect: String,
     pub until_handled: bool,
+    /// 光晕强度（`INTENSITY_MIN..=INTENSITY_MAX`）。
+    pub intensity: i64,
     pub reminder_type: String,
     pub description: String,
     pub scheduled_time: Option<String>,
@@ -192,6 +208,7 @@ pub struct AttentionPayload {
 pub struct EffectOptions {
     pub effect: String,
     pub until_handled: bool,
+    pub intensity: i64,
     pub theme: String,
 }
 
@@ -205,6 +222,7 @@ impl AttentionPayload {
         Some(Self {
             effect: normalize_effect(&options.effect),
             until_handled: options.until_handled,
+            intensity: normalize_intensity(options.intensity),
             reminder_type: head.reminder_type.as_str().to_string(),
             description: head.description.clone(),
             scheduled_time: head.scheduled_time.clone(),
@@ -220,6 +238,7 @@ impl AttentionPayload {
         Self {
             effect: normalize_effect(&options.effect),
             until_handled: options.until_handled,
+            intensity: normalize_intensity(options.intensity),
             reminder_type: "TASK".to_string(),
             description: "这是全屏提醒效果的预览".to_string(),
             scheduled_time: None,
@@ -504,6 +523,7 @@ mod tests {
         let options = EffectOptions {
             effect: "unknown".to_string(),
             until_handled: true,
+            intensity: 9,
             theme: "dark".to_string(),
         };
         assert!(AttentionPayload::for_queue(&[], &options, false).is_none());
@@ -514,6 +534,7 @@ mod tests {
         let payload = AttentionPayload::for_queue(&queue, &options, true).unwrap();
         assert_eq!(payload.effect, "banner");
         assert!(payload.until_handled);
+        assert_eq!(payload.intensity, INTENSITY_DEFAULT);
         assert_eq!(payload.reminder_type, "RECURRING");
         assert_eq!(payload.description, "提醒 a");
         assert_eq!(
@@ -533,12 +554,14 @@ mod tests {
         let payload = AttentionPayload::preview(&EffectOptions {
             effect: "edge".to_string(),
             until_handled: false,
+            intensity: 5,
             theme: "app".to_string(),
         });
         let script = bootstrap_script(&payload).unwrap();
         assert!(script.starts_with("window.__ATTENTION__ = {"));
         assert!(script.contains("\"effect\":\"edge\""));
         assert!(script.contains("\"untilHandled\":false"));
+        assert!(script.contains("\"intensity\":5"));
         assert!(script.contains("\"popupDirection\":\"here\""));
         assert_eq!(window_label(3, 1), "attention-3-1");
     }

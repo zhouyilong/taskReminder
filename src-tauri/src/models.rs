@@ -250,6 +250,9 @@ pub struct AppSettings {
     /// 全屏注意效果持续到提醒处理完；否则约 6 秒后淡出。
     #[serde(default)]
     pub attention_until_handled: bool,
+    /// 全屏效果的光晕强度（`attention::INTENSITY_*`），越强越向屏幕中间延伸。
+    #[serde(default = "default_attention_intensity")]
+    pub attention_intensity: i64,
     /// 提醒未处理时每隔几分钟再次提醒（`ATTENTION_REPEAT_OPTIONS`），0 为不重复。
     #[serde(default)]
     pub attention_repeat_minutes: i64,
@@ -300,6 +303,7 @@ pub struct NotificationPrefs {
     pub notification_theme: String,
     pub attention_effect: String,
     pub attention_until_handled: bool,
+    pub attention_intensity: i64,
     pub attention_repeat_minutes: i64,
     pub notification_screen: String,
 }
@@ -314,6 +318,7 @@ impl From<&AppSettings> for NotificationPrefs {
             notification_theme: settings.notification_theme.clone(),
             attention_effect: settings.attention_effect.clone(),
             attention_until_handled: settings.attention_until_handled,
+            attention_intensity: settings.attention_intensity,
             attention_repeat_minutes: settings.attention_repeat_minutes,
             notification_screen: settings.notification_screen.clone(),
         }
@@ -333,9 +338,14 @@ impl NotificationPrefs {
         crate::attention::EffectOptions {
             effect: self.attention_effect.clone(),
             until_handled: self.attention_until_handled,
+            intensity: self.attention_intensity,
             theme: self.notification_theme.clone(),
         }
     }
+}
+
+fn default_attention_intensity() -> i64 {
+    crate::attention::INTENSITY_DEFAULT
 }
 
 fn default_attention_effect() -> String {

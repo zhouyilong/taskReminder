@@ -181,8 +181,14 @@ pub fn snooze_notification(
 pub struct AttentionPreviewPayload {
     effect: String,
     until_handled: bool,
+    #[serde(default = "default_intensity")]
+    intensity: i64,
     screen: String,
     theme: String,
+}
+
+fn default_intensity() -> i64 {
+    attention::INTENSITY_DEFAULT
 }
 
 /// 设置中的“预览”：按草稿在每块屏幕上播放一次全屏效果（不弹提醒、不写记录）。
@@ -197,6 +203,7 @@ pub async fn preview_attention(
     let options = EffectOptions {
         effect: payload.effect,
         until_handled: payload.until_handled,
+        intensity: payload.intensity,
         theme: payload.theme,
     };
     let popup = attention::target_screen(&app, &payload.screen);

@@ -167,6 +167,21 @@
       <div class="form-row compact">
         <span class="field-hint" :class="{ 'is-error': !!attentionPreviewError }">{{ attentionHint }}</span>
       </div>
+      <div class="form-row compact" title="越强光晕越宽、越向屏幕中间延伸，可点“预览”查看">
+        <label for="attention-intensity">光晕强度</label>
+        <input
+          id="attention-intensity"
+          class="settings-range"
+          type="range"
+          :min="ATTENTION_INTENSITY_MIN"
+          :max="ATTENTION_INTENSITY_MAX"
+          step="1"
+          v-model.number="settingsDraft.attentionIntensity"
+          :disabled="settingsDraft.attentionEffect === 'off'"
+          style="flex: 1"
+        />
+        <span class="tag">{{ attentionIntensityLabel(settingsDraft.attentionIntensity) }}</span>
+      </div>
       <div class="form-row compact">
         <label>未处理时再次提醒</label>
         <select class="select" v-model.number="settingsDraft.attentionRepeatMinutes" aria-label="未处理时再次提醒">
@@ -295,9 +310,12 @@ import { SHORTCUT_HELP } from "../keyboard";
 import { COMPLETED_RETENTION_OPTIONS, completedRetentionHint } from "../retention";
 import {
   ATTENTION_EFFECT_OPTIONS,
+  ATTENTION_INTENSITY_MAX,
+  ATTENTION_INTENSITY_MIN,
   ATTENTION_REPEAT_OPTIONS,
   NOTIFICATION_SCREEN_OPTIONS,
   attentionEffectHint,
+  attentionIntensityLabel,
   attentionRepeatHint
 } from "../attentionEffect";
 
@@ -393,6 +411,7 @@ const handlePreviewAttention = async () => {
     await api.previewAttention({
       effect: settingsDraft.attentionEffect,
       untilHandled: settingsDraft.attentionUntilHandled,
+      intensity: settingsDraft.attentionIntensity,
       screen: settingsDraft.notificationScreen,
       theme: settingsDraft.notificationTheme
     });

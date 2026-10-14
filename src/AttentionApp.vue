@@ -1,6 +1,6 @@
 <template>
   <div v-if="payload" class="attention-stage" :class="stageClasses">
-    <div class="attention-edge" aria-hidden="true"></div>
+    <div class="attention-edge" :style="edgeStyle" aria-hidden="true"></div>
     <div v-if="payload.effect === 'banner'" class="attention-banner-anchor">
       <div class="attention-banner" role="status" aria-live="assertive">
         <span class="attention-bell" aria-hidden="true">
@@ -25,6 +25,7 @@ import { listen } from "@tauri-apps/api/event";
 import {
   ATTENTION_DURATION_MS,
   ATTENTION_FADE_MS,
+  attentionEdgeVars,
   attentionEyebrow,
   attentionTitle,
   missedLabel,
@@ -53,6 +54,7 @@ const missed = computed(() => {
 const eyebrow = computed(() => (payload.value ? attentionEyebrow(payload.value, shownAt) : ""));
 const title = computed(() => attentionTitle(payload.value?.description));
 const hint = computed(() => (payload.value ? popupHint(payload.value.popupDirection, payload.value.count) : ""));
+const edgeStyle = computed(() => attentionEdgeVars(payload.value?.intensity ?? 0));
 const stageClasses = computed(() => [`is-${phase.value}`, { "is-missed": missed.value }]);
 
 const applyTheme = () => {
@@ -118,14 +120,16 @@ onBeforeUnmount(() => {
   --attention-current-glow-soft: var(--attention-missed-glow-soft);
 }
 
-/* 屏幕四边的光晕：先快速闪 3 次，之后淡出或缓慢呼吸。 */
+/* 屏幕四边的光晕：先快速闪 3 次，之后淡出或缓慢呼吸。尺寸随光晕强度变化（`attentionEdgeVars`），
+   缺省为“标准”档；较强档位多一层深层柔光，向屏幕中间延伸。 */
 .attention-edge {
   position: absolute;
   inset: 0;
   box-shadow:
-    inset 0 0 0 3px var(--attention-current-ring),
-    inset 0 0 48px 12px var(--attention-current-glow),
-    inset 0 0 180px 56px var(--attention-current-glow-soft);
+    inset 0 0 0 var(--attention-ring-width, 3px) var(--attention-current-ring),
+    inset 0 0 var(--attention-glow-blur, 48px) var(--attention-glow-spread, 12px) var(--attention-current-glow),
+    inset 0 0 var(--attention-soft-blur, 180px) var(--attention-soft-spread, 56px) var(--attention-current-glow-soft),
+    inset 0 0 var(--attention-deep-blur, 0) var(--attention-deep-spread, 0) var(--attention-current-glow-soft);
   opacity: 0.25;
   will-change: opacity;
   animation: attention-flash 0.9s ease-in-out 6 alternate both;

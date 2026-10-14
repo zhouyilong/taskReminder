@@ -152,6 +152,8 @@ export interface AppSettings {
   attentionEffect: AttentionEffect;
   /** 全屏效果持续到提醒处理完；否则约 6 秒后淡出。 */
   attentionUntilHandled: boolean;
+  /** 光晕强度：1 柔和 / 2 标准（默认）/ 3 较强 / 4 强烈 / 5 最强，越强越向屏幕中间延伸。 */
+  attentionIntensity: number;
   /** 提醒未处理时每隔几分钟再次提醒：0（不重复）/ 2 / 5 / 10。 */
   attentionRepeatMinutes: number;
   /** 提醒弹窗出现的屏幕：鼠标所在屏幕 / 主屏幕。 */
