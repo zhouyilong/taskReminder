@@ -1,5 +1,5 @@
 <template>
-  <div v-if="payload" class="attention-stage" :class="stageClasses">
+  <div v-if="payload" class="attention-stage" :class="stageClasses" :style="colorStyle">
     <div class="attention-edge" :style="edgeStyle" aria-hidden="true"></div>
     <div v-if="payload.effect === 'banner'" class="attention-banner-anchor">
       <div class="attention-banner" role="status" aria-live="assertive">
@@ -25,6 +25,7 @@ import { listen } from "@tauri-apps/api/event";
 import {
   ATTENTION_DURATION_MS,
   ATTENTION_FADE_MS,
+  attentionColorVars,
   attentionEdgeVars,
   attentionEyebrow,
   attentionTitle,
@@ -54,13 +55,15 @@ const missed = computed(() => {
 const eyebrow = computed(() => (payload.value ? attentionEyebrow(payload.value, shownAt) : ""));
 const title = computed(() => attentionTitle(payload.value?.description));
 const hint = computed(() => (payload.value ? popupHint(payload.value.popupDirection, payload.value.count) : ""));
+const theme = ref<"light" | "dark">("dark");
+const colorStyle = computed(() => attentionColorVars(payload.value?.color ?? "", theme.value));
 const edgeStyle = computed(() => attentionEdgeVars(payload.value?.intensity ?? 0));
 const stageClasses = computed(() => [`is-${phase.value}`, { "is-missed": missed.value }]);
 
 const applyTheme = () => {
   const systemLight = window.matchMedia?.("(prefers-color-scheme: light)").matches ?? false;
-  const theme = resolveAttentionTheme(payload.value?.theme, safeStorage.getItem("appTheme"), systemLight);
-  document.documentElement.classList.toggle("light-theme", theme === "light");
+  theme.value = resolveAttentionTheme(payload.value?.theme, safeStorage.getItem("appTheme"), systemLight);
+  document.documentElement.classList.toggle("light-theme", theme.value === "light");
 };
 
 const later = (ms: number, action: () => void) => {

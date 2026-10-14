@@ -253,6 +253,9 @@ pub struct AppSettings {
     /// 全屏效果的光晕强度（`attention::INTENSITY_*`），越强越向屏幕中间延伸。
     #[serde(default = "default_attention_intensity")]
     pub attention_intensity: i64,
+    /// 全屏效果的光晕颜色（`#rrggbb`），空字符串为默认颜色；错过的提醒仍用警示色。
+    #[serde(default)]
+    pub attention_color: String,
     /// 提醒未处理时每隔几分钟再次提醒（`ATTENTION_REPEAT_OPTIONS`），0 为不重复。
     #[serde(default)]
     pub attention_repeat_minutes: i64,
@@ -304,6 +307,7 @@ pub struct NotificationPrefs {
     pub attention_effect: String,
     pub attention_until_handled: bool,
     pub attention_intensity: i64,
+    pub attention_color: String,
     pub attention_repeat_minutes: i64,
     pub notification_screen: String,
 }
@@ -319,6 +323,7 @@ impl From<&AppSettings> for NotificationPrefs {
             attention_effect: settings.attention_effect.clone(),
             attention_until_handled: settings.attention_until_handled,
             attention_intensity: settings.attention_intensity,
+            attention_color: settings.attention_color.clone(),
             attention_repeat_minutes: settings.attention_repeat_minutes,
             notification_screen: settings.notification_screen.clone(),
         }
@@ -339,6 +344,7 @@ impl NotificationPrefs {
             effect: self.attention_effect.clone(),
             until_handled: self.attention_until_handled,
             intensity: self.attention_intensity,
+            color: self.attention_color.clone(),
             theme: self.notification_theme.clone(),
         }
     }

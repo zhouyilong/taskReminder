@@ -183,6 +183,8 @@ pub struct AttentionPreviewPayload {
     until_handled: bool,
     #[serde(default = "default_intensity")]
     intensity: i64,
+    #[serde(default)]
+    color: String,
     screen: String,
     theme: String,
 }
@@ -204,6 +206,7 @@ pub async fn preview_attention(
         effect: payload.effect,
         until_handled: payload.until_handled,
         intensity: payload.intensity,
+        color: payload.color,
         theme: payload.theme,
     };
     let popup = attention::target_screen(&app, &payload.screen);

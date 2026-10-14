@@ -298,6 +298,7 @@ export const api = {
     effect: AttentionEffect;
     untilHandled: boolean;
     intensity: number;
+    color: string;
     screen: NotificationScreen;
     theme: string;
   }): Promise<void> {

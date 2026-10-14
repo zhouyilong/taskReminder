@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  ATTENTION_COLOR_PRESETS,
   ATTENTION_INTENSITY_OPTIONS,
+  attentionColorLabel,
+  attentionColorVars,
   attentionEdgeVars,
   attentionEffectHint,
   attentionEyebrow,
@@ -9,6 +12,7 @@ import {
   attentionTitle,
   formatScheduledClock,
   missedLabel,
+  normalizeAttentionColor,
   normalizeAttentionIntensity,
   normalizeAttentionPayload,
   popupHint,
@@ -85,6 +89,7 @@ describe("normalizeAttentionPayload", () => {
       effect: "banner",
       untilHandled: false,
       intensity: 2,
+      color: "",
       reminderType: "TASK",
       description: "",
       scheduledTime: null,
@@ -98,6 +103,7 @@ describe("normalizeAttentionPayload", () => {
       effect: "edge",
       untilHandled: true,
       intensity: 5,
+      color: "#FF3B30",
       reminderType: "RECURRING",
       description: "喝水",
       scheduledTime: "2026-10-13T10:00:00",
@@ -110,6 +116,7 @@ describe("normalizeAttentionPayload", () => {
     expect(payload?.effect).toBe("edge");
     expect(payload?.untilHandled).toBe(true);
     expect(payload?.intensity).toBe(5);
+    expect(payload?.color).toBe("#ff3b30");
     expect(payload?.count).toBe(2);
     expect(payload?.popupDirection).toBe("left");
   });
@@ -153,5 +160,39 @@ describe("attention intensity", () => {
       expect(higher[0]).toBeGreaterThan(lower[0]);
     }
     expect(parseFloat(attentionEdgeVars(5)["--attention-deep-spread"])).toBeGreaterThan(0);
+  });
+});
+
+describe("attention color", () => {
+  it("accepts #rrggbb only, like the backend", () => {
+    expect(normalizeAttentionColor(" #1A2b3C ")).toBe("#1a2b3c");
+    expect(normalizeAttentionColor("")).toBe("");
+    expect(normalizeAttentionColor("red")).toBe("");
+    expect(normalizeAttentionColor("#12345")).toBe("");
+    expect(normalizeAttentionColor("#ffffff;x")).toBe("");
+    expect(normalizeAttentionColor(null)).toBe("");
+    expect(ATTENTION_COLOR_PRESETS.every(item => item.value === normalizeAttentionColor(item.value))).toBe(true);
+  });
+
+  it("names presets and custom colors", () => {
+    expect(attentionColorLabel("")).toBe("默认蓝");
+    expect(attentionColorLabel("#FF3B30")).toBe("红色");
+    expect(attentionColorLabel("#123abc")).toBe("自定义 #123ABC");
+    expect(attentionColorLabel("bad")).toBe("默认蓝");
+  });
+
+  it("keeps the theme tokens for the default color", () => {
+    expect(attentionColorVars("", "dark")).toEqual({});
+    expect(attentionColorVars("bad", "light")).toEqual({});
+  });
+
+  it("overrides the glow tokens with the chosen color per theme", () => {
+    expect(attentionColorVars("#ff3b30", "dark")).toEqual({
+      "--attention-ring": "rgba(255, 59, 48, 0.92)",
+      "--attention-glow": "rgba(255, 59, 48, 0.6)",
+      "--attention-glow-soft": "rgba(255, 59, 48, 0.24)",
+      "--attention-banner-border": "rgba(255, 59, 48, 0.38)"
+    });
+    expect(attentionColorVars("#30D158", "light")["--attention-glow"]).toBe("rgba(48, 209, 88, 0.5)");
   });
 });
