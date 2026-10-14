@@ -155,6 +155,7 @@
       attentionEffect: "banner",
       attentionUntilHandled: false,
       attentionIntensity: 2,
+      attentionColor: "",
       attentionRepeatMinutes: 0,
       notificationScreen: "cursor",
       secretStorage: "db",

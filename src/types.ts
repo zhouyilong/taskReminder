@@ -154,6 +154,8 @@ export interface AppSettings {
   attentionUntilHandled: boolean;
   /** 光晕强度：1 柔和 / 2 标准（默认）/ 3 较强 / 4 强烈 / 5 最强，越强越向屏幕中间延伸。 */
   attentionIntensity: number;
+  /** 光晕颜色 `#rrggbb`，空字符串为默认（跟随主题的蓝色）；错过的提醒仍用警示色。 */
+  attentionColor: string;
   /** 提醒未处理时每隔几分钟再次提醒：0（不重复）/ 2 / 5 / 10。 */
   attentionRepeatMinutes: number;
   /** 提醒弹窗出现的屏幕：鼠标所在屏幕 / 主屏幕。 */

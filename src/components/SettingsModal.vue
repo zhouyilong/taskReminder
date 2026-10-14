@@ -182,6 +182,36 @@
         />
         <span class="tag">{{ attentionIntensityLabel(settingsDraft.attentionIntensity) }}</span>
       </div>
+      <div class="form-row compact" title="错过的提醒仍用橙色标出">
+        <label id="attention-color-label">光晕颜色</label>
+        <div class="attention-swatches" role="radiogroup" aria-labelledby="attention-color-label">
+          <button
+            v-for="item in ATTENTION_COLOR_PRESETS"
+            :key="item.value || 'default'"
+            type="button"
+            role="radio"
+            class="attention-swatch"
+            :class="{ active: attentionColor === item.value, 'is-default': !item.value }"
+            :style="item.value ? { background: item.value } : undefined"
+            :aria-checked="attentionColor === item.value"
+            :aria-label="item.label"
+            :title="item.label"
+            :disabled="settingsDraft.attentionEffect === 'off'"
+            @click="settingsDraft.attentionColor = item.value"
+          ></button>
+          <input
+            type="color"
+            class="attention-swatch is-custom"
+            :class="{ active: attentionColorCustom }"
+            :value="attentionColorPickerValue"
+            aria-label="自选光晕颜色"
+            title="自选颜色"
+            :disabled="settingsDraft.attentionEffect === 'off'"
+            @input="settingsDraft.attentionColor = normalizeAttentionColor(($event.target as HTMLInputElement).value)"
+          />
+        </div>
+        <span class="tag">{{ attentionColorLabel(settingsDraft.attentionColor) }}</span>
+      </div>
       <div class="form-row compact">
         <label>未处理时再次提醒</label>
         <select class="select" v-model.number="settingsDraft.attentionRepeatMinutes" aria-label="未处理时再次提醒">
@@ -309,14 +339,17 @@ import { playChime } from "../notificationSound";
 import { SHORTCUT_HELP } from "../keyboard";
 import { COMPLETED_RETENTION_OPTIONS, completedRetentionHint } from "../retention";
 import {
+  ATTENTION_COLOR_PRESETS,
   ATTENTION_EFFECT_OPTIONS,
   ATTENTION_INTENSITY_MAX,
   ATTENTION_INTENSITY_MIN,
   ATTENTION_REPEAT_OPTIONS,
   NOTIFICATION_SCREEN_OPTIONS,
+  attentionColorLabel,
   attentionEffectHint,
   attentionIntensityLabel,
-  attentionRepeatHint
+  attentionRepeatHint,
+  normalizeAttentionColor
 } from "../attentionEffect";
 
 const props = defineProps<{ appVersion: string }>();
@@ -404,6 +437,12 @@ const attentionHint = computed(() => {
   const hint = attentionEffectHint(settingsDraft.attentionEffect, settingsDraft.attentionUntilHandled);
   return isWindows || settingsDraft.attentionEffect === "off" ? hint : `${hint}（目前只支持 Windows）`;
 });
+const attentionColor = computed(() => normalizeAttentionColor(settingsDraft.attentionColor));
+const attentionColorCustom = computed(
+  () => !ATTENTION_COLOR_PRESETS.some(item => item.value === attentionColor.value)
+);
+// 取色器显示当前自选颜色；尚未自选时从默认蓝开始。
+const attentionColorPickerValue = computed(() => (attentionColorCustom.value ? attentionColor.value : "#4f7cff"));
 const handlePreviewAttention = async () => {
   attentionPreviewing.value = true;
   attentionPreviewError.value = "";
@@ -412,6 +451,7 @@ const handlePreviewAttention = async () => {
       effect: settingsDraft.attentionEffect,
       untilHandled: settingsDraft.attentionUntilHandled,
       intensity: settingsDraft.attentionIntensity,
+      color: settingsDraft.attentionColor,
       screen: settingsDraft.notificationScreen,
       theme: settingsDraft.notificationTheme
     });
@@ -465,6 +505,69 @@ const saveSettings = async () => {
 </script>
 
 <style scoped>
+.attention-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.attention-swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid var(--bg-surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--border-strong);
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.attention-swatch.is-default {
+  background: var(--attention-glow);
+}
+
+.attention-swatch:hover:not(:disabled) {
+  transform: scale(1.1);
+}
+
+.attention-swatch.active {
+  box-shadow: 0 0 0 2px var(--primary);
+}
+
+.attention-swatch:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.attention-swatch:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 自选颜色：原生取色器，去掉内边距与边框，显示成与预设一致的圆点；未自选时为虚线圈。 */
+.attention-swatch.is-custom {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  overflow: hidden;
+}
+
+.attention-swatch.is-custom:not(.active) {
+  border-style: dashed;
+  border-color: var(--text-faint);
+  box-shadow: none;
+}
+
+.attention-swatch.is-custom::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.attention-swatch.is-custom::-webkit-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
 .shortcut-help-row {
   align-items: flex-start;
 }

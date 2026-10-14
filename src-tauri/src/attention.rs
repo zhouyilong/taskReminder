@@ -43,6 +43,20 @@ pub fn normalize_intensity(value: i64) -> i64 {
     }
 }
 
+/// 光晕颜色：`#rrggbb`（统一为小写），其余值（含空字符串）为默认颜色，返回空字符串。
+/// 与前端 `normalizeAttentionColor` 一致。
+pub fn normalize_color(value: &str) -> String {
+    let value = value.trim();
+    let valid = value.len() == 7
+        && value.starts_with('#')
+        && value[1..].chars().all(|c| c.is_ascii_hexdigit());
+    if valid {
+        value.to_ascii_lowercase()
+    } else {
+        String::new()
+    }
+}
+
 /// 不认识的效果按默认（光晕 + 横幅）处理。
 pub fn normalize_effect(value: &str) -> String {
     match value.trim() {
@@ -190,6 +204,8 @@ pub struct AttentionPayload {
     pub until_handled: bool,
     /// 光晕强度（`INTENSITY_MIN..=INTENSITY_MAX`）。
     pub intensity: i64,
+    /// 光晕颜色（`#rrggbb`），空字符串为默认颜色。
+    pub color: String,
     pub reminder_type: String,
     pub description: String,
     pub scheduled_time: Option<String>,
@@ -209,6 +225,7 @@ pub struct EffectOptions {
     pub effect: String,
     pub until_handled: bool,
     pub intensity: i64,
+    pub color: String,
     pub theme: String,
 }
 
@@ -223,6 +240,7 @@ impl AttentionPayload {
             effect: normalize_effect(&options.effect),
             until_handled: options.until_handled,
             intensity: normalize_intensity(options.intensity),
+            color: normalize_color(&options.color),
             reminder_type: head.reminder_type.as_str().to_string(),
             description: head.description.clone(),
             scheduled_time: head.scheduled_time.clone(),
@@ -239,6 +257,7 @@ impl AttentionPayload {
             effect: normalize_effect(&options.effect),
             until_handled: options.until_handled,
             intensity: normalize_intensity(options.intensity),
+            color: normalize_color(&options.color),
             reminder_type: "TASK".to_string(),
             description: "这是全屏提醒效果的预览".to_string(),
             scheduled_time: None,
@@ -524,6 +543,7 @@ mod tests {
             effect: "unknown".to_string(),
             until_handled: true,
             intensity: 9,
+            color: "red".to_string(),
             theme: "dark".to_string(),
         };
         assert!(AttentionPayload::for_queue(&[], &options, false).is_none());
@@ -535,6 +555,7 @@ mod tests {
         assert_eq!(payload.effect, "banner");
         assert!(payload.until_handled);
         assert_eq!(payload.intensity, INTENSITY_DEFAULT);
+        assert_eq!(payload.color, "");
         assert_eq!(payload.reminder_type, "RECURRING");
         assert_eq!(payload.description, "提醒 a");
         assert_eq!(
@@ -555,6 +576,7 @@ mod tests {
             effect: "edge".to_string(),
             until_handled: false,
             intensity: 5,
+            color: " #FF3B30 ".to_string(),
             theme: "app".to_string(),
         });
         let script = bootstrap_script(&payload).unwrap();
@@ -562,7 +584,19 @@ mod tests {
         assert!(script.contains("\"effect\":\"edge\""));
         assert!(script.contains("\"untilHandled\":false"));
         assert!(script.contains("\"intensity\":5"));
+        assert!(script.contains("\"color\":\"#ff3b30\""));
         assert!(script.contains("\"popupDirection\":\"here\""));
         assert_eq!(window_label(3, 1), "attention-3-1");
+    }
+
+    #[test]
+    fn color_accepts_hex_only() {
+        assert_eq!(normalize_color("#1A2b3C"), "#1a2b3c");
+        assert_eq!(normalize_color(""), "");
+        assert_eq!(normalize_color("red"), "");
+        assert_eq!(normalize_color("#12345"), "");
+        assert_eq!(normalize_color("#12345g"), "");
+        assert_eq!(normalize_color("#ffffff;x"), "");
+        assert_eq!(normalize_color("#ééé"), "");
     }
 }

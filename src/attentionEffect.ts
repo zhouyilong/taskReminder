@@ -17,6 +17,8 @@ export interface AttentionPayload {
   untilHandled: boolean;
   /** 光晕强度（`ATTENTION_INTENSITY_MIN`…`ATTENTION_INTENSITY_MAX`）。 */
   intensity: number;
+  /** 光晕颜色 `#rrggbb`，空字符串为默认颜色。 */
+  color: string;
   reminderType: string;
   description: string;
   scheduledTime?: string | null;
@@ -86,6 +88,52 @@ export const attentionEdgeVars = (intensity: number): Record<string, string> => 
     "--attention-soft-spread": `${level.soft[1]}px`,
     "--attention-deep-blur": `${level.deep[0]}vmin`,
     "--attention-deep-spread": `${level.deep[1]}vmin`
+  };
+};
+
+/**
+ * 光晕颜色的预设（空字符串为默认：跟随主题的蓝色，即 `--attention-*` 令牌）。
+ * 颜色是用户可选的数据而不是界面样式，因此直接写色值；也可以在设置中自选任意颜色。
+ */
+export const ATTENTION_COLOR_PRESETS: Array<{ value: string; label: string }> = [
+  { value: "", label: "默认蓝" },
+  { value: "#ff3b30", label: "红色" },
+  { value: "#ff9500", label: "橙色" },
+  { value: "#ffd60a", label: "黄色" },
+  { value: "#30d158", label: "绿色" },
+  { value: "#40c8e0", label: "青色" },
+  { value: "#bf5af2", label: "紫色" },
+  { value: "#ff375f", label: "粉色" }
+];
+
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+/** `#rrggbb`（统一为小写），其余值为默认颜色（空字符串），与后端 `attention::normalize_color` 一致。 */
+export const normalizeAttentionColor = (value: unknown): string => {
+  const text = typeof value === "string" ? value.trim() : "";
+  return HEX_COLOR.test(text) ? text.toLowerCase() : "";
+};
+
+export const attentionColorLabel = (value: string): string => {
+  const color = normalizeAttentionColor(value);
+  return ATTENTION_COLOR_PRESETS.find(item => item.value === color)?.label ?? `自定义 ${color.toUpperCase()}`;
+};
+
+/**
+ * 自选颜色时覆盖光晕令牌（描边、近处光晕、柔光）与横幅边框，透明度与默认令牌一致（深色、浅色主题各一套）。
+ * 默认颜色返回空对象，沿用样式表中的令牌；错过的提醒仍用警示色（`.is-missed` 覆盖）。
+ */
+export const attentionColorVars = (color: string, theme: "light" | "dark"): Record<string, string> => {
+  const hex = normalizeAttentionColor(color);
+  if (!hex) return {};
+  const [r, g, b] = [1, 3, 5].map(start => parseInt(hex.slice(start, start + 2), 16));
+  const rgba = (alpha: number) => `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  const [glow, soft, border] = theme === "light" ? [0.5, 0.2, 0.3] : [0.6, 0.24, 0.38];
+  return {
+    "--attention-ring": rgba(0.92),
+    "--attention-glow": rgba(glow),
+    "--attention-glow-soft": rgba(soft),
+    "--attention-banner-border": rgba(border)
   };
 };
 
@@ -198,6 +246,7 @@ export const normalizeAttentionPayload = (raw: unknown): AttentionPayload | null
     effect,
     untilHandled: value.untilHandled === true,
     intensity: normalizeAttentionIntensity(value.intensity),
+    color: normalizeAttentionColor(value.color),
     reminderType: typeof value.reminderType === "string" ? value.reminderType : "TASK",
     description: typeof value.description === "string" ? value.description : "",
     scheduledTime: typeof value.scheduledTime === "string" ? value.scheduledTime : null,

@@ -62,7 +62,8 @@ impl DbManager {
             .query_row(
                 "SELECT sound_enabled, quiet_hours_enabled, quiet_hours_start, quiet_hours_end,
                         notification_theme, attention_effect, attention_until_handled,
-                        attention_repeat_minutes, notification_screen, attention_intensity
+                        attention_repeat_minutes, notification_screen, attention_intensity,
+                        attention_color
                  FROM settings WHERE id = 1",
                 [],
                 |row| {
@@ -94,6 +95,9 @@ impl DbManager {
                             row.get::<_, Option<i64>>(9)?
                                 .unwrap_or(attention::INTENSITY_DEFAULT),
                         ),
+                        attention_color: attention::normalize_color(
+                            &row.get::<_, Option<String>>(10)?.unwrap_or_default(),
+                        ),
                     })
                 },
             )
@@ -114,7 +118,7 @@ impl DbManager {
                    native_notification_enabled, sticky_toggle_shortcut, secret_storage,
                    sticky_snap_enabled, holiday_auto_update, completed_retention_days,
                    attention_effect, attention_until_handled, attention_repeat_minutes,
-                   notification_screen, attention_intensity
+                   notification_screen, attention_intensity, attention_color
                    FROM settings WHERE id = 1";
         let mut stmt = conn.prepare(sql)?;
         let row = stmt.query_row([], |row| {
@@ -203,6 +207,9 @@ impl DbManager {
                     row.get::<_, Option<i64>>(40)?
                         .unwrap_or(attention::INTENSITY_DEFAULT),
                 ),
+                attention_color: attention::normalize_color(
+                    &row.get::<_, Option<String>>(41)?.unwrap_or_default(),
+                ),
             })
         })?;
         let mut settings = row;
@@ -234,7 +241,7 @@ impl DbManager {
                  native_notification_enabled = ?, sticky_toggle_shortcut = ?, secret_storage = ?,
                  sticky_snap_enabled = ?, holiday_auto_update = ?, completed_retention_days = ?,
                  attention_effect = ?, attention_until_handled = ?, attention_repeat_minutes = ?,
-                 notification_screen = ?, attention_intensity = ?
+                 notification_screen = ?, attention_intensity = ?, attention_color = ?
              WHERE id = 1",
             params![
                 if settings.auto_start_enabled { 1 } else { 0 },
@@ -278,6 +285,7 @@ impl DbManager {
                 normalize_attention_repeat_minutes(settings.attention_repeat_minutes),
                 attention::normalize_screen(&settings.notification_screen),
                 attention::normalize_intensity(settings.attention_intensity),
+                attention::normalize_color(&settings.attention_color),
             ],
         )?;
         Ok(())
