@@ -154,6 +154,7 @@
       completedRetentionDays: 30,
       attentionEffect: "banner",
       attentionUntilHandled: false,
+      attentionIntensity: 2,
       attentionRepeatMinutes: 0,
       notificationScreen: "cursor",
       secretStorage: "db",

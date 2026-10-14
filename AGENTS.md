@@ -217,7 +217,8 @@
 - 队列清空时 `publish_queue` 调用 `attention::dismiss` 关闭全部效果窗口；队列变化时向效果窗口推送 `attention-queue`。
 - **规则**：效果窗口只在 Windows 上创建（`attention::supported`，Linux 透明窗口不重绘）；创建窗口一律放在后台线程（`attention::play` 内部已处理），不要在同步命令或菜单事件所在的主线程中直接创建窗口（Windows 上会死锁），托盘“查看待处理提醒”同理。
 - 弹窗与效果窗口的定位用物理像素：`attention::popup_position` 按目标屏幕的缩放换算，先移到目标屏幕再设逻辑尺寸、再对齐一次。不要再用屏幕的物理尺寸设置逻辑坐标（旧实现在缩放不是 100% 时偏出屏幕）。
-- 这些都是本机设置（`settings` 表，迁移 `V2.2.1`）；巡检读取用 `DbManager::notification_prefs`（不访问凭据库）。前端效果时长 `ATTENTION_DURATION_MS` 与后端 `EFFECT_DURATION_MS` 保持一致。
+- 光晕强度 `attention_intensity`（1–5，默认 2 = 标准，迁移 `V2.2.2`）随效果内容注入；各档尺寸只在 `src/attentionEffect.ts` 的 `attentionEdgeVars` 中定义（CSS 变量，`AttentionApp.vue` 的缺省值即“标准”档），超出范围前后端都按标准处理（`attention::normalize_intensity` / `normalizeAttentionIntensity`）。
+- 这些都是本机设置（`settings` 表，迁移 `V2.2.1`、`V2.2.2`）；巡检读取用 `DbManager::notification_prefs`（不访问凭据库）。前端效果时长 `ATTENTION_DURATION_MS` 与后端 `EFFECT_DURATION_MS` 保持一致。
 
 ### onMounted 中异步操作的异常隔离
 - **问题**：多个异步操作放在同一个 `try` 块中，前面的操作抛异常会导致后面的操作被跳过（如自动更新检查被数据初始化异常阻断）。

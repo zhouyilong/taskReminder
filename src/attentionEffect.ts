@@ -15,6 +15,8 @@ export type PopupDirection = "here" | "left" | "right" | "up" | "down";
 export interface AttentionPayload {
   effect: AttentionEffect;
   untilHandled: boolean;
+  /** 光晕强度（`ATTENTION_INTENSITY_MIN`…`ATTENTION_INTENSITY_MAX`）。 */
+  intensity: number;
   reminderType: string;
   description: string;
   scheduledTime?: string | null;
@@ -37,6 +39,55 @@ export const ATTENTION_EFFECT_OPTIONS: Array<{ value: AttentionEffect; label: st
   { value: "edge", label: "边缘光晕" },
   { value: "banner", label: "光晕 + 顶部横幅" }
 ];
+
+/** 光晕强度，与后端 `attention::INTENSITY_*` 一致；2（标准）即 2.2.1 的效果。 */
+export const ATTENTION_INTENSITY_MIN = 1;
+export const ATTENTION_INTENSITY_MAX = 5;
+export const ATTENTION_INTENSITY_DEFAULT = 2;
+
+export const ATTENTION_INTENSITY_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 1, label: "柔和" },
+  { value: 2, label: "标准" },
+  { value: 3, label: "较强" },
+  { value: 4, label: "强烈" },
+  { value: 5, label: "最强" }
+];
+
+/** 超出范围或不是整数的强度按默认（标准）处理。 */
+export const normalizeAttentionIntensity = (value: unknown): number =>
+  typeof value === "number" &&
+  Number.isInteger(value) &&
+  value >= ATTENTION_INTENSITY_MIN &&
+  value <= ATTENTION_INTENSITY_MAX
+    ? value
+    : ATTENTION_INTENSITY_DEFAULT;
+
+export const attentionIntensityLabel = (value: number): string =>
+  ATTENTION_INTENSITY_OPTIONS.find(item => item.value === normalizeAttentionIntensity(value))?.label ?? "标准";
+
+// 每档光晕的尺寸：描边、近处光晕、柔光，以及较强档位额外的一层向屏幕中间延伸的深层柔光
+// （按屏幕短边 vmin 计算，大屏小屏都能延伸到相近的比例）。
+const EDGE_LEVELS: Record<number, { ring: number; glow: [number, number]; soft: [number, number]; deep: [number, number] }> = {
+  1: { ring: 2, glow: [36, 8], soft: [120, 36], deep: [0, 0] },
+  2: { ring: 3, glow: [48, 12], soft: [180, 56], deep: [0, 0] },
+  3: { ring: 4, glow: [64, 18], soft: [240, 80], deep: [24, 4] },
+  4: { ring: 5, glow: [84, 26], soft: [320, 110], deep: [34, 8] },
+  5: { ring: 6, glow: [110, 36], soft: [420, 150], deep: [46, 12] }
+};
+
+/** 边缘光晕的 CSS 变量（`AttentionApp.vue` 的 `.attention-edge` 使用）。 */
+export const attentionEdgeVars = (intensity: number): Record<string, string> => {
+  const level = EDGE_LEVELS[normalizeAttentionIntensity(intensity)];
+  return {
+    "--attention-ring-width": `${level.ring}px`,
+    "--attention-glow-blur": `${level.glow[0]}px`,
+    "--attention-glow-spread": `${level.glow[1]}px`,
+    "--attention-soft-blur": `${level.soft[0]}px`,
+    "--attention-soft-spread": `${level.soft[1]}px`,
+    "--attention-deep-blur": `${level.deep[0]}vmin`,
+    "--attention-deep-spread": `${level.deep[1]}vmin`
+  };
+};
 
 export const ATTENTION_REPEAT_OPTIONS: Array<{ value: number; label: string }> = [
   { value: 0, label: "不重复" },
@@ -146,6 +197,7 @@ export const normalizeAttentionPayload = (raw: unknown): AttentionPayload | null
   return {
     effect,
     untilHandled: value.untilHandled === true,
+    intensity: normalizeAttentionIntensity(value.intensity),
     reminderType: typeof value.reminderType === "string" ? value.reminderType : "TASK",
     description: typeof value.description === "string" ? value.description : "",
     scheduledTime: typeof value.scheduledTime === "string" ? value.scheduledTime : null,

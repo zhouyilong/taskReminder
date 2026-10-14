@@ -297,6 +297,7 @@ export const api = {
   async previewAttention(payload: {
     effect: AttentionEffect;
     untilHandled: boolean;
+    intensity: number;
     screen: NotificationScreen;
     theme: string;
   }): Promise<void> {

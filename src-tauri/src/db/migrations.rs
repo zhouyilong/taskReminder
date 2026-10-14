@@ -192,6 +192,11 @@ pub(super) fn migration_scripts() -> Vec<MigrationScript> {
             description: "add attention effect settings".to_string(),
             sql: include_str!("../../migrations/V2.2.1__add_attention_settings.sql"),
         },
+        MigrationScript {
+            version: "2.2.2".to_string(),
+            description: "add attention intensity".to_string(),
+            sql: include_str!("../../migrations/V2.2.2__add_attention_intensity.sql"),
+        },
     ]
 }
 

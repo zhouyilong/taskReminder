@@ -149,11 +149,16 @@ test("全屏提醒效果设置与预览", async ({ app }) => {
   await effectRow.locator("select").selectOption({ label: "边缘光晕" });
   await effectRow.getByLabel("持续到处理").check();
   await expect(modal).toContainText("每块屏幕边缘亮起柔光，直到处理完提醒");
+  const intensityRow = modal.locator(".form-row", { hasText: "光晕强度" });
+  await expect(intensityRow).toContainText("标准");
+  await intensityRow.getByLabel("光晕强度").fill("5");
+  await expect(intensityRow).toContainText("最强");
   await effectRow.getByRole("button", { name: "预览" }).click();
   const previews = await invokeCalls(app, "preview_attention");
   expect(previews.at(-1)!.args.payload).toEqual({
     effect: "edge",
     untilHandled: true,
+    intensity: 5,
     screen: "cursor",
     theme: "app"
   });
@@ -164,6 +169,7 @@ test("全屏提醒效果设置与预览", async ({ app }) => {
   // 关闭效果时“持续到处理”与预览不可用。
   await effectRow.locator("select").selectOption({ label: "关闭" });
   await expect(effectRow.getByLabel("持续到处理")).toBeDisabled();
+  await expect(intensityRow.getByLabel("光晕强度")).toBeDisabled();
   await expect(effectRow.getByRole("button", { name: "预览" })).toBeDisabled();
   await effectRow.locator("select").selectOption({ label: "光晕 + 顶部横幅" });
   await modal.getByRole("button", { name: "确认" }).click();
@@ -172,6 +178,7 @@ test("全屏提醒效果设置与预览", async ({ app }) => {
   const saved = calls.at(-1)!.args.settings as Record<string, unknown>;
   expect(saved.attentionEffect).toBe("banner");
   expect(saved.attentionUntilHandled).toBe(true);
+  expect(saved.attentionIntensity).toBe(5);
   expect(saved.attentionRepeatMinutes).toBe(5);
   expect(saved.notificationScreen).toBe("primary");
 });
