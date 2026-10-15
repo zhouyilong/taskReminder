@@ -422,10 +422,10 @@ const handleCheckHolidays = async () => {
   }
 };
 
-// 吸附靠 Windows 的鼠标按键状态判断拖动结束，其他平台交给窗口管理器。
+// 吸附挂在 Windows 的系统移动循环上判断拖动结束，其他平台交给窗口管理器。
 const isWindows = typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
 const stickySnapHint = isWindows
-  ? "拖到屏幕边缘或其他便签旁时自动对齐，松开时按住 Alt 不吸附"
+  ? "拖到屏幕边缘或其他便签旁时自动对齐，拖出屏幕时收回到边缘；松开时按住 Alt 不吸附"
   : "仅在 Windows 上生效";
 // 全屏提醒效果：Linux 的透明窗口首帧后不重绘，目前只在 Windows 上播放。
 const attentionPreviewing = ref(false);
