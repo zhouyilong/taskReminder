@@ -318,6 +318,8 @@ pub fn show_sticky_note_item_window(
             .inner_size(STICKY_NOTE_ITEM_WIDTH, STICKY_NOTE_ITEM_HEIGHT)
             .min_inner_size(STICKY_NOTE_ITEM_MIN_WIDTH, STICKY_NOTE_ITEM_MIN_HEIGHT)
             .resizable(true)
+            // 双击标题栏（拖动区域）不最大化；系统贴靠另见 `snap`。
+            .maximizable(false)
             .focused(false)
             .decorations(false)
             .transparent(!cfg!(target_os = "linux"))
@@ -328,9 +330,12 @@ pub fn show_sticky_note_item_window(
         if let Some(script) = sticky_note_bootstrap_script(note) {
             builder = builder.initialization_script(script);
         }
-        builder
+        let window = builder
             .build()
-            .map_err(|e| AppError::System(e.to_string()))?
+            .map_err(|e| AppError::System(e.to_string()))?;
+        #[cfg(target_os = "windows")]
+        snap::install(&window);
+        window
     };
 
     let width = note.width.max(STICKY_NOTE_ITEM_MIN_WIDTH);
@@ -436,8 +441,6 @@ pub fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
                     return;
                 }
                 let _ = state.db.move_sticky_note(&note_id, logical.x, logical.y);
-                #[cfg(target_os = "windows")]
-                snap::on_moved(window, &note_id);
             }
         }
         WindowEvent::Resized(size) => {
@@ -455,90 +458,98 @@ pub fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
     }
 }
 
-/// 贴边吸附（仅 Windows）。
+/// 贴边吸附与屏蔽系统贴靠（仅 Windows）。
 ///
-/// 拖动标题栏时系统进入模态移动循环，Tauri 只给出一连串 `Moved`，没有“拖动结束”事件，
-/// 所以按鼠标键状态判断：移动时有鼠标键按下才算用户拖动；松开鼠标且 150 ms 内没有新的
-/// 移动后吸附。打开便签、越界校正、吸附本身造成的移动发生时鼠标没有按下，不会触发；
-/// 拖动途中停顿也不会被“吸走”。松开时按住 Alt 不吸附。
+/// 便签窗口无边框但可缩放，系统样式中有 `WS_THICKFRAME`，拖动标题栏时系统会把它当普通窗口做
+/// Aero Snap：鼠标碰到屏幕顶边就最大化、碰到左右边就占半屏。这里给窗口挂一个子类过程，
+/// 在系统移动循环（`WM_SYSCOMMAND` / `SC_MOVE`，标题栏拖动经 `start_dragging` 进入）开始前
+/// 临时去掉 `WS_THICKFRAME` 与 `WS_MAXIMIZEBOX`，系统便不再贴靠；循环返回即拖动结束，
+/// 恢复样式后按松开时的位置吸附。缩放走 `SC_SIZE`，不受影响。松开时按住 Alt 不吸附。
 #[cfg(target_os = "windows")]
 mod snap {
-    use std::collections::HashMap;
-    use std::sync::{Mutex, OnceLock};
-    use std::time::{Duration, Instant};
-
     use tauri::{LogicalPosition, Manager};
-    use windows::Win32::UI::Input::KeyboardAndMouse::{
-        GetAsyncKeyState, VIRTUAL_KEY, VK_LBUTTON, VK_MENU, VK_RBUTTON,
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_MENU};
+    use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, GWL_STYLE, SC_MOVE, WM_NCDESTROY, WM_SYSCOMMAND,
+        WS_MAXIMIZEBOX, WS_THICKFRAME,
     };
 
     use super::{monitor_work_areas, STICKY_NOTE_ITEM_PREFIX};
     use crate::state::AppState;
     use crate::windows::placement::{self, Rect};
 
-    const SETTLE: Duration = Duration::from_millis(150);
-    const POLL: Duration = Duration::from_millis(50);
-    /// 防止异常情况下（如按键状态读不到松开）监视线程一直不退出。
-    const MAX_WAIT: Duration = Duration::from_secs(120);
+    const SUBCLASS_ID: usize = 0x5354_4943; // "STIC"
+    /// 系统据此判断窗口能否贴靠、最大化。
+    const SYSTEM_SNAP_STYLES: isize = (WS_THICKFRAME.0 | WS_MAXIMIZEBOX.0) as isize;
 
-    fn key_down(key: VIRTUAL_KEY) -> bool {
+    struct DragContext {
+        app: tauri::AppHandle,
+        label: String,
+    }
+
+    /// 给新建的便签窗口挂上子类过程（子类只能在窗口所属的主线程上挂）。
+    pub fn install(window: &tauri::WebviewWindow) {
+        let Ok(hwnd) = window.hwnd() else {
+            return;
+        };
+        // Tauri 与本项目引用的 `windows` 版本不同，按原始句柄转换。
+        let hwnd = hwnd.0 as isize;
+        let context = DragContext {
+            app: window.app_handle().clone(),
+            label: window.label().to_string(),
+        };
+        let _ = window.run_on_main_thread(move || unsafe {
+            let data = Box::into_raw(Box::new(context));
+            if !SetWindowSubclass(HWND(hwnd), Some(subclass_proc), SUBCLASS_ID, data as usize)
+                .as_bool()
+            {
+                drop(Box::from_raw(data));
+            }
+        });
+    }
+
+    fn key_down(key: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY) -> bool {
         // 最高位为 1 表示按下。
         unsafe { GetAsyncKeyState(i32::from(key.0)) < 0 }
     }
 
-    /// 左右键都算：交换了主次键的用户按的是物理右键。
-    fn mouse_down() -> bool {
-        key_down(VK_LBUTTON) || key_down(VK_RBUTTON)
-    }
-
-    /// 正在拖动的便签 → 最近一次移动的时间。有记录说明监视线程在运行。
-    fn drags() -> &'static Mutex<HashMap<String, Instant>> {
-        static DRAGS: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
-        DRAGS.get_or_init(|| Mutex::new(HashMap::new()))
-    }
-
-    pub fn on_moved(window: &tauri::Window, note_id: &str) {
-        let Ok(mut drags) = drags().lock() else {
-            return;
-        };
-        if let Some(last_moved) = drags.get_mut(note_id) {
-            *last_moved = Instant::now();
-            return;
-        }
-        if !mouse_down() {
-            return;
-        }
-        drags.insert(note_id.to_string(), Instant::now());
-        // 从左边或上边缩放也会移动窗口；结束时尺寸变了就不吸附，避免把缩放后的便签整体挪动。
-        let start_size = window.outer_size().ok();
-        let app = window.app_handle().clone();
-        let label = window.label().to_string();
-        let note_id = note_id.to_string();
-        std::thread::spawn(move || watch_drag(app, label, note_id, start_size));
-    }
-
-    fn watch_drag(
-        app: tauri::AppHandle,
-        label: String,
-        note_id: String,
-        start_size: Option<tauri::PhysicalSize<u32>>,
-    ) {
-        let started = Instant::now();
-        loop {
-            std::thread::sleep(POLL);
-            let Ok(mut drags) = drags().lock() else {
-                return;
-            };
-            let last_moved = drags.get(&note_id).copied().unwrap_or(started);
-            let settled = last_moved.elapsed() >= SETTLE && !mouse_down();
-            if settled || started.elapsed() >= MAX_WAIT {
-                drags.remove(&note_id);
-                break;
+    unsafe extern "system" fn subclass_proc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+        _id: usize,
+        data: usize,
+    ) -> LRESULT {
+        match msg {
+            WM_SYSCOMMAND if (wparam.0 as u32 & 0xFFF0) == SC_MOVE => {
+                let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+                SetWindowLongPtrW(hwnd, GWL_STYLE, style & !SYSTEM_SNAP_STYLES);
+                // 系统移动循环在这里运行，返回时用户已松开鼠标。
+                let result = DefSubclassProc(hwnd, msg, wparam, lparam);
+                let current = GetWindowLongPtrW(hwnd, GWL_STYLE);
+                SetWindowLongPtrW(hwnd, GWL_STYLE, current | (style & SYSTEM_SNAP_STYLES));
+                if !key_down(VK_MENU) {
+                    let context = &*(data as *const DragContext);
+                    let app = context.app.clone();
+                    let label = context.label.clone();
+                    // 不在窗口过程里调用窗口接口（会重入事件循环），交给后台线程。
+                    std::thread::spawn(move || snap_after_drag(app, label));
+                }
+                result
             }
+            WM_NCDESTROY => {
+                let _ = RemoveWindowSubclass(hwnd, Some(subclass_proc), SUBCLASS_ID);
+                drop(Box::from_raw(data as *mut DragContext));
+                DefSubclassProc(hwnd, msg, wparam, lparam)
+            }
+            _ => DefSubclassProc(hwnd, msg, wparam, lparam),
         }
-        if key_down(VK_MENU) {
-            return;
-        }
+    }
+
+    fn snap_after_drag(app: tauri::AppHandle, label: String) {
         let enabled = app
             .try_state::<AppState>()
             .and_then(|state| state.db.sticky_snap_enabled().ok())
@@ -546,13 +557,9 @@ mod snap {
         if !enabled {
             return;
         }
-        let Some(window) = app.get_webview_window(&label) else {
-            return;
-        };
-        if start_size.is_none() || window.outer_size().ok() != start_size {
-            return;
+        if let Some(window) = app.get_webview_window(&label) {
+            snap_window(&app, &window);
         }
-        snap_window(&app, &window);
     }
 
     fn logical_rect(window: &tauri::WebviewWindow, scale_factor: f64) -> Option<Rect> {

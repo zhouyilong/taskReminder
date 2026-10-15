@@ -202,6 +202,11 @@
 - 更换同步密码走 `CloudSyncService::change_passphrase`：用当前密码合并远端后以新密码上传（`sync_with_remote_as`），上传成功后才保存新密码；前端成功后只刷新同步相关字段，不要整体 `loadSettings` 覆盖草稿，也不要让旧草稿再次保存旧密码。
 - 开发构建对 `argon2`/`blake2` 单独开启优化（`Cargo.toml` 的 `profile.dev.package`），否则每次同步派生密钥要数秒。
 
+### 便签贴边吸附与系统贴靠（v2.2.2）
+- **问题**：便签窗口无边框但可缩放，系统样式里仍有 `WS_THICKFRAME`（tao 对无边框可缩放窗口保留 `WS_CAPTION | WS_SIZEBOX`），拖动标题栏时 Windows 会做 Aero Snap：鼠标碰到屏幕顶边最大化、碰到左右边占半屏；Tauri 的 `data-tauri-drag-region` 双击也会最大化。旧实现靠轮询鼠标键判断拖动结束，系统贴靠改了尺寸后吸附被跳过。
+- **解决**：便签窗口 `maximizable(false)`；`windows/sticky.rs` 的 `snap::install` 给窗口挂子类过程，在 `WM_SYSCOMMAND` / `SC_MOVE`（系统移动循环）前临时去掉 `WS_THICKFRAME | WS_MAXIMIZEBOX`，循环返回即拖动结束，恢复样式后在后台线程吸附。吸附（`placement::snap_position`）最后经 `keep_inside` 把拖出屏幕的便签收回到边缘（越过的部分在另一块屏幕上时不收回）。
+- **规则**：不要在子类过程（窗口过程）里直接调用 Tauri 窗口接口，交给后台线程；子类只能在窗口所属的主线程上挂（`run_on_main_thread`）。`windows` crate（0.52）与 Tauri 依赖的版本不同，HWND 按原始句柄转换。
+
 ### 全局快捷键
 - 快捷键由 `shortcuts::apply_shortcuts` 统一注册（先 `unregister_all` 再逐个注册：快速添加、显示/隐藏全部便签），启动时与保存设置后调用；某个失败不影响其他，原因合并后通过 `apply_quick_add_shortcut` 命令返回给设置界面。失败（格式无效、被其他程序占用、Wayland 不支持等）不能阻止应用启动。
 - 新增全局快捷键时加到 `apply_shortcuts` 中，不要在别处单独注册，否则会被 `unregister_all` 清掉。

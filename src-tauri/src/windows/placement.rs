@@ -84,7 +84,7 @@ pub fn clamp_to_work_areas(note: Rect, areas: &[Rect]) -> Option<(f64, f64)> {
 /// 贴边吸附：便签边缘离屏幕工作区边缘或其他便签边缘小于这个距离时对齐。
 // 吸附只在 Windows 上启用（见 `sticky::snap`），其他平台只在测试中使用。
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-pub const SNAP_THRESHOLD: f64 = 12.0;
+pub const SNAP_THRESHOLD: f64 = 16.0;
 /// 与其他便签并排或上下相接时保留的间距。
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const SNAP_GAP: f64 = 8.0;
@@ -110,11 +110,71 @@ fn nearest_candidate(current: f64, candidates: &[f64]) -> Option<f64> {
         })
 }
 
+/// 两个矩形相交部分的面积（不相交为 0）。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn overlap_area(a: &Rect, b: &Rect) -> f64 {
+    let width = a.right().min(b.right()) - a.x.max(b.x);
+    let height = a.bottom().min(b.bottom()) - a.y.max(b.y);
+    if width > 0.0 && height > 0.0 {
+        width * height
+    } else {
+        0.0
+    }
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn contains_point(area: &Rect, x: f64, y: f64) -> bool {
+    x >= area.x && x < area.right() && y >= area.y && y < area.bottom()
+}
+
+/// 拖出屏幕时收回：便签主要所在的工作区（重叠面积最大）的某条边被越过、
+/// 且越过的部分不在另一块屏幕上时，把便签移回贴住这条边（任务栏也算越界）。
+/// 便签比工作区还大的方向不处理；与所有工作区都不相交时保持原位（打开时的越界校正会处理）。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn keep_inside(note: Rect, areas: &[Rect]) -> (f64, f64) {
+    let Some(area) = areas
+        .iter()
+        .filter(|area| overlap_area(&note, area) > 0.0)
+        .max_by(|a, b| {
+            overlap_area(&note, a)
+                .partial_cmp(&overlap_area(&note, b))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    else {
+        return (note.x, note.y);
+    };
+    let on_other_area = |x: f64, y: f64| {
+        areas
+            .iter()
+            .any(|other| !std::ptr::eq(other, area) && contains_point(other, x, y))
+    };
+    let cx = note.x + note.width / 2.0;
+    let cy = note.y + note.height / 2.0;
+    let mut x = note.x;
+    if note.width <= area.width {
+        if note.x < area.x && !on_other_area(note.x, cy) {
+            x = area.x;
+        } else if note.right() > area.right() && !on_other_area(note.right() - 1.0, cy) {
+            x = area.right() - note.width;
+        }
+    }
+    let mut y = note.y;
+    if note.height <= area.height {
+        if note.y < area.y && !on_other_area(cx, note.y) {
+            y = area.y;
+        } else if note.bottom() > area.bottom() && !on_other_area(cx, note.bottom() - 1.0) {
+            y = area.bottom() - note.height;
+        }
+    }
+    (x, y)
+}
+
 /// 拖动结束后的吸附位置。横、纵两个方向分别处理：
 /// - 工作区的四条边（便签贴在屏幕边缘，不含任务栏）；
 /// - 与其他便签并排（相隔 `SNAP_GAP`，要求另一方向有重叠）；
 /// - 与相邻的便签边缘对齐（左对左、右对右、上对上、下对下，要求另一方向相距不远）。
 ///
+/// 最后把拖出屏幕的便签收回到边缘（`keep_inside`）。
 /// 没有候选时返回原位置；对吸附后的位置再次调用结果不变。
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn snap_position(note: Rect, areas: &[Rect], peers: &[Rect]) -> (f64, f64) {
@@ -147,10 +207,9 @@ pub fn snap_position(note: Rect, areas: &[Rect], peers: &[Rect]) -> (f64, f64) {
             ys.push(peer.bottom() - note.height);
         }
     }
-    (
-        nearest_candidate(note.x, &xs).unwrap_or(note.x),
-        nearest_candidate(note.y, &ys).unwrap_or(note.y),
-    )
+    let x = nearest_candidate(note.x, &xs).unwrap_or(note.x);
+    let y = nearest_candidate(note.y, &ys).unwrap_or(note.y);
+    keep_inside(Rect::new(x, y, note.width, note.height), areas)
 }
 
 #[cfg(test)]
@@ -290,7 +349,7 @@ mod tests {
 
     #[test]
     fn leaves_note_outside_threshold() {
-        assert_eq!(snap(13.0, 300.0, &[]), (13.0, 300.0));
+        assert_eq!(snap(17.0, 300.0, &[]), (17.0, 300.0));
         assert_eq!(snap(500.0, 500.0, &[]), (500.0, 500.0));
     }
 
@@ -327,9 +386,54 @@ mod tests {
     }
 
     #[test]
+    fn pulls_note_dragged_off_screen_back_to_edge() {
+        // 左边、上边拖出屏幕。
+        assert_eq!(snap(-120.0, 300.0, &[]), (0.0, 300.0));
+        assert_eq!(snap(300.0, -60.0, &[]), (300.0, 0.0));
+        // 右边拖出屏幕、底边压到任务栏上。
+        assert_eq!(snap(1800.0, 900.0, &[]), (1920.0 - 284.0, 1040.0 - 280.0));
+    }
+
+    #[test]
+    fn keeps_note_straddling_adjacent_monitor() {
+        // 右侧有副屏：越过主屏右边缘的部分在副屏上，不收回。
+        let right = Rect::new(1920.0, 0.0, 1920.0, 1040.0);
+        assert_eq!(
+            snap_position(note_at(1800.0, 300.0), &[primary(), right], &[]),
+            (1800.0, 300.0)
+        );
+        // 副屏比主屏矮：越过副屏底边的部分不在任何屏幕上，收回到副屏底边。
+        let short = Rect::new(1920.0, 0.0, 1280.0, 700.0);
+        assert_eq!(
+            snap_position(note_at(2400.0, 600.0), &[primary(), short], &[]),
+            (2400.0, 700.0 - 280.0)
+        );
+    }
+
+    #[test]
+    fn keeps_note_larger_than_screen_in_place() {
+        let small = Rect::new(0.0, 0.0, 200.0, 150.0);
+        assert_eq!(
+            snap_position(note_at(-40.0, -30.0), &[small], &[]),
+            (-40.0, -30.0)
+        );
+    }
+
+    #[test]
+    fn leaves_note_outside_all_screens() {
+        assert_eq!(snap(3000.0, 300.0, &[]), (3000.0, 300.0));
+    }
+
+    #[test]
     fn snapping_is_stable() {
         let peers = [note_at(400.0, 100.0), note_at(700.0, 100.0)];
-        for (x, y) in [(9.0, 7.0), (410.0, 395.0), (690.0, 105.0), (1000.0, 1000.0)] {
+        for (x, y) in [
+            (9.0, 7.0),
+            (410.0, 395.0),
+            (690.0, 105.0),
+            (1000.0, 1000.0),
+            (-50.0, 500.0),
+        ] {
             let first = snap(x, y, &peers);
             assert_eq!(snap(first.0, first.1, &peers), first);
         }
