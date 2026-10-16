@@ -127,6 +127,12 @@ test("统计：近 12 周按周显示，并按标签汇总", async ({ app }) => 
   const tagRows = app.locator(".tag-stats-table tbody tr");
   await expect(tagRows.first()).toContainText("#健康");
   await expect(app.locator(".tag-stats-table")).toContainText("#工作");
+
+  // 按项目汇总：循环提醒计入未分组。
+  await app.getByRole("radiogroup", { name: "汇总方式" }).getByRole("radio", { name: "项目" }).click();
+  await expect(app.locator(".stats-card-title", { hasText: "按项目" })).toBeVisible();
+  await expect(app.locator(".tag-stats-table thead")).toContainText("项目");
+  await expect(app.locator(".tag-stats-table tbody tr").last()).toContainText("未分组");
 });
 
 test("设置已完成待办的保留期", async ({ app }) => {

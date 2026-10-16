@@ -106,6 +106,7 @@ describe("computeStats", () => {
     expect(stats.handledRate).toBeNull();
     expect(stats.buckets.every(day => day.total === 0)).toBe(true);
     expect(stats.tags).toEqual([]);
+    expect(stats.projects).toEqual([]);
   });
 
   const task = (id: string, tags: string[], completedAt?: string): Task => ({
@@ -145,6 +146,42 @@ describe("computeStats", () => {
     ]);
     expect(stats.tags[0].handledRate).toBeCloseTo(2 / 3);
     expect(stats.tags[1].handledRate).toBe(0.5);
+  });
+
+  it("summarizes reminders by the project of their task", () => {
+    const records = [
+      record("1", "a", "2026-09-26T09:00:00", "COMPLETED", "TASK"),
+      record("2", "b", "2026-09-26T10:00:00", "SNOOZED", "TASK"),
+      record("3", "done", "2026-09-25T10:00:00", "DISMISSED", "TASK"),
+      record("4", "r1", "2026-09-25T09:00:00", "COMPLETED"),
+      record("5", "gone", "2026-09-24T09:00:00", "SNOOZED", "TASK"),
+      record("6", "plain", "2026-09-24T10:00:00", "DISMISSED", "TASK"),
+    ];
+    const stats = computeStats({
+      now: NOW,
+      days: 7,
+      records,
+      activeTasks: [
+        { ...task("a", ["工作"]), project: "装修" },
+        { ...task("b", []), project: "搬家" },
+        task("plain", []),
+      ],
+      completedTasks: [{ ...task("done", [], "2026-09-25T10:00:00"), project: "装修" }],
+      recurringTasks: [{ ...habit("r1"), tags: ["健康"] }],
+    });
+    expect(stats.projects.map(item => [item.project, item.total, item.counts.COMPLETED, item.counts.SNOOZED])).toEqual([
+      ["装修", 2, 1, 0],
+      ["搬家", 1, 0, 1],
+      // 循环提醒、没有项目的待办与来源已删除的提醒。
+      ["", 3, 1, 1],
+    ]);
+    expect(stats.projects[0].handledRate).toBe(1);
+    // 按标签的结果不受影响。
+    expect(stats.tags.map(item => [item.tag, item.total])).toEqual([
+      ["健康", 1],
+      ["工作", 1],
+      ["", 4],
+    ]);
   });
 
   it("matches tags case-insensitively", () => {

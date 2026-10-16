@@ -30,6 +30,16 @@ export interface TagSummary {
   handledRate: number;
 }
 
+/** 按项目汇总的提醒（v2.2.3，项目取自提醒对应的待办；循环提醒没有项目）。 */
+export interface ProjectSummary {
+  /** 项目；空字符串为“未分组”（含循环提醒与来源已删除的提醒）。 */
+  project: string;
+  total: number;
+  counts: ActionCounts;
+  /** 直接处理（完成或关闭）占比，0–1。 */
+  handledRate: number;
+}
+
 export interface SnoozeRank {
   reminderId: string;
   description: string;
@@ -59,6 +69,7 @@ export interface StatsSummary {
   topSnoozed: SnoozeRank[];
   habits: HabitStreak[];
   tags: TagSummary[];
+  projects: ProjectSummary[];
 }
 
 const emptyCounts = (): ActionCounts => ({ COMPLETED: 0, DISMISSED: 0, SNOOZED: 0, PENDING: 0 });
@@ -108,6 +119,37 @@ export const computeStreak = (dayChecks: Map<string, boolean>, today: string) =>
 
 const UNTAGGED = "";
 
+interface GroupSummary {
+  name: string;
+  total: number;
+  counts: ActionCounts;
+  handledRate: number;
+}
+
+/** 按名称（不区分大小写）累计提醒的处理结果；空名称（未加标签 / 未分组）排在最后。 */
+const createGroups = () => {
+  const groups = new Map<string, GroupSummary>();
+  return {
+    add(name: string, action: UserAction) {
+      const key = name.toLowerCase();
+      const summary = groups.get(key) ?? { name, total: 0, counts: emptyCounts(), handledRate: 0 };
+      summary.total += 1;
+      summary.counts[action] += 1;
+      groups.set(key, summary);
+    },
+    list(): GroupSummary[] {
+      return [...groups.values()]
+        .map(summary => ({ ...summary, handledRate: (summary.counts.COMPLETED + summary.counts.DISMISSED) / summary.total }))
+        .sort((a, b) => {
+          if ((a.name === "") !== (b.name === "")) {
+            return a.name === "" ? 1 : -1;
+          }
+          return b.total - a.total || a.name.localeCompare(b.name);
+        });
+    }
+  };
+};
+
 /**
  * 统计范围：按天时为最近 `days` 天；按周时为最近 `days / 7` 周（从那一周的周一开始，到今天为止）。
  */
@@ -146,14 +188,12 @@ export const computeStats = (input: {
   for (const task of [...(input.activeTasks ?? []), ...input.completedTasks, ...input.recurringTasks]) {
     tagsById.set(task.id, task.tags ?? []);
   }
-  const byTag = new Map<string, TagSummary>();
-  const addToTag = (tag: string, action: UserAction) => {
-    const key = tag.toLowerCase();
-    const summary = byTag.get(key) ?? { tag, total: 0, counts: emptyCounts(), handledRate: 0 };
-    summary.total += 1;
-    summary.counts[action] += 1;
-    byTag.set(key, summary);
-  };
+  const projectById = new Map<string, string>();
+  for (const task of [...(input.activeTasks ?? []), ...input.completedTasks]) {
+    projectById.set(task.id, task.project ?? "");
+  }
+  const byTag = createGroups();
+  const byProject = createGroups();
 
   for (const task of input.completedTasks) {
     if (inRange(task.completedAt)) {
@@ -178,10 +218,11 @@ export const computeStats = (input: {
     }
     const tags = tagsById.get(record.reminderId) ?? [];
     if (tags.length) {
-      tags.forEach(tag => addToTag(tag, action));
+      tags.forEach(tag => byTag.add(tag, action));
     } else {
-      addToTag(UNTAGGED, action);
+      byTag.add(UNTAGGED, action);
     }
+    byProject.add(projectById.get(record.reminderId) ?? "", action);
     if (action === "SNOOZED") {
       const rank = snoozed.get(record.reminderId);
       if (rank) {
@@ -224,15 +265,8 @@ export const computeStats = (input: {
     .filter(habit => habit.remindedDays > 0)
     .sort((a, b) => b.current - a.current || b.checkedDays - a.checkedDays);
 
-  const tags = [...byTag.values()]
-    .map(summary => ({ ...summary, handledRate: (summary.counts.COMPLETED + summary.counts.DISMISSED) / summary.total }))
-    .sort((a, b) => {
-      // “未加标签”排在最后。
-      if ((a.tag === UNTAGGED) !== (b.tag === UNTAGGED)) {
-        return a.tag === UNTAGGED ? 1 : -1;
-      }
-      return b.total - a.total || a.tag.localeCompare(b.tag);
-    });
+  const tags = byTag.list().map(({ name, ...summary }) => ({ tag: name, ...summary }));
+  const projects = byProject.list().map(({ name, ...summary }) => ({ project: name, ...summary }));
 
   const handled = counts.COMPLETED + counts.DISMISSED;
   return {
@@ -245,6 +279,7 @@ export const computeStats = (input: {
     topSnoozed,
     habits,
     tags,
+    projects,
   };
 };
 
