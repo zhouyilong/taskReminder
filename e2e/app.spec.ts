@@ -127,6 +127,12 @@ test("统计：近 12 周按周显示，并按标签汇总", async ({ app }) => 
   const tagRows = app.locator(".tag-stats-table tbody tr");
   await expect(tagRows.first()).toContainText("#健康");
   await expect(app.locator(".tag-stats-table")).toContainText("#工作");
+
+  // 按项目汇总：循环提醒计入未分组。
+  await app.getByRole("radiogroup", { name: "汇总方式" }).getByRole("radio", { name: "项目" }).click();
+  await expect(app.locator(".stats-card-title", { hasText: "按项目" })).toBeVisible();
+  await expect(app.locator(".tag-stats-table thead")).toContainText("项目");
+  await expect(app.locator(".tag-stats-table tbody tr").last()).toContainText("未分组");
 });
 
 test("设置已完成待办的保留期", async ({ app }) => {
@@ -139,6 +145,24 @@ test("设置已完成待办的保留期", async ({ app }) => {
 
   const calls = await invokeCalls(app, "save_settings");
   expect((calls.at(-1)!.args.settings as { completedRetentionDays: number }).completedRetentionDays).toBe(365);
+});
+
+test("自动备份保留份数与打开备份目录", async ({ app }) => {
+  await app.getByRole("button", { name: "设置", exact: true }).click();
+  const modal = app.locator(".modal", { has: app.locator(".modal-header", { hasText: "应用设置" }) });
+  const row = modal.locator(".form-row", { hasText: "自动备份保留" });
+  await expect(row.locator("select")).toHaveValue("7");
+  await row.locator("select").selectOption({ label: "14 份" });
+  await modal.getByRole("button", { name: "确认" }).click();
+  const calls = await invokeCalls(app, "save_settings");
+  expect((calls.at(-1)!.args.settings as { autoBackupKeep: number }).autoBackupKeep).toBe(14);
+
+  await app.getByRole("button", { name: "设置", exact: true }).click();
+  await modal.getByRole("button", { name: "导入导出与备份…" }).click();
+  const data = app.locator(".modal", { has: app.locator(".modal-header", { hasText: "导入导出与备份" }) });
+  await expect(data).toContainText("保留最近 14 份");
+  await data.getByRole("button", { name: "打开备份目录" }).click();
+  await expect.poll(async () => (await invokeCalls(app, "open_backup_dir")).length).toBe(1);
 });
 
 test("全屏提醒效果设置与预览", async ({ app }) => {
@@ -279,4 +303,44 @@ test("自然语言识别循环提醒的次数", async ({ app }) => {
   await input.press("Enter");
   const [call] = await invokeCalls(app, "create_recurring_task");
   expect(call.args.payload).toMatchObject({ description: "吃药", repeatMode: "DAILY", scheduleTime: "08:00", remainingCount: 7, endsOn: null });
+});
+
+test("管理标签与项目：重命名、合并与移除，筛选跟随", async ({ app }) => {
+  const projectFilter = app.locator(".task-toolbar select[title='按项目筛选']");
+  await projectFilter.selectOption({ label: "家务（1）" });
+  await app.getByRole("button", { name: "管理标签" }).click();
+  const modal = app.locator(".modal", { has: app.locator(".modal-header", { hasText: "管理标签与项目" }) });
+  const confirm = app.locator(".modal", { has: app.locator(".modal-text") });
+  const item = (name: string) => modal.locator(".label-item", { hasText: name });
+
+  // 标签改名：已完成的待办与循环提醒也计入。
+  await expect(item("#工作")).toContainText("3 条");
+  await item("#工作").getByRole("button", { name: "重命名" }).click();
+  await modal.getByLabel("标签的新名称").fill("#职场");
+  await modal.getByRole("button", { name: "确定" }).click();
+  await expect(confirm).toContainText("把 #工作 改名为 #职场？将修改 3 条待办与循环提醒。");
+  await confirm.getByRole("button", { name: "确认" }).click();
+  await expect(modal).toContainText("已修改 3 条");
+  await expect(item("#职场")).toBeVisible();
+  expect((await invokeCalls(app, "rename_tag"))[0].args).toEqual({ oldName: "工作", newName: "职场" });
+
+  // 项目合并到已有项目，当前的项目筛选跟随。
+  await item("@家务").getByRole("button", { name: "重命名" }).click();
+  await modal.getByLabel("项目的新名称").fill("季度总结");
+  await expect(modal.locator(".label-hint")).toHaveText("将合并到已有的 @季度总结");
+  await modal.getByRole("button", { name: "合并" }).click();
+  await expect(confirm).toContainText("把项目「家务」合并到已有的项目「季度总结」？将修改 2 条待办。");
+  await confirm.getByRole("button", { name: "确认" }).click();
+  await expect(item("@季度总结")).toContainText("3 条");
+  expect((await invokeCalls(app, "rename_project"))[0].args).toEqual({ oldName: "家务", newName: "季度总结" });
+
+  // 移除标签。
+  await item("#生活").getByRole("button", { name: "移除" }).click();
+  await confirm.getByRole("button", { name: "确认" }).click();
+  await expect(item("#生活")).toHaveCount(0);
+  expect((await invokeCalls(app, "remove_tag"))[0].args).toEqual({ name: "生活" });
+
+  await modal.getByRole("button", { name: "确认" }).click();
+  await expect(projectFilter.locator("option:checked")).toHaveText(/^季度总结/);
+  await expect(taskRow(app, "买菜").locator(".task-project")).toHaveText("季度总结");
 });

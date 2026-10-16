@@ -93,7 +93,11 @@ pub async fn import_data(
     let content = std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败：{}", e))?;
     let data = into_api(backup::parse_backup(&content))?;
     // 导入前先留一份本地快照，出问题时可以从备份恢复。
-    into_api(backup::create_backup(&state.db.db_path(), &time::now()))?;
+    into_api(backup::create_backup(
+        &state.db.db_path(),
+        &time::now(),
+        backup::keep_count(&state.db),
+    ))?;
     let summary = into_api(backup::import_backup(&state.db, &data))?;
     into_api(after_bulk_change(&state))?;
     Ok(Some(summary))
@@ -110,7 +114,31 @@ pub fn list_backups(state: State<AppState>) -> ApiResult<BackupListPayload> {
 
 #[tauri::command]
 pub fn create_backup_now(state: State<AppState>) -> ApiResult<()> {
-    into_api(backup::create_backup(&state.db.db_path(), &time::now()))?;
+    into_api(backup::create_backup(
+        &state.db.db_path(),
+        &time::now(),
+        backup::keep_count(&state.db),
+    ))?;
+    Ok(())
+}
+
+/// 在系统文件管理器中打开备份目录（只打开固定的数据目录 `backups/`，不接受前端传入的路径）。
+#[tauri::command]
+pub fn open_backup_dir(state: State<AppState>) -> ApiResult<()> {
+    let dir = backup::backup_dir(&state.db.db_path());
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建备份目录失败：{}", e))?;
+    let program = if cfg!(target_os = "windows") {
+        "explorer.exe"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    // explorer.exe 成功时也可能返回非 0，只检查能否启动。
+    std::process::Command::new(program)
+        .arg(&dir)
+        .spawn()
+        .map_err(|e| format!("打开备份目录失败：{}", e))?;
     Ok(())
 }
 

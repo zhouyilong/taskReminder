@@ -61,6 +61,9 @@ fn main() {
             tasks::uncomplete_task,
             tasks::delete_task,
             tasks::batch_update_tasks,
+            tasks::rename_tag,
+            tasks::remove_tag,
+            tasks::rename_project,
             tasks::set_task_order,
             recurring::create_recurring_task,
             recurring::update_recurring_task,
@@ -116,6 +119,7 @@ fn main() {
             data::import_data,
             data::list_backups,
             data::create_backup_now,
+            data::open_backup_dir,
             data::restore_backup
         ])
         .setup(|app| {

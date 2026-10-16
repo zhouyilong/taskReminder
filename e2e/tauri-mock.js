@@ -152,6 +152,7 @@
       stickySnapEnabled: true,
       holidayAutoUpdate: true,
       completedRetentionDays: 30,
+      autoBackupKeep: 7,
       attentionEffect: "banner",
       attentionUntilHandled: false,
       attentionIntensity: 2,
@@ -168,6 +169,21 @@
   let nextCallback = 1;
   const calls = [];
 
+  const renameTagIn = (oldName, replacement) => {
+    const from = normalizeTags([oldName])[0]?.toLowerCase();
+    if (!from || replacement === undefined) throw new Error("标签名不能为空");
+    let changed = 0;
+    for (const item of [...state.tasks, ...state.recurringTasks]) {
+      const before = item.tags ?? [];
+      if (item.deletedAt || !before.some(tag => tag.toLowerCase() === from)) continue;
+      const after = normalizeTags(before.flatMap(tag => (tag.toLowerCase() === from ? (replacement ? [replacement] : []) : [tag])));
+      if (after.join(",") === before.join(",")) continue;
+      item.tags = after;
+      touch(item);
+      changed += 1;
+    }
+    return changed;
+  };
   const findTask = id => state.tasks.find(item => item.id === id && !item.deletedAt);
   const findRecurring = id => state.recurringTasks.find(item => item.id === id && !item.deletedAt);
   const touch = item => {
@@ -284,6 +300,21 @@
       }
       return changed;
     },
+    // 与后端 db/labels.rs 一致：不区分大小写，作用于未删除的待办（含已完成）与循环提醒，只计实际变化的条目。
+    rename_tag: ({ oldName, newName }) => renameTagIn(oldName, normalizeTags([newName])[0]),
+    remove_tag: ({ name }) => renameTagIn(name, null),
+    rename_project: ({ oldName, newName }) => {
+      const from = normalizeProject(oldName).toLowerCase();
+      const to = normalizeProject(newName);
+      let changed = 0;
+      for (const item of state.tasks) {
+        if (item.deletedAt || !item.project || item.project.toLowerCase() !== from || item.project === to) continue;
+        item.project = to;
+        touch(item);
+        changed += 1;
+      }
+      return changed;
+    },
     set_task_order: ({ orders }) => {
       for (const { id, sortOrder } of orders) {
         const item = findTask(id);
@@ -362,7 +393,9 @@
     get_ui_state: () => null,
     emit_ui_state_changed: () => null,
     apply_quick_add_shortcut: () => null,
-    list_backups: () => ({ backups: [], directory: "" }),
+    list_backups: () => ({ backups: [], dir: "" }),
+    create_backup_now: () => null,
+    open_backup_dir: () => null,
     "plugin:app|version": () => "2.1.1",
     "plugin:app|name": () => "TaskReminderApp",
     "plugin:event|listen": ({ event, handler }) => {
@@ -385,6 +418,9 @@
   };
 
   const MUTATIONS = new Set([
+    "rename_tag",
+    "remove_tag",
+    "rename_project",
     "create_task",
     "quick_add_task",
     "update_task",

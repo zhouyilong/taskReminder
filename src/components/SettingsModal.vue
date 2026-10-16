@@ -139,6 +139,13 @@
         </select>
         <span class="field-hint">{{ completedRetentionHint(settingsDraft.completedRetentionDays, settingsDraft.webdavEnabled) }}</span>
       </div>
+      <div class="form-row compact">
+        <label>自动备份保留</label>
+        <select class="select" v-model.number="settingsDraft.autoBackupKeep" aria-label="自动备份保留份数">
+          <option v-for="item in AUTO_BACKUP_KEEP_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
+        </select>
+        <span class="field-hint">每天一份；调小后在下一次备份时删除更早的备份</span>
+      </div>
     </div>
     <div class="modal-section">
       <div class="form-row compact">
@@ -337,7 +344,7 @@ import { useUiPrefs } from "../composables/useUiPrefs";
 import { useUpdater } from "../composables/useUpdater";
 import { playChime } from "../notificationSound";
 import { SHORTCUT_HELP } from "../keyboard";
-import { COMPLETED_RETENTION_OPTIONS, completedRetentionHint } from "../retention";
+import { AUTO_BACKUP_KEEP_OPTIONS, COMPLETED_RETENTION_OPTIONS, completedRetentionHint } from "../retention";
 import {
   ATTENTION_COLOR_PRESETS,
   ATTENTION_EFFECT_OPTIONS,

@@ -65,6 +65,14 @@
           {{ option.value ? `${option.label}优先级` : "无优先级" }}
         </option>
       </select>
+      <button
+        class="button secondary"
+        type="button"
+        title="重命名、合并或移除标签与项目"
+        @click="openLabelManager"
+      >
+        管理标签
+      </button>
       <select class="select" v-model="sortKey" title="排序">
         <option v-for="option in TASK_SORT_OPTIONS" :key="option.value" :value="option.value">按{{ option.label }}</option>
       </select>
@@ -225,10 +233,12 @@ import {
   collectProjects,
   collectTags,
   filterAndSortTasks,
+  followRename,
   type TaskFilter,
   type TaskSortKey
 } from "../tasks";
 import { useAppData } from "../composables/useAppData";
+import { useLabelManager } from "../composables/useLabelManager";
 import { useDialogs } from "../composables/useDialogs";
 import { useItemActions } from "../composables/useItemActions";
 import { usePagination } from "../composables/usePagination";
@@ -259,6 +269,17 @@ const visibleTasks = computed(() => filterAndSortTasks(tasks.value, filter, sort
 const filterKey = computed(
   () => `${filter.query}|${filter.tag}|${filter.priority}|${filter.project ?? "\u0000all"}|${sortKey.value}`
 );
+
+// 在“管理标签”中改名、合并或移除后，筛选跟随新名称。
+const { openLabelManager, lastChange } = useLabelManager();
+watch(lastChange, change => {
+  if (!change) return;
+  if (change.kind === "tag") {
+    filter.tag = followRename(filter.tag, change.from, change.to);
+  } else {
+    filter.project = followRename(filter.project ?? null, change.from, change.to);
+  }
+});
 
 // 标签被删光后自动回到“全部标签”。
 watch(allTags, list => {

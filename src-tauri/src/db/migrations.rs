@@ -202,6 +202,11 @@ pub(super) fn migration_scripts() -> Vec<MigrationScript> {
             description: "add attention color".to_string(),
             sql: include_str!("../../migrations/V2.2.3__add_attention_color.sql"),
         },
+        MigrationScript {
+            version: "2.2.4".to_string(),
+            description: "add auto backup keep".to_string(),
+            sql: include_str!("../../migrations/V2.2.4__add_auto_backup_keep.sql"),
+        },
     ]
 }
 

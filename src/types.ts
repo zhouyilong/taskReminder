@@ -148,6 +148,8 @@ export interface AppSettings {
   holidayAutoUpdate: boolean;
   /** 已完成待办的保留天数：30（默认，另限最近 100 条）/ 90 / 365 / 0（永久），本机设置。 */
   completedRetentionDays: number;
+  /** 每日自动备份保留的份数：7（默认）/ 14 / 30，本机设置。 */
+  autoBackupKeep: number;
   /** 到点时在每块屏幕上播放的全屏注意效果（本机设置，仅 Windows）。 */
   attentionEffect: AttentionEffect;
   /** 全屏效果持续到提醒处理完；否则约 6 秒后淡出。 */

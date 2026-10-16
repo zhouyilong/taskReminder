@@ -1,6 +1,6 @@
 [package]
 name = "task_reminder_app"
-version = "2.2.2"
+version = "2.2.3"
 edition = "2021"
 
 [build-dependencies]
@@ -9,7 +9,9 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [ "tray-icon" ] }
 tauri-plugin-process = "2"
-tauri-plugin-updater = "2"
+# 只发布 MSI（更新包即安装包本身），不需要解压 .zip / .tar.gz 的 `zip` 特性；
+# 且 `zip` 4.x 已全部撤回（yanked），开启时无锁文件的构建无法解析依赖。
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 serde = { version = "1.0", features = ["derive"] }

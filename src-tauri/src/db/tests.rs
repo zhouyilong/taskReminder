@@ -793,6 +793,28 @@ fn completed_retention_setting_roundtrips_and_rejects_unknown_values() {
 }
 
 #[test]
+fn auto_backup_keep_roundtrips_and_rejects_unknown_values() {
+    let (db, dir) = temp_db();
+    assert_eq!(db.auto_backup_keep().unwrap(), 7);
+    let mut settings = db.load_settings().unwrap();
+    assert_eq!(settings.auto_backup_keep, 7);
+    settings.auto_backup_keep = 30;
+    db.save_settings(&settings).unwrap();
+    assert_eq!(db.load_settings().unwrap().auto_backup_keep, 30);
+    assert_eq!(db.auto_backup_keep().unwrap(), 30);
+    settings.auto_backup_keep = 0;
+    db.save_settings(&settings).unwrap();
+    assert_eq!(db.auto_backup_keep().unwrap(), 7);
+    db.get_conn()
+        .unwrap()
+        .execute("UPDATE settings SET auto_backup_keep = 100", [])
+        .unwrap();
+    assert_eq!(db.auto_backup_keep().unwrap(), 7);
+    assert_eq!(db.load_settings().unwrap().auto_backup_keep, 7);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn attention_settings_roundtrip_with_defaults_and_light_read() {
     let (db, dir) = temp_db();
     let mut settings = db.load_settings().unwrap();
@@ -937,5 +959,114 @@ fn recurring_end_condition_roundtrip_and_import() {
             .remaining_count,
         Some(0)
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+fn task_with(db: &DbManager, title: &str, tags: &[&str], project: &str) -> String {
+    let meta = TaskMeta {
+        tags: tags.iter().map(|tag| tag.to_string()).collect(),
+        priority: 0,
+        project: project.to_string(),
+    };
+    db.create_task_with_meta(title, None, &meta).unwrap().id
+}
+
+fn set_updated_at(db: &DbManager, table: &str, id: &str, value: &str) {
+    db.get_conn()
+        .unwrap()
+        .execute(
+            &format!("UPDATE {table} SET updated_at = ?1 WHERE id = ?2"),
+            params![value, id],
+        )
+        .unwrap();
+}
+
+#[test]
+fn rename_tag_merges_case_insensitively_and_touches_only_changed_rows() {
+    let (db, dir) = temp_db();
+    let a = task_with(&db, "a", &["Work", "家务"], "");
+    let b = task_with(&db, "b", &["work", "重要"], "");
+    let c = task_with(&db, "c", &["其他"], "");
+    let mut recurring = sample_recurring();
+    recurring.tags = vec!["work".to_string()];
+    let r = db.create_recurring_task(&recurring).unwrap().id;
+    let old = "2026-01-01T00:00:00";
+    for id in [&a, &b, &c] {
+        set_updated_at(&db, "tasks", id, old);
+    }
+    set_updated_at(&db, "recurring_tasks", &r, old);
+
+    // 改成已存在的“重要”：b 上合并为一个。
+    assert_eq!(db.rename_tag("#WORK", "重要").unwrap(), 3);
+    assert_eq!(db.get_task(&a).unwrap().unwrap().tags, vec!["重要", "家务"]);
+    assert_eq!(db.get_task(&b).unwrap().unwrap().tags, vec!["重要"]);
+    assert_eq!(
+        db.get_recurring_task(&r).unwrap().unwrap().tags,
+        vec!["重要"]
+    );
+    let untouched = db.get_task(&c).unwrap().unwrap();
+    assert_eq!(untouched.updated_at.as_deref(), Some(old));
+    assert_ne!(
+        db.get_task(&a).unwrap().unwrap().updated_at.as_deref(),
+        Some(old)
+    );
+
+    // 没有用到的标签、只改大小写。
+    assert_eq!(db.rename_tag("不存在", "x").unwrap(), 0);
+    assert_eq!(db.rename_tag("其他", "其他").unwrap(), 0);
+    assert!(db.rename_tag("其他", " # ").is_err());
+    assert!(db.rename_tag("", "x").is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn remove_tag_skips_deleted_rows_and_keeps_completed_ones() {
+    let (db, dir) = temp_db();
+    let done = task_with(&db, "done", &["旧", "保留"], "");
+    db.complete_task(&done).unwrap();
+    let gone = task_with(&db, "gone", &["旧"], "");
+    db.delete_task(&gone).unwrap();
+    assert_eq!(db.remove_tag("旧").unwrap(), 1);
+    assert_eq!(db.get_task(&done).unwrap().unwrap().tags, vec!["保留"]);
+    let deleted_tags: String = db
+        .get_conn()
+        .unwrap()
+        .query_row("SELECT tags FROM tasks WHERE id = ?", [&gone], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(deleted_tags, "旧");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn rename_project_moves_merges_and_clears() {
+    let (db, dir) = temp_db();
+    let a = task_with(&db, "a", &[], "装修");
+    let b = task_with(&db, "b", &[], "@装修");
+    let c = task_with(&db, "c", &[], "搬家");
+    let gone = task_with(&db, "gone", &[], "装修");
+    db.delete_task(&gone).unwrap();
+    let project = |id: &str| db.get_task(id).unwrap().unwrap().project;
+
+    assert_eq!(db.rename_project("@装修", "新家").unwrap(), 2);
+    assert_eq!(project(&a), "新家");
+    assert_eq!(project(&b), "新家");
+    // 合并到已有项目。
+    assert_eq!(db.rename_project("搬家", "新家").unwrap(), 1);
+    assert_eq!(project(&c), "新家");
+    // 移出到未分组。
+    assert_eq!(db.rename_project("新家", "").unwrap(), 3);
+    assert_eq!(project(&a), "");
+    assert_eq!(db.rename_project("新家", "x").unwrap(), 0);
+    assert!(db.rename_project(" @ ", "x").is_err());
+    let deleted: String = db
+        .get_conn()
+        .unwrap()
+        .query_row("SELECT project FROM tasks WHERE id = ?", [&gone], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(deleted, "装修");
     let _ = std::fs::remove_dir_all(dir);
 }

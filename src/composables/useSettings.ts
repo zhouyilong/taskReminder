@@ -39,6 +39,7 @@ const settingsDraft = reactive<AppSettings>({
   stickySnapEnabled: true,
   holidayAutoUpdate: true,
   completedRetentionDays: 30,
+  autoBackupKeep: 7,
   attentionEffect: "banner",
   attentionUntilHandled: false,
   attentionIntensity: 2,

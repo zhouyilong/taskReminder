@@ -55,6 +55,21 @@ impl DbManager {
         ))
     }
 
+    /// 每日自动备份保留的份数。只读一列，每日备份时调用，避免 `load_settings` 访问凭据库。
+    pub fn auto_backup_keep(&self) -> Result<i64, AppError> {
+        let conn = self.get_conn()?;
+        let value: Option<i64> = conn
+            .query_row(
+                "SELECT auto_backup_keep FROM settings WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(normalize_auto_backup_keep(
+            value.unwrap_or(DEFAULT_AUTO_BACKUP_KEEP),
+        ))
+    }
+
     /// 提醒弹出与再次提醒用到的设置。只读这几列，巡检时调用，避免 `load_settings` 访问凭据库。
     pub fn notification_prefs(&self) -> Result<NotificationPrefs, AppError> {
         let conn = self.get_conn()?;
@@ -118,7 +133,8 @@ impl DbManager {
                    native_notification_enabled, sticky_toggle_shortcut, secret_storage,
                    sticky_snap_enabled, holiday_auto_update, completed_retention_days,
                    attention_effect, attention_until_handled, attention_repeat_minutes,
-                   notification_screen, attention_intensity, attention_color
+                   notification_screen, attention_intensity, attention_color,
+                   auto_backup_keep
                    FROM settings WHERE id = 1";
         let mut stmt = conn.prepare(sql)?;
         let row = stmt.query_row([], |row| {
@@ -210,6 +226,10 @@ impl DbManager {
                 attention_color: attention::normalize_color(
                     &row.get::<_, Option<String>>(41)?.unwrap_or_default(),
                 ),
+                auto_backup_keep: normalize_auto_backup_keep(
+                    row.get::<_, Option<i64>>(42)?
+                        .unwrap_or(DEFAULT_AUTO_BACKUP_KEEP),
+                ),
             })
         })?;
         let mut settings = row;
@@ -241,7 +261,8 @@ impl DbManager {
                  native_notification_enabled = ?, sticky_toggle_shortcut = ?, secret_storage = ?,
                  sticky_snap_enabled = ?, holiday_auto_update = ?, completed_retention_days = ?,
                  attention_effect = ?, attention_until_handled = ?, attention_repeat_minutes = ?,
-                 notification_screen = ?, attention_intensity = ?, attention_color = ?
+                 notification_screen = ?, attention_intensity = ?, attention_color = ?,
+                 auto_backup_keep = ?
              WHERE id = 1",
             params![
                 if settings.auto_start_enabled { 1 } else { 0 },
@@ -286,6 +307,7 @@ impl DbManager {
                 attention::normalize_screen(&settings.notification_screen),
                 attention::normalize_intensity(settings.attention_intensity),
                 attention::normalize_color(&settings.attention_color),
+                normalize_auto_backup_keep(settings.auto_backup_keep),
             ],
         )?;
         Ok(())

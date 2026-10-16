@@ -4,7 +4,7 @@
 - `src/` 存放 Vue 3 + TypeScript 前端，共三个窗口入口：
   - 主窗口：`index.html` → `src/main.ts` → `src/App.vue`（只负责外壳：标题栏、侧边栏、按 Tab 切换视图、挂载共享弹窗与全局事件监听）。
     - `src/views/`：每个 Tab 一个视图——`TodayView`（今天时间线）、`CalendarView`（日历月视图 / 周视图，可拖动待办改期到某天或某个时段）、`TasksView`（含搜索、标签/优先级筛选与排序）、`CompletedView`、`RecurringView`、`StickiesView`（便签管理列表：显示中 / 已隐藏 / 已关闭，打开、置前、关闭）、`RecordsView`、`StatsView`（统计）、`TrashView`（回收站）。Tab 键定义在 `src/navigation.ts`，上次打开的 Tab 记在 `localStorage.activeTab`。
-    - `src/composables/`：模块级单例的共享状态——`useAppData`（四个列表、`refreshAll`、`dataVersion`）、`useSettings`（设置草稿、同步状态、设置/云同步弹窗开关）、`useUpdater`、`useUiPrefs`（主题、缩放、透明度、侧边栏）、`useDialogs`（确认框、详情、编辑待办/循环提醒）、`useItemActions`（完成、删除、右键菜单等通用操作）、`useSmartAdd`（带自然语言识别的新建待办/循环提醒）、`useContextMenu`、`usePagination`、`useNow`、`useSearchPalette`（全局搜索面板开关）。
+    - `src/composables/`：模块级单例的共享状态——`useAppData`（四个列表、`refreshAll`、`dataVersion`）、`useSettings`（设置草稿、同步状态、设置/云同步弹窗开关）、`useUpdater`、`useUiPrefs`（主题、缩放、透明度、侧边栏）、`useDialogs`（确认框、详情、编辑待办/循环提醒）、`useItemActions`（完成、删除、右键菜单等通用操作）、`useSmartAdd`（带自然语言识别的新建待办/循环提醒）、`useContextMenu`、`usePagination`、`useNow`、`useSearchPalette`（全局搜索面板开关）、`useLabelManager`（标签与项目管理弹窗开关与最近一次改名，待办视图据此让筛选跟随）。
   - 提醒弹窗：`notification.html` → `src/notification.ts` → `src/NotificationApp.vue`。
   - 全屏提醒效果：`attention.html` → `src/attention.ts` → `src/AttentionApp.vue`（每块屏幕一个透明、鼠标穿透、不可聚焦的置顶窗口，标签为 `attention-<批次>-<序号>`，内容由后端注入到 `window.__ATTENTION__`）。
   - 桌面便签：`sticky-note-item.html` → `src/stickyNoteItem.ts` → `src/StickyNoteItemApp.vue`（每张便签一个独立窗口，窗口标签为 `sticky-note-item-<编码后的 id>`）。
@@ -24,6 +24,7 @@
   - `SearchPalette.vue`：全局搜索面板（`Ctrl+K` / 标题栏按钮），挂在 App.vue，回车跳到对应页面并打开编辑或详情。
   - `StatsBarChart.vue`：统计面板的堆叠柱状图（提醒与完成趋势共用）。
   - `ChecklistProgress.vue`：正文中勾选清单的进度徽标（如 2/5）。
+  - `TagProjectManager.vue`：标签与项目管理（重命名、合并、移除，v2.2.3），挂在 App.vue，由待办工具栏的“管理标签”打开。
 - `src/api.ts` 封装所有 Tauri `invoke` 命令；`src/types.ts` 为前后端共享的数据类型。
 - `src/markdown.ts` Markdown 转纯文本/预览文本工具（列表描述、提醒记录去掉前导列表标记）与勾选清单进度（`checklistProgress`，Crepe 保存为 `* [ ]`）。
 - `src/format.ts` 主窗口共用的时间与文案格式化；`src/recurring.ts` 循环规则展示、表单草稿、校验与提交载荷。
@@ -36,7 +37,7 @@
 - `src/due.ts`（截止时间与提前提醒、`taskAnchorTime`、拖动改期时平移提醒）、`src/reorder.ts`（拖拽排序的位置计算）、`src/selection.ts`（列表多选）、`src/keyboard.ts`（主窗口快捷键映射）、`src/modalStack.ts`（Esc 关闭最上层弹窗）、`src/notificationSound.ts`（提醒弹窗提示音）为纯函数或小工具，测试在同名 `*.spec.ts`。
 - `src/weekdays.ts` 每周位掩码工具（与后端一致：周一 = bit0 … 周日 = bit6）；`src/shortcut.ts` 全局快捷键录制与展示。
 - `src-tauri/` 存放 Tauri 应用的 Rust 后端。
-  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（插件、命令注册与启动流程）、`commands/`（前端 `invoke` 的命令，按业务分为 `tasks`、`recurring`、`notification`、`trash`、`settings`、`sticky`、`system`、`data`，公共的 `ApiResult` / `into_api` 在 `commands/mod.rs`）、`windows/`（窗口事件；`windows/sticky.rs` 为便签窗口的标签编码、创建显示、层级与 UI 状态注入，以及 Windows 上的贴边吸附；`windows/placement.rs` 为便签位置的纯几何计算：越界校正、吸附）、`db/`（SQLite 读写：`mod.rs` 为连接池、初始化与凭据库，业务表按 `tasks`、`recurring`、`records`、`sticky`、`settings`、`tombstones`、`import`、`migrations` 拆分，测试在 `db/tests.rs`）、`scheduler.rs`（提醒调度与弹窗）、`attention.rs`（全屏提醒效果窗口、弹窗所在屏幕的定位、再次提醒的判断）、`recurrence.rs`（循环规则计算）、`sync/`（WebDAV 同步：`service.rs` 调度与入口、`remote.rs` 同步主流程与加密、`merge.rs` 快照导出与按行合并、`webdav.rs` 客户端与同步锁，测试在 `sync/tests.rs`）、`sync_schema.rs`（参与同步的表与列的唯一定义、合并时保留不认识的列）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（时间的唯一入口：`now()`、数据库时间格式与各固定格式的解析与格式化）、`holidays.rs`（中国法定节假日与调休：内置数据、在线更新缓存与用户覆盖文件的合并与校验）、`holiday_update.rs`（每天从仓库拉取节假日数据）、`quick_add.rs`（快速添加窗口）、`shortcuts.rs`（全局快捷键统一注册：快速添加、显示/隐藏全部便签）、`quiet_hours.rs`（勿扰时段判断）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单与提示：下一条提醒、完成/推迟、显示/隐藏全部便签）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`kinds.rs`（状态、类型、处理结果、循环模式的强类型枚举，未知值原样保留）、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
+  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（插件、命令注册与启动流程）、`commands/`（前端 `invoke` 的命令，按业务分为 `tasks`、`recurring`、`notification`、`trash`、`settings`、`sticky`、`system`、`data`，公共的 `ApiResult` / `into_api` 在 `commands/mod.rs`）、`windows/`（窗口事件；`windows/sticky.rs` 为便签窗口的标签编码、创建显示、层级与 UI 状态注入，以及 Windows 上的贴边吸附；`windows/placement.rs` 为便签位置的纯几何计算：越界校正、吸附）、`db/`（SQLite 读写：`mod.rs` 为连接池、初始化与凭据库，业务表按 `tasks`、`recurring`、`records`、`sticky`、`settings`、`tombstones`、`import`、`labels`（标签与项目的批量改名）、`migrations` 拆分，测试在 `db/tests.rs`）、`scheduler.rs`（提醒调度与弹窗）、`attention.rs`（全屏提醒效果窗口、弹窗所在屏幕的定位、再次提醒的判断）、`recurrence.rs`（循环规则计算）、`sync/`（WebDAV 同步：`service.rs` 调度与入口、`remote.rs` 同步主流程与加密、`merge.rs` 快照导出与按行合并、`webdav.rs` 客户端与同步锁，测试在 `sync/tests.rs`）、`sync_schema.rs`（参与同步的表与列的唯一定义、合并时保留不认识的列）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（时间的唯一入口：`now()`、数据库时间格式与各固定格式的解析与格式化）、`holidays.rs`（中国法定节假日与调休：内置数据、在线更新缓存与用户覆盖文件的合并与校验）、`holiday_update.rs`（每天从仓库拉取节假日数据）、`quick_add.rs`（快速添加窗口）、`shortcuts.rs`（全局快捷键统一注册：快速添加、显示/隐藏全部便签）、`quiet_hours.rs`（勿扰时段判断）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单与提示：下一条提醒、完成/推迟、显示/隐藏全部便签）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`kinds.rs`（状态、类型、处理结果、循环模式的强类型枚举，未知值原样保留）、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
   - `src-tauri/migrations/` 存放数据库迁移文件；新增迁移后需在 `db/migrations.rs` 的 `migration_scripts()` 中登记；新增同步列还要登记到 `sync_schema.rs` 的 `SYNC_TABLES`（测试会检查迁移结果与登记一致）。
   - `src-tauri/data/holidays-cn.json` 为内置法定节假日数据（`off` 放假日、`work` 调休上班日，支持 `[开始, 结束]` 区间），每年国务院发布次年安排后追加，并补充 `holidays.rs` 中的测试。
   - **该文件同时是在线更新的数据源**：客户端每天从 `main` 分支拉取（jsDelivr / GitHub raw），推送到 `main` 后已发布的应用即可获得新年份。客户端只采用内置数据没有的年份，且拒绝删减已下载年份的文件，因此**只能追加年份**；已发布年份的更正需随应用版本发布（内置数据优先）。CI 的 `holidays` 任务用 `scripts/check-holidays.mjs` 与基准版本比较：删除年份或日期一律失败；已有年份新增日期视为更正，需在提交信息或 PR 标题中加入 `holidays-correction`。
@@ -172,10 +173,18 @@
 - 标签存于 `tasks.tags`（逗号分隔），读写统一经过 `models::normalize_tags`（去掉 `#`、逗号，不区分大小写去重，最多 10 个、每个 24 字）；前端 `src/tasks.ts` 的 `normalizeTags` 与之保持一致。
 - `update_task` 的 `tags` / `priority` 省略时保留原值：稍后提醒、日历拖动改期等只改时间的调用不要传这两个字段。
 
+### 标签与项目的批量管理（v2.2.3）
+- `rename_tag` / `remove_tag` / `rename_project`（`db/labels.rs`）在一个事务内改写未删除的待办（含已完成）与循环提醒（项目只在待办上），名称不区分大小写，经 `normalize_tags` / `normalize_project` 规范化；新名称已存在即合并。只更新实际变化的行并写 `updated_at`，开启同步时会同步到其他设备。
+- 移出项目 = `rename_project` 传空字符串；项目仍没有单独的表，改名就是改写每条待办的 `tasks.project`。
+
 ### 导入导出与备份
 - 文件对话框由后端 `tauri-plugin-dialog` 弹出（`export_data` / `import_data` 为 async 命令，阻塞对话框不能在主线程等待），前端不传文件路径；因此不需要为对话框添加前端权限。
 - 导入、备份恢复都按“较新的 `updated_at` 胜出”合并（导入走 `DbManager::import_rows`，恢复复用 `sync::merge_databases`），之后调用 `schedule_existing` 并 `notify_local_change`。
 - 备份文件名固定为 `taskreminder-YYYYMMDD-HHMMSS.db`，`backup::resolve_backup` 只接受这种名字，防止路径穿越。
+- 自动备份保留份数为本机设置 `auto_backup_keep`（7 / 14 / 30，迁移 `V2.2.4`），`backup::keep_count` 只读这一列（不访问凭据库）；`create_backup` / `ensure_daily_backup` 按它清理。`open_backup_dir` 只打开固定的 `backups/` 目录，不接受前端路径。
+
+### 依赖
+- `tauri-plugin-updater` 关闭默认的 `zip` 特性（只开 `rustls-tls`、`system-proxy`）：只发布 MSI，更新包即安装包本身；`zip` 4.x 已全部撤回，开启时无锁文件的构建无法解析依赖。仓库不提交 `Cargo.lock`，新增依赖时留意被撤回的版本。
 
 ### 同步状态码
 - `settings.webdav_last_sync_status` 存状态码（`sync::SyncState`：`never` / `syncing` / `success` / `first_sync` / `lock_busy` / `failed` / `passphrase_mismatch`），`get_status` 与 `sync-status` 事件也返回状态码；文案只在前端 `src/syncStatus.ts` 映射。
@@ -206,6 +215,7 @@
 - **问题**：便签窗口无边框但可缩放，系统样式里仍有 `WS_THICKFRAME`（tao 对无边框可缩放窗口保留 `WS_CAPTION | WS_SIZEBOX`），拖动标题栏时 Windows 会做 Aero Snap：鼠标碰到屏幕顶边最大化、碰到左右边占半屏；Tauri 的 `data-tauri-drag-region` 双击也会最大化。旧实现靠轮询鼠标键判断拖动结束，系统贴靠改了尺寸后吸附被跳过。
 - **解决**：便签窗口 `maximizable(false)`；`windows/sticky.rs` 的 `snap::install` 给窗口挂子类过程，在 `WM_SYSCOMMAND` / `SC_MOVE`（系统移动循环）前临时去掉 `WS_THICKFRAME | WS_MAXIMIZEBOX`，循环返回即拖动结束，恢复样式后在后台线程吸附。吸附（`placement::snap_position`）最后经 `keep_inside` 把拖出屏幕的便签收回到边缘（越过的部分在另一块屏幕上时不收回）。
 - **规则**：不要在子类过程（窗口过程）里直接调用 Tauri 窗口接口，交给后台线程；子类只能在窗口所属的主线程上挂（`run_on_main_thread`）。`windows` crate（0.52）与 Tauri 依赖的版本不同，HWND 按原始句柄转换。
+- 2.2.2 之前被系统贴靠贴成全屏、半屏的便签：打开时（`display_size`）宽或高达到所在工作区 95% 且不超出 16 px 的恢复为默认尺寸并保存（`placement::looks_snapped`）；比工作区大得多的（来自更大屏幕的设备）不处理。
 
 ### 全局快捷键
 - 快捷键由 `shortcuts::apply_shortcuts` 统一注册（先 `unregister_all` 再逐个注册：快速添加、显示/隐藏全部便签），启动时与保存设置后调用；某个失败不影响其他，原因合并后通过 `apply_quick_add_shortcut` 命令返回给设置界面。失败（格式无效、被其他程序占用、Wayland 不支持等）不能阻止应用启动。

@@ -71,6 +71,18 @@ export const api = {
   async batchUpdateTasks(ids: string[], payload: TaskBatchPayload): Promise<number> {
     return invoke("batch_update_tasks", { ids, payload });
   },
+  /** 标签改名（新名称已存在即合并），作用于待办与循环提醒，返回改动的条数。 */
+  async renameTag(oldName: string, newName: string): Promise<number> {
+    return invoke("rename_tag", { oldName, newName });
+  },
+  /** 从所有待办与循环提醒上去掉标签，返回改动的条数。 */
+  async removeTag(name: string): Promise<number> {
+    return invoke("remove_tag", { name });
+  },
+  /** 项目改名或合并（`newName` 为空即移出到未分组），返回改动的条数。 */
+  async renameProject(oldName: string, newName: string): Promise<number> {
+    return invoke("rename_project", { oldName, newName });
+  },
   /** 设置便签颜色（空字符串为默认颜色）。 */
   async setStickyNoteColor(taskId: string, color: string): Promise<void> {
     return invoke("set_sticky_note_color", { taskId, color });
@@ -153,6 +165,9 @@ export const api = {
   },
   async createBackupNow(): Promise<void> {
     return invoke("create_backup_now");
+  },
+  async openBackupDir(): Promise<void> {
+    return invoke("open_backup_dir");
   },
   async restoreBackup(name: string): Promise<void> {
     return invoke("restore_backup", { name });

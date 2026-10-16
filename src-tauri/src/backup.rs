@@ -14,13 +14,12 @@ use serde::{Deserialize, Serialize};
 use crate::db::DbManager;
 use crate::errors::AppError;
 use crate::kinds::{RepeatMode, TaskStatus};
-use crate::models::{RecurringTask, ReminderRecord, Task, PRIORITY_MAX};
+use crate::models::{RecurringTask, ReminderRecord, Task, DEFAULT_AUTO_BACKUP_KEEP, PRIORITY_MAX};
 use crate::recurrence::{self, weekday_mask};
 use crate::time::{self, format_datetime, parse_datetime_any};
 
 pub const BACKUP_APP_ID: &str = "TaskReminder";
 pub const BACKUP_FORMAT_VERSION: u32 = 1;
-pub const AUTO_BACKUP_KEEP: usize = 7;
 const AUTO_BACKUP_PREFIX: &str = "taskreminder-";
 const AUTO_BACKUP_DIR: &str = "backups";
 
@@ -671,7 +670,17 @@ fn backups_to_prune(mut names: Vec<String>, keep: usize) -> Vec<String> {
     names.into_iter().skip(keep).collect()
 }
 
-pub fn create_backup(db_path: &Path, now: &NaiveDateTime) -> Result<PathBuf, AppError> {
+/// 自动备份保留的份数（本机设置 `auto_backup_keep`，读取失败时按默认）。
+pub fn keep_count(db: &DbManager) -> usize {
+    db.auto_backup_keep().unwrap_or(DEFAULT_AUTO_BACKUP_KEEP) as usize
+}
+
+/// 创建一份备份，并只保留最近 `keep` 份。
+pub fn create_backup(
+    db_path: &Path,
+    now: &NaiveDateTime,
+    keep: usize,
+) -> Result<PathBuf, AppError> {
     let dir = backup_dir(db_path);
     std::fs::create_dir_all(&dir)?;
     let target = dir.join(backup_file_name(now));
@@ -681,7 +690,7 @@ pub fn create_backup(db_path: &Path, now: &NaiveDateTime) -> Result<PathBuf, App
     let conn = Connection::open(db_path)?;
     let escaped = target.to_string_lossy().replace('\'', "''");
     conn.execute_batch(&format!("VACUUM INTO '{}'", escaped))?;
-    prune_backups(&dir, AUTO_BACKUP_KEEP)?;
+    prune_backups(&dir, keep)?;
     Ok(target)
 }
 
@@ -700,6 +709,7 @@ pub fn prune_backups(dir: &Path, keep: usize) -> Result<(), AppError> {
 pub fn ensure_daily_backup(
     db_path: &Path,
     now: &NaiveDateTime,
+    keep: usize,
 ) -> Result<Option<PathBuf>, AppError> {
     let today = now.date();
     let has_today = list_backups(&backup_dir(db_path))
@@ -709,7 +719,7 @@ pub fn ensure_daily_backup(
     if has_today {
         return Ok(None);
     }
-    create_backup(db_path, now).map(Some)
+    create_backup(db_path, now, keep).map(Some)
 }
 
 /// 找到备份文件的完整路径；名字不合法或文件不存在时报错。
@@ -1023,17 +1033,21 @@ mod tests {
                 .and_hms_opt(8, 0, 0)
                 .unwrap()
         };
-        assert!(ensure_daily_backup(&db_path, &day(1)).unwrap().is_some());
+        let keep = keep_count(&db);
+        assert_eq!(keep, 7);
+        assert!(ensure_daily_backup(&db_path, &day(1), keep)
+            .unwrap()
+            .is_some());
         assert!(
-            ensure_daily_backup(&db_path, &(day(1) + Duration::hours(3)))
+            ensure_daily_backup(&db_path, &(day(1) + Duration::hours(3)), keep)
                 .unwrap()
                 .is_none()
         );
         for d in 2..=10 {
-            ensure_daily_backup(&db_path, &day(d)).unwrap();
+            ensure_daily_backup(&db_path, &day(d), keep).unwrap();
         }
         let backups = list_backups(&backup_dir(&db_path));
-        assert_eq!(backups.len(), AUTO_BACKUP_KEEP);
+        assert_eq!(backups.len(), 7);
         assert_eq!(backups[0].name, "taskreminder-20260910-080000.db");
         assert_eq!(backups[0].created_at, "2026-09-10T08:00:00");
 
@@ -1045,6 +1059,35 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1);
         assert!(resolve_backup(&db_path, "../test.db").is_err());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn backup_keep_follows_setting() {
+        let (db, dir) = temp_db();
+        let db_path = db.db_path();
+        let mut settings = db.load_settings().unwrap();
+        settings.auto_backup_keep = 14;
+        db.save_settings(&settings).unwrap();
+        assert_eq!(keep_count(&db), 14);
+        let day = |d: u32| {
+            chrono::NaiveDate::from_ymd_opt(2026, 9, d)
+                .unwrap()
+                .and_hms_opt(8, 0, 0)
+                .unwrap()
+        };
+        for d in 1..=20 {
+            ensure_daily_backup(&db_path, &day(d), keep_count(&db)).unwrap();
+        }
+        assert_eq!(list_backups(&backup_dir(&db_path)).len(), 14);
+
+        // 调小后，下一次备份时清理到新的份数。
+        settings.auto_backup_keep = 7;
+        db.save_settings(&settings).unwrap();
+        ensure_daily_backup(&db_path, &day(21), keep_count(&db)).unwrap();
+        let backups = list_backups(&backup_dir(&db_path));
+        assert_eq!(backups.len(), 7);
+        assert_eq!(backups[0].name, "taskreminder-20260921-080000.db");
         let _ = std::fs::remove_dir_all(dir);
     }
 

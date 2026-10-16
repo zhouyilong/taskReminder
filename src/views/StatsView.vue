@@ -132,15 +132,35 @@
         <section class="stats-card">
           <header class="stats-card-header">
             <div>
-              <div class="stats-card-title">按标签</div>
-              <div class="stats-card-subtitle">提醒按所属待办或循环提醒的标签汇总，多个标签各计一次</div>
+              <div class="stats-card-title">{{ activeGroup === "project" ? "按项目" : "按标签" }}</div>
+              <div class="stats-card-subtitle">
+                {{
+                  activeGroup === "project"
+                    ? "提醒按所属待办的项目汇总，循环提醒没有项目，计入未分组"
+                    : "提醒按所属待办或循环提醒的标签汇总，多个标签各计一次"
+                }}
+              </div>
+            </div>
+            <div v-if="hasProjects" class="segmented stats-group-toggle" role="radiogroup" aria-label="汇总方式">
+              <button
+                v-for="option in GROUP_OPTIONS"
+                :key="option.value"
+                class="segmented-item"
+                :class="{ active: groupBy === option.value }"
+                type="button"
+                role="radio"
+                :aria-checked="groupBy === option.value"
+                @click="groupBy = option.value"
+              >
+                {{ option.label }}
+              </button>
             </div>
           </header>
-          <div v-if="stats.tags.length" class="table-scroll stats-table-scroll">
+          <div v-if="groupRows.length" class="table-scroll stats-table-scroll">
             <table class="table tag-stats-table">
               <thead>
                 <tr>
-                  <th>标签</th>
+                  <th>{{ activeGroup === "project" ? "项目" : "标签" }}</th>
                   <th class="is-number">提醒</th>
                   <th class="is-number">完成</th>
                   <th class="is-number">推迟</th>
@@ -148,10 +168,10 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="item in stats.tags" :key="item.tag || '__untagged'">
+                <tr v-for="item in groupRows" :key="item.name || '__none'">
                   <td>
-                    <span v-if="item.tag" class="cell-title">#{{ item.tag }}</span>
-                    <span v-else class="cell-empty">未加标签</span>
+                    <span v-if="item.name" class="cell-title">{{ activeGroup === "project" ? "@" : "#" }}{{ item.name }}</span>
+                    <span v-else class="cell-empty">{{ activeGroup === "project" ? "未分组" : "未加标签" }}</span>
                   </td>
                   <td class="is-number cell-time">{{ item.total }}</td>
                   <td class="is-number cell-time">{{ item.counts.COMPLETED }}</td>
@@ -270,6 +290,24 @@ watch(rangeDays, days => {
 const range = computed(() => RANGE_OPTIONS.find(option => option.days === rangeDays.value) ?? RANGE_OPTIONS[0]);
 const isWeekly = computed(() => range.value.granularity === "week");
 
+// 按标签 / 按项目（v2.2.3）汇总；没有任何项目时只按标签。
+const GROUP_OPTIONS = [
+  { value: "tag", label: "标签" },
+  { value: "project", label: "项目" }
+] as const;
+type GroupBy = (typeof GROUP_OPTIONS)[number]["value"];
+const groupBy = ref<GroupBy>(safeStorage.getItem("statsGroupBy") === "project" ? "project" : "tag");
+watch(groupBy, value => {
+  safeStorage.setItem("statsGroupBy", value);
+});
+const hasProjects = computed(() => [...tasks.value, ...completedTasks.value].some(task => task.project));
+const activeGroup = computed<GroupBy>(() => (hasProjects.value ? groupBy.value : "tag"));
+const groupRows = computed(() =>
+  activeGroup.value === "project"
+    ? stats.value.projects.map(({ project, ...item }) => ({ name: project, ...item }))
+    : stats.value.tags.map(({ tag, ...item }) => ({ name: tag, ...item }))
+);
+
 const habitTag = ref("");
 const habitTagOptions = computed(() => collectTags(recurringTasks.value));
 const habits = computed(() => filterHabitsByTag(stats.value.habits, habitTag.value));
@@ -332,6 +370,14 @@ const completionColumns = computed(() =>
 </script>
 
 <style scoped>
+.stats-group-toggle {
+  flex-shrink: 0;
+}
+
+.stats-group-toggle .segmented-item {
+  white-space: nowrap;
+}
+
 .habit-tag-filter {
   height: 32px;
   min-width: 112px;

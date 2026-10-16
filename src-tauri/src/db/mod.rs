@@ -15,16 +15,17 @@ use crate::backup::ImportSummary;
 use crate::errors::AppError;
 use crate::kinds::{ReminderAction, ReminderKind, RepeatMode, TaskStatus, TaskType};
 use crate::models::{
-    default_quick_add_shortcut, normalize_attention_repeat_minutes,
+    default_quick_add_shortcut, normalize_attention_repeat_minutes, normalize_auto_backup_keep,
     normalize_completed_retention_days, normalize_priority, normalize_project, tags_from_db,
     tags_to_db, AppSettings, NotificationPrefs, RecurringTask, ReminderRecord, StickyNote, Task,
-    DEFAULT_COMPLETED_RETENTION_DAYS,
+    DEFAULT_AUTO_BACKUP_KEEP, DEFAULT_COMPLETED_RETENTION_DAYS,
 };
 use crate::quiet_hours;
 use crate::secrets::{self, SecretStore, Secrets};
 use crate::time::{self, format_datetime, now_string, parse_datetime_any};
 
 mod import;
+mod labels;
 mod migrations;
 mod records;
 mod recurring;

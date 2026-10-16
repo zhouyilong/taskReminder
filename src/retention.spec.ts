@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { completedRetentionHint, normalizeCompletedRetention, retentionCoversRange } from "./retention";
+import {
+  completedRetentionHint,
+  normalizeAutoBackupKeep,
+  normalizeCompletedRetention,
+  retentionCoversRange
+} from "./retention";
 
 describe("已完成待办保留期", () => {
   it("不认识的值按 30 天处理", () => {
@@ -21,5 +26,13 @@ describe("已完成待办保留期", () => {
     expect(retentionCoversRange(30, 84)).toBe(false);
     expect(retentionCoversRange(90, 84)).toBe(true);
     expect(retentionCoversRange(0, 365)).toBe(true);
+  });
+
+  it("自动备份份数只接受 7 / 14 / 30", () => {
+    expect(normalizeAutoBackupKeep(14)).toBe(14);
+    expect(normalizeAutoBackupKeep(30)).toBe(30);
+    expect(normalizeAutoBackupKeep(0)).toBe(7);
+    expect(normalizeAutoBackupKeep(100)).toBe(7);
+    expect(normalizeAutoBackupKeep(undefined)).toBe(7);
   });
 });

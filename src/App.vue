@@ -20,6 +20,7 @@
     <SettingsModal :app-version="appVersion" />
     <WebdavModal />
     <DataModal />
+    <TagProjectManager />
     <SearchPalette @navigate="activeTab = $event" />
     <!-- 放在最后：确认框需要叠在设置类弹窗之上。 -->
     <SharedDialogs />
@@ -35,6 +36,7 @@ import SharedDialogs from "./components/SharedDialogs.vue";
 import SettingsModal from "./components/SettingsModal.vue";
 import WebdavModal from "./components/WebdavModal.vue";
 import DataModal from "./components/DataModal.vue";
+import TagProjectManager from "./components/TagProjectManager.vue";
 import SearchPalette from "./components/SearchPalette.vue";
 import TodayView from "./views/TodayView.vue";
 import CalendarView from "./views/CalendarView.vue";
