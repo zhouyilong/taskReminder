@@ -378,6 +378,39 @@ pub fn batch_update_tasks(
     Ok(changed.len())
 }
 
+/// 标签、项目改名或移除后，有改动时标记一次本地变更。
+fn after_label_change(state: &AppState, changed: usize) -> ApiResult<usize> {
+    if changed > 0 {
+        into_api(state.sync.notify_local_change())?;
+    }
+    Ok(changed)
+}
+
+/// 把标签改名（新名称已存在即合并），作用于所有未删除的待办与循环提醒。返回改动的条数。
+#[tauri::command]
+pub fn rename_tag(state: State<AppState>, old_name: String, new_name: String) -> ApiResult<usize> {
+    let changed = into_api(state.db.rename_tag(&old_name, &new_name))?;
+    after_label_change(&state, changed)
+}
+
+/// 从所有未删除的待办与循环提醒上去掉标签。返回改动的条数。
+#[tauri::command]
+pub fn remove_tag(state: State<AppState>, name: String) -> ApiResult<usize> {
+    let changed = into_api(state.db.remove_tag(&name))?;
+    after_label_change(&state, changed)
+}
+
+/// 把项目中的待办移到另一个项目（已存在即合并，空字符串为移出到未分组）。返回改动的条数。
+#[tauri::command]
+pub fn rename_project(
+    state: State<AppState>,
+    old_name: String,
+    new_name: String,
+) -> ApiResult<usize> {
+    let changed = into_api(state.db.rename_project(&old_name, &new_name))?;
+    after_label_change(&state, changed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

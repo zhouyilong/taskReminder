@@ -83,6 +83,30 @@ export const collectProjects = (tasks: ReadonlyArray<Pick<Task, "project">>) => 
   return [...counts.values()].sort((a, b) => b.count - a.count || a.project.localeCompare(b.project, "zh-CN"));
 };
 
+/**
+ * 标签与项目管理（v2.2.3）中列出的名称与使用次数：标签来自待办（含已完成）与循环提醒，
+ * 项目来自待办（含已完成）。与后端 `rename_tag` / `rename_project` 改动的范围一致。
+ */
+export const collectLabelUsage = (
+  active: ReadonlyArray<Pick<Task, "tags" | "project">>,
+  completed: ReadonlyArray<Pick<Task, "tags" | "project">>,
+  recurring: ReadonlyArray<{ tags?: string[] }>
+) => ({
+  tags: collectTags([...active, ...completed, ...recurring]),
+  projects: collectProjects([...active, ...completed])
+});
+
+/** 在已有名称中找与 `name` 相同（不区分大小写）的另一个，用于提示“合并”。 */
+export const findOtherLabel = (names: ReadonlyArray<string>, current: string, name: string) =>
+  names.find(item => item.toLowerCase() === name.toLowerCase() && item.toLowerCase() !== current.toLowerCase()) ?? null;
+
+/**
+ * 改名或移除后筛选跟随：当前筛选正是被改名的标签 / 项目时换成新名称。
+ * 标签移除（`to` 为空）时回到全部标签；项目移出（`to` 为空）时筛选“未分组”，即那些待办的去处。
+ */
+export const followRename = <T extends string | null>(current: T, from: string, to: string): T | string =>
+  current && current.toLowerCase() === from.toLowerCase() ? to : current;
+
 export type TaskSortKey = "created" | "reminder" | "priority" | "manual";
 
 export const TASK_SORT_OPTIONS: { value: TaskSortKey; label: string }[] = [

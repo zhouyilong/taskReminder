@@ -25,6 +25,7 @@ use crate::secrets::{self, SecretStore, Secrets};
 use crate::time::{self, format_datetime, now_string, parse_datetime_any};
 
 mod import;
+mod labels;
 mod migrations;
 mod records;
 mod recurring;
