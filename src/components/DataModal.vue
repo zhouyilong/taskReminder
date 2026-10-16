@@ -21,10 +21,11 @@
     <div class="modal-section">
       <div class="data-section-title">
         本地自动备份
-        <span class="tag">每天一份，保留最近 {{ BACKUP_KEEP }} 份</span>
+        <span class="tag">每天一份，保留最近 {{ backupKeep }} 份</span>
       </div>
       <div class="form-row compact">
         <button class="button secondary" type="button" :disabled="busy" @click="handleBackupNow">立即备份</button>
+        <button class="button secondary" type="button" :disabled="busy" @click="handleOpenDir">打开备份目录</button>
         <span class="field-hint data-backup-dir" :title="backupDir">{{ backupDir || "-" }}</span>
       </div>
       <div class="data-backup-list">
@@ -43,7 +44,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import Modal from "./Modal.vue";
 import { api } from "../api";
 import { errorMessage, formatBytes, formatDateTime } from "../format";
@@ -51,10 +52,11 @@ import type { BackupInfo } from "../types";
 import { useAppData } from "../composables/useAppData";
 import { useDialogs } from "../composables/useDialogs";
 import { useSettings } from "../composables/useSettings";
+import { normalizeAutoBackupKeep } from "../retention";
 
-const BACKUP_KEEP = 7;
-
-const { dataOpen } = useSettings();
+const { dataOpen, settingsDraft } = useSettings();
+// 份数在设置中修改；这里显示已加载的设置。
+const backupKeep = computed(() => normalizeAutoBackupKeep(settingsDraft.autoBackupKeep));
 const { refreshAll } = useAppData();
 const { confirmAction } = useDialogs();
 
@@ -126,6 +128,11 @@ const handleBackupNow = () =>
     await api.createBackupNow();
     await loadBackups();
     showMessage("已创建备份");
+  });
+
+const handleOpenDir = () =>
+  run(async () => {
+    await api.openBackupDir();
   });
 
 const confirmRestore = (item: BackupInfo) => {

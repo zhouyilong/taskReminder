@@ -116,6 +116,7 @@ fn main() {
             data::import_data,
             data::list_backups,
             data::create_backup_now,
+            data::open_backup_dir,
             data::restore_backup
         ])
         .setup(|app| {

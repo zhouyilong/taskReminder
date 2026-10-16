@@ -152,6 +152,7 @@
       stickySnapEnabled: true,
       holidayAutoUpdate: true,
       completedRetentionDays: 30,
+      autoBackupKeep: 7,
       attentionEffect: "banner",
       attentionUntilHandled: false,
       attentionIntensity: 2,
@@ -362,7 +363,9 @@
     get_ui_state: () => null,
     emit_ui_state_changed: () => null,
     apply_quick_add_shortcut: () => null,
-    list_backups: () => ({ backups: [], directory: "" }),
+    list_backups: () => ({ backups: [], dir: "" }),
+    create_backup_now: () => null,
+    open_backup_dir: () => null,
     "plugin:app|version": () => "2.1.1",
     "plugin:app|name": () => "TaskReminderApp",
     "plugin:event|listen": ({ event, handler }) => {

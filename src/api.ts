@@ -154,6 +154,9 @@ export const api = {
   async createBackupNow(): Promise<void> {
     return invoke("create_backup_now");
   },
+  async openBackupDir(): Promise<void> {
+    return invoke("open_backup_dir");
+  },
   async restoreBackup(name: string): Promise<void> {
     return invoke("restore_backup", { name });
   },

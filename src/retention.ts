@@ -26,6 +26,20 @@ export const completedRetentionHint = (value: number | null | undefined, syncEna
     : local;
 };
 
+// 每日自动备份保留的份数（本机设置，与后端 `models::AUTO_BACKUP_KEEP_OPTIONS` 一致）。
+
+export const DEFAULT_AUTO_BACKUP_KEEP = 7;
+
+export const AUTO_BACKUP_KEEP_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 7, label: "7 份" },
+  { value: 14, label: "14 份" },
+  { value: 30, label: "30 份" }
+];
+
+/** 不认识的值按默认处理（与后端相同）。 */
+export const normalizeAutoBackupKeep = (value: number | null | undefined) =>
+  AUTO_BACKUP_KEEP_OPTIONS.some(item => item.value === value) ? (value as number) : DEFAULT_AUTO_BACKUP_KEEP;
+
 /**
  * 统计范围是否超出了已完成待办的保留期：超出时“完成数”与趋势不完整。
  * 永久保留时不会超出。

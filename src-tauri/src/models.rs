@@ -244,6 +244,9 @@ pub struct AppSettings {
     /// 已完成待办的保留天数（`COMPLETED_RETENTION_OPTIONS`），0 为永久保留。
     #[serde(default = "default_completed_retention_days")]
     pub completed_retention_days: i64,
+    /// 每日自动备份保留的份数（`AUTO_BACKUP_KEEP_OPTIONS`）。
+    #[serde(default = "default_auto_backup_keep")]
+    pub auto_backup_keep: i64,
     /// 到点时的全屏注意效果（`attention::EFFECT_*`）。
     #[serde(default = "default_attention_effect")]
     pub attention_effect: String,
@@ -293,6 +296,23 @@ pub fn normalize_completed_retention_days(value: i64) -> i64 {
         value
     } else {
         DEFAULT_COMPLETED_RETENTION_DAYS
+    }
+}
+
+/// 每日自动备份保留份数的可选值：7（默认）、14、30。
+pub const AUTO_BACKUP_KEEP_OPTIONS: &[i64] = &[7, 14, 30];
+pub const DEFAULT_AUTO_BACKUP_KEEP: i64 = 7;
+
+fn default_auto_backup_keep() -> i64 {
+    DEFAULT_AUTO_BACKUP_KEEP
+}
+
+/// 不认识的保留份数按默认值处理。
+pub fn normalize_auto_backup_keep(value: i64) -> i64 {
+    if AUTO_BACKUP_KEEP_OPTIONS.contains(&value) {
+        value
+    } else {
+        DEFAULT_AUTO_BACKUP_KEEP
     }
 }
 

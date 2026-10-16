@@ -141,6 +141,24 @@ test("设置已完成待办的保留期", async ({ app }) => {
   expect((calls.at(-1)!.args.settings as { completedRetentionDays: number }).completedRetentionDays).toBe(365);
 });
 
+test("自动备份保留份数与打开备份目录", async ({ app }) => {
+  await app.getByRole("button", { name: "设置", exact: true }).click();
+  const modal = app.locator(".modal", { has: app.locator(".modal-header", { hasText: "应用设置" }) });
+  const row = modal.locator(".form-row", { hasText: "自动备份保留" });
+  await expect(row.locator("select")).toHaveValue("7");
+  await row.locator("select").selectOption({ label: "14 份" });
+  await modal.getByRole("button", { name: "确认" }).click();
+  const calls = await invokeCalls(app, "save_settings");
+  expect((calls.at(-1)!.args.settings as { autoBackupKeep: number }).autoBackupKeep).toBe(14);
+
+  await app.getByRole("button", { name: "设置", exact: true }).click();
+  await modal.getByRole("button", { name: "导入导出与备份…" }).click();
+  const data = app.locator(".modal", { has: app.locator(".modal-header", { hasText: "导入导出与备份" }) });
+  await expect(data).toContainText("保留最近 14 份");
+  await data.getByRole("button", { name: "打开备份目录" }).click();
+  await expect.poll(async () => (await invokeCalls(app, "open_backup_dir")).length).toBe(1);
+});
+
 test("全屏提醒效果设置与预览", async ({ app }) => {
   await app.getByRole("button", { name: "设置", exact: true }).click();
   const modal = app.locator(".modal", { has: app.locator(".modal-header", { hasText: "应用设置" }) });

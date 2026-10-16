@@ -793,6 +793,28 @@ fn completed_retention_setting_roundtrips_and_rejects_unknown_values() {
 }
 
 #[test]
+fn auto_backup_keep_roundtrips_and_rejects_unknown_values() {
+    let (db, dir) = temp_db();
+    assert_eq!(db.auto_backup_keep().unwrap(), 7);
+    let mut settings = db.load_settings().unwrap();
+    assert_eq!(settings.auto_backup_keep, 7);
+    settings.auto_backup_keep = 30;
+    db.save_settings(&settings).unwrap();
+    assert_eq!(db.load_settings().unwrap().auto_backup_keep, 30);
+    assert_eq!(db.auto_backup_keep().unwrap(), 30);
+    settings.auto_backup_keep = 0;
+    db.save_settings(&settings).unwrap();
+    assert_eq!(db.auto_backup_keep().unwrap(), 7);
+    db.get_conn()
+        .unwrap()
+        .execute("UPDATE settings SET auto_backup_keep = 100", [])
+        .unwrap();
+    assert_eq!(db.auto_backup_keep().unwrap(), 7);
+    assert_eq!(db.load_settings().unwrap().auto_backup_keep, 7);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn attention_settings_roundtrip_with_defaults_and_light_read() {
     let (db, dir) = temp_db();
     let mut settings = db.load_settings().unwrap();
