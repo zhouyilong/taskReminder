@@ -299,6 +299,39 @@ fn visible_position(
     corrected.unwrap_or((note.pos_x, note.pos_y))
 }
 
+/// 便签应显示的尺寸。2.2.2 之前被系统贴靠贴成全屏、半屏的便签（尺寸已保存并同步），
+/// 恢复为默认尺寸并保存，其他设备随同步一起恢复。
+fn display_size(
+    app: &tauri::AppHandle,
+    window: &tauri::WebviewWindow,
+    note: &StickyNote,
+) -> (f64, f64) {
+    let width = note.width.max(STICKY_NOTE_ITEM_MIN_WIDTH);
+    let height = note.height.max(STICKY_NOTE_ITEM_MIN_HEIGHT);
+    let saved = Rect::new(note.pos_x, note.pos_y, width, height);
+    let snapped = placement::area_of(&saved, &monitor_work_areas(window))
+        .is_some_and(|area| placement::looks_snapped(width, height, &area));
+    if !snapped {
+        return (width, height);
+    }
+    if let Some(state) = app.try_state::<AppState>() {
+        match state.db.resize_sticky_note(
+            &note.task_id,
+            STICKY_NOTE_ITEM_WIDTH,
+            STICKY_NOTE_ITEM_HEIGHT,
+        ) {
+            Ok(()) => {
+                let _ = state.sync.notify_local_change();
+            }
+            Err(err) => eprintln!(
+                "[sticky-note] 恢复便签尺寸失败 task_id={} err={}",
+                note.task_id, err
+            ),
+        }
+    }
+    (STICKY_NOTE_ITEM_WIDTH, STICKY_NOTE_ITEM_HEIGHT)
+}
+
 pub fn show_sticky_note_item_window(
     app: &tauri::AppHandle,
     note: &StickyNote,
@@ -338,8 +371,7 @@ pub fn show_sticky_note_item_window(
         window
     };
 
-    let width = note.width.max(STICKY_NOTE_ITEM_MIN_WIDTH);
-    let height = note.height.max(STICKY_NOTE_ITEM_MIN_HEIGHT);
+    let (width, height) = display_size(app, &window, note);
     let _ = window.set_size(LogicalSize::new(width, height));
     let (x, y) = visible_position(&window, note, width, height);
     let _ = window.set_position(LogicalPosition::new(x, y));

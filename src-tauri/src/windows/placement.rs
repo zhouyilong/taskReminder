@@ -81,6 +81,45 @@ pub fn clamp_to_work_areas(note: Rect, areas: &[Rect]) -> Option<(f64, f64)> {
     ))
 }
 
+/// 便签所在的工作区：重叠面积最大的一个；与所有工作区都不相交时取离便签中心最近的。
+pub fn area_of(note: &Rect, areas: &[Rect]) -> Option<Rect> {
+    let areas = areas
+        .iter()
+        .filter(|area| area.width > 0.0 && area.height > 0.0);
+    let cx = note.x + note.width / 2.0;
+    let cy = note.y + note.height / 2.0;
+    areas
+        .max_by(|a, b| {
+            let by_overlap = overlap_area(note, a)
+                .partial_cmp(&overlap_area(note, b))
+                .unwrap_or(std::cmp::Ordering::Equal);
+            // 重叠相同（如都为 0）时离中心越近越优先。
+            by_overlap.then_with(|| {
+                distance_sq(cx, cy, b)
+                    .partial_cmp(&distance_sq(cx, cy, a))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+        })
+        .copied()
+}
+
+/// 与工作区同宽或同高的比例下限：达到即视为系统贴靠留下的尺寸。
+pub const SNAPPED_RATIO: f64 = 0.95;
+/// 贴靠后的尺寸可能比工作区略大（窗口边框），超出这么多以内仍算贴靠。
+pub const SNAPPED_OVERFLOW: f64 = 16.0;
+
+/// 便签尺寸是否像被系统贴靠（Aero Snap）贴成了全屏或半屏：宽或高与所在工作区几乎相同。
+/// 2.2.2 之前，拖到屏幕边缘会被系统贴靠，这个尺寸会被保存并同步。
+/// 比工作区大得多的便签（来自更大屏幕的设备）不算，四分之一屏（半宽半高）无法与手动调大的便签区分，也不算。
+pub fn looks_snapped(width: f64, height: f64, area: &Rect) -> bool {
+    let fills = |length: f64, area_length: f64| {
+        area_length > 0.0
+            && length >= area_length * SNAPPED_RATIO
+            && length <= area_length + SNAPPED_OVERFLOW
+    };
+    fills(width, area.width) || fills(height, area.height)
+}
+
 /// 贴边吸附：便签边缘离屏幕工作区边缘或其他便签边缘小于这个距离时对齐。
 // 吸附只在 Windows 上启用（见 `sticky::snap`），其他平台只在测试中使用。
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -111,7 +150,6 @@ fn nearest_candidate(current: f64, candidates: &[f64]) -> Option<f64> {
 }
 
 /// 两个矩形相交部分的面积（不相交为 0）。
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn overlap_area(a: &Rect, b: &Rect) -> f64 {
     let width = a.right().min(b.right()) - a.x.max(b.x);
     let height = a.bottom().min(b.bottom()) - a.y.max(b.y);
@@ -321,6 +359,53 @@ mod tests {
             clamp_to_work_areas(note_at(500.0, 500.0), &[small]),
             Some((0.0, 0.0))
         );
+    }
+
+    #[test]
+    fn area_of_picks_monitor_with_most_overlap() {
+        let left = Rect::new(-1280.0, 0.0, 1280.0, 693.0);
+        // 大半在左侧副屏上。
+        let note = Rect::new(-200.0, 100.0, 284.0, 280.0);
+        assert_eq!(area_of(&note, &[primary(), left]), Some(left));
+        // 完全在屏幕外时取离中心最近的。
+        let lost = Rect::new(2500.0, 100.0, 284.0, 280.0);
+        assert_eq!(area_of(&lost, &[left, primary()]), Some(primary()));
+        assert_eq!(area_of(&lost, &[]), None);
+        assert_eq!(area_of(&lost, &[Rect::new(0.0, 0.0, 0.0, 0.0)]), None);
+    }
+
+    #[test]
+    fn detects_sizes_left_by_system_snap() {
+        let area = primary();
+        // 全屏、左右半屏。
+        assert!(looks_snapped(1920.0, 1040.0, &area));
+        assert!(looks_snapped(960.0, 1040.0, &area));
+        // 带一点窗口边框也算。
+        assert!(looks_snapped(976.0, 1056.0, &area));
+        // 顶边全宽贴靠（Win11 布局）。
+        assert!(looks_snapped(1920.0, 520.0, &area));
+    }
+
+    #[test]
+    fn keeps_ordinary_and_oversized_notes() {
+        let area = primary();
+        assert!(!looks_snapped(284.0, 280.0, &area));
+        // 不足 95%。
+        assert!(!looks_snapped(600.0, 980.0, &area));
+        // 四分之一屏无法与手动调大的便签区分。
+        assert!(!looks_snapped(960.0, 520.0, &area));
+        // 比屏幕大得多：来自更大屏幕的设备，不当作贴靠。
+        assert!(!looks_snapped(600.0, 1400.0, &area));
+        assert!(!looks_snapped(284.0, 280.0, &Rect::new(0.0, 0.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn detects_snap_on_scaled_monitor() {
+        // 150% 缩放的 1920×1080 屏幕（逻辑 1280×693）贴成左半屏。
+        let scaled = Rect::new(0.0, 0.0, 1280.0, 693.0);
+        assert!(looks_snapped(640.0, 693.0, &scaled));
+        // 同一尺寸在 100% 的主屏上不算。
+        assert!(!looks_snapped(640.0, 693.0, &primary()));
     }
 
     #[test]
