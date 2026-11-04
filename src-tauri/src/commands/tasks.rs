@@ -498,6 +498,16 @@ pub struct TaskOrderPayload {
     sort_order: f64,
 }
 
+/// 设置或取消加急（v2.2.5）。
+#[tauri::command]
+pub fn set_task_urgent(state: State<AppState>, id: String, urgent: bool) -> ApiResult<bool> {
+    let changed = into_api(state.db.set_task_urgent(&id, urgent))?;
+    if changed {
+        into_api(state.sync.notify_local_change())?;
+    }
+    Ok(changed)
+}
+
 /// 拖拽排序：写入一条或多条（重新编号时）待办的手动排序位置。
 #[tauri::command]
 pub fn set_task_order(state: State<AppState>, orders: Vec<TaskOrderPayload>) -> ApiResult<usize> {

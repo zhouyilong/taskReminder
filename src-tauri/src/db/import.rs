@@ -31,8 +31,8 @@ impl DbManager {
             tx.execute(
                 "INSERT INTO tasks (id, description, sticky_content, type, status, created_at, completed_at,
                                     reminder_time, updated_at, deleted_at, tags, priority,
-                                    due_at, sticky_color, sort_order, project)
-                 VALUES (?1, ?2, ?3, 'ONE_TIME', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                                    due_at, sticky_color, sort_order, project, urgent)
+                 VALUES (?1, ?2, ?3, 'ONE_TIME', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
                  ON CONFLICT(id) DO UPDATE SET
                     description = excluded.description, sticky_content = excluded.sticky_content,
                     status = excluded.status, created_at = excluded.created_at,
@@ -40,7 +40,8 @@ impl DbManager {
                     updated_at = excluded.updated_at, deleted_at = excluded.deleted_at,
                     tags = excluded.tags, priority = excluded.priority,
                     due_at = excluded.due_at, sticky_color = excluded.sticky_color,
-                    sort_order = excluded.sort_order, project = excluded.project",
+                    sort_order = excluded.sort_order, project = excluded.project,
+                    urgent = excluded.urgent",
                 params![
                     task.id,
                     task.description.trim(),
@@ -57,6 +58,7 @@ impl DbManager {
                     crate::models::normalize_sticky_color(&task.sticky_color).unwrap_or_default(),
                     task.sort_order.filter(|value| value.is_finite()),
                     crate::models::normalize_project(&task.project),
+                    i64::from(task.urgent),
                 ],
             )?;
             summary.count(outcome);

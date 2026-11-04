@@ -34,6 +34,9 @@ pub struct Task {
     /// 项目（v2.2），空字符串为未分组；读写经 `normalize_project`。
     #[serde(default)]
     pub project: String,
+    /// 是否加急（v2.2.5），待办清单便签与列表中醒目标识。
+    #[serde(default)]
+    pub urgent: bool,
 }
 
 pub const MAX_PROJECT_CHARS: usize = 32;
@@ -184,6 +187,8 @@ pub struct TodoStickyState {
     pub height: f64,
     /// 是否锚定：置顶并锁定位置。
     pub pinned: bool,
+    /// 清单颜色（v2.2.5），取值同便签颜色（`STICKY_COLORS`），空字符串为默认颜色。
+    pub color: String,
 }
 
 pub const TODO_STICKY_WIDTH: f64 = 300.0;
@@ -200,6 +205,7 @@ impl Default for TodoStickyState {
             width: TODO_STICKY_WIDTH,
             height: TODO_STICKY_HEIGHT,
             pinned: false,
+            color: String::new(),
         }
     }
 }
@@ -225,6 +231,7 @@ impl TodoStickyState {
         } else {
             TODO_STICKY_HEIGHT
         };
+        state.color = normalize_sticky_color(&state.color).unwrap_or_default();
         state
     }
 }

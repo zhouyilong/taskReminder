@@ -29,7 +29,7 @@ pub enum TaskBatchOp {
 macro_rules! task_columns {
     () => {
         "id, description, sticky_content, type, status, created_at, completed_at, reminder_time,
-         updated_at, deleted_at, tags, priority, due_at, sticky_color, sort_order, project"
+         updated_at, deleted_at, tags, priority, due_at, sticky_color, sort_order, project, urgent"
     };
 }
 
@@ -118,6 +118,7 @@ impl DbManager {
             sticky_color: String::new(),
             sort_order: None,
             project,
+            urgent: false,
         })
     }
 
@@ -251,6 +252,17 @@ impl DbManager {
         Ok(changed > 0)
     }
 
+    /// 设置或取消加急（v2.2.5）。状态不变时不写库。
+    pub fn set_task_urgent(&self, task_id: &str, urgent: bool) -> Result<bool, AppError> {
+        let conn = self.get_conn()?;
+        let changed = conn.execute(
+            "UPDATE tasks SET urgent = ?1, updated_at = ?2
+             WHERE id = ?3 AND deleted_at IS NULL AND urgent IS NOT ?1",
+            params![i64::from(urgent), now_string(), task_id],
+        )?;
+        Ok(changed > 0)
+    }
+
     /// 写入手动排序位置（拖拽排序，可能同时给多条重新编号），只写确实变化的行。
     pub fn set_task_sort_orders(&self, orders: &[(String, f64)]) -> Result<usize, AppError> {
         let mut conn = self.get_conn()?;
@@ -359,5 +371,6 @@ pub(super) fn task_from_row(row: &rusqlite::Row<'_>) -> Result<Task, rusqlite::E
         sticky_color: row.get::<_, Option<String>>(13)?.unwrap_or_default(),
         sort_order: row.get(14)?,
         project: normalize_project(&row.get::<_, Option<String>>(15)?.unwrap_or_default()),
+        urgent: row.get::<_, Option<i64>>(16)?.unwrap_or(0) != 0,
     })
 }

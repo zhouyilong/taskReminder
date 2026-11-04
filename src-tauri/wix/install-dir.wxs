@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  默认安装目录（v2.2.5）：Tauri 的 WiX 模板用 productName（“任务提醒”）作为安装目录名，
+  这里在目录解析前把 INSTALLDIR 改为英文的 Program Files\TaskReminderApp。
+  - 之前装过的（注册表中记有安装目录，模板的 RegistrySearch 会读出）沿用原目录；
+  - 2.2.4 默认装到 Program Files\任务提醒 的，升级时改回 TaskReminderApp
+    （大版本升级会先卸载旧版本，开机自启项在应用启动时按新路径重写）。
+  安装界面中手动选择的目录不受影响（界面中改过后 INSTALLDIR 已不是旧的默认目录）。
+  通过 tauri.conf.json 的 bundle.windows.wix.fragmentPaths 引入，componentGroupRefs 引用空的
+  InstallDirDefaults 组，链接器才会带上本片段。
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <?if $(sys.BUILDARCH) = x86 ?>
+    <?define TrProgramFilesFolder = "ProgramFilesFolder" ?>
+  <?else ?>
+    <?define TrProgramFilesFolder = "ProgramFiles64Folder" ?>
+  <?endif ?>
+  <Fragment>
+    <ComponentGroup Id="InstallDirDefaults" />
+    <SetProperty Id="TR_LEGACY_INSTALLDIR"
+                 Value="[$(var.TrProgramFilesFolder)]任务提醒\"
+                 Before="AppSearch"
+                 Sequence="both" />
+    <SetDirectory Id="INSTALLDIR"
+                  Value="[$(var.TrProgramFilesFolder)]TaskReminderApp"
+                  Sequence="both">NOT Installed AND (NOT INSTALLDIR OR INSTALLDIR ~= TR_LEGACY_INSTALLDIR)</SetDirectory>
+  </Fragment>
+</Wix>

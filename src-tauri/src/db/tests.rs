@@ -689,6 +689,25 @@ fn batch_update_tasks_changes_only_live_rows_that_differ() {
 }
 
 #[test]
+fn urgent_flag_roundtrips_and_only_writes_changes() {
+    let (db, dir) = temp_db();
+    let task = db.create_task("加急", None).unwrap();
+    assert!(!task.urgent);
+    let before = db.get_task(&task.id).unwrap().unwrap().updated_at;
+    assert!(db.set_task_urgent(&task.id, true).unwrap());
+    assert!(!db.set_task_urgent(&task.id, true).unwrap(), "不变不写");
+    let saved = db.get_task(&task.id).unwrap().unwrap();
+    assert!(saved.urgent);
+    assert!(saved.updated_at >= before);
+    assert!(db.list_active_tasks().unwrap()[0].urgent);
+    assert!(db.set_task_urgent(&task.id, false).unwrap());
+    assert!(!db.get_task(&task.id).unwrap().unwrap().urgent);
+    db.delete_task(&task.id).unwrap();
+    assert!(!db.set_task_urgent(&task.id, true).unwrap(), "已删除的不改");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn sort_orders_due_and_sticky_color_roundtrip() {
     let (db, dir) = temp_db();
     let a = db.create_task("a", None).unwrap();
@@ -1131,6 +1150,7 @@ fn todo_sticky_state_defaults_and_roundtrips() {
             state.x = Some(-120.0);
             state.y = Some(40.0);
             state.pinned = true;
+            state.color = "green".to_string();
         })
         .unwrap();
     assert_eq!(db.todo_sticky_state().unwrap(), saved);
@@ -1139,5 +1159,6 @@ fn todo_sticky_state_defaults_and_roundtrips() {
         .update_todo_sticky_state(|state| state.open = false)
         .unwrap();
     assert!(!closed.open && closed.pinned);
+    assert_eq!(closed.color, "green", "颜色随其他状态保留");
     let _ = std::fs::remove_dir_all(dir);
 }

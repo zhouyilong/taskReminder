@@ -130,7 +130,23 @@ const flush = () => {
   emit("update:modelValue", nextMarkdown);
 };
 
-defineExpose({ flush });
+/** 把光标放进正文末尾（v2.2.5）；编辑器还在创建时等它就绪（最多约 2 秒）。 */
+const focus = async () => {
+  for (let i = 0; i < 40 && !crepe.value; i += 1) {
+    await new Promise(resolve => window.setTimeout(resolve, 50));
+  }
+  await nextTick();
+  const element = editorRoot.value?.querySelector<HTMLElement>(".ProseMirror[contenteditable='true'], [contenteditable='true']");
+  if (!element) return;
+  element.focus();
+  const selection = window.getSelection();
+  if (selection) {
+    selection.selectAllChildren(element);
+    selection.collapseToEnd();
+  }
+};
+
+defineExpose({ flush, focus });
 
 onBeforeUnmount(() => {
   buildToken += 1;

@@ -375,6 +375,21 @@ test("循环提醒右键设置与取消临时提醒", async ({ app }) => {
   expect(calls[1].args).toEqual({ id: "r-standup", at: null, replaceNext: false });
 });
 
+test("待办右键加急与取消加急", async ({ app }) => {
+  const row = app.locator(".tasks-table .table-row", { hasText: "写季度报告" });
+  await row.click({ button: "right" });
+  await app.locator(".context-menu-item", { hasText: "加急" }).click();
+  await expect(row.locator(".urgent-badge")).toHaveText("加急");
+  await row.click({ button: "right" });
+  await app.locator(".context-menu-item", { hasText: "取消加急" }).click();
+  await expect(row.locator(".urgent-badge")).toHaveCount(0);
+  const calls = await invokeCalls(app, "set_task_urgent");
+  expect(calls.map(call => call.args)).toEqual([
+    { id: "t-report", urgent: true },
+    { id: "t-report", urgent: false },
+  ]);
+});
+
 test("待办页打开待办清单便签", async ({ app }) => {
   await app.locator(".task-toolbar").getByRole("button", { name: "清单便签" }).click();
   expect(await invokeCalls(app, "open_todo_sticky")).toHaveLength(1);
@@ -386,12 +401,16 @@ test("待办清单便签：列表、添加、完成、打开便签与锚定", as
   await expect(page.locator(".todo-sticky-row").first()).toHaveClass(/is-overdue/);
   await expect(page.locator(".todo-sticky-count")).toContainText("4 项");
 
-  // 点击待办打开它的便签。
-  await page.locator(".todo-sticky-row", { hasText: "买菜" }).click();
+  // 单击不打开，双击打开待办的便签。
+  const groceries = page.locator(".todo-sticky-row", { hasText: "买菜" });
+  await groceries.click();
+  expect(await invokeCalls(page, "open_sticky_note")).toHaveLength(0);
+  await groceries.dblclick();
   const [open] = await invokeCalls(page, "open_sticky_note");
   expect(open.args.payload).toMatchObject({ taskId: "t-groceries", title: "买菜" });
+  expect(open.args.payload.focus).toBeUndefined();
 
-  // 输入框按自然语言新建待办。
+  // 输入框按自然语言新建待办，添加后打开它的便签并聚焦正文。
   const input = page.locator(".todo-sticky-input");
   await input.fill("明天下午3点 交周报 #工作");
   await input.press("Enter");
@@ -400,14 +419,62 @@ test("待办清单便签：列表、添加、完成、打开便签与锚定", as
   await expect(input).toHaveValue("");
   const [add] = await invokeCalls(page, "quick_add_task");
   expect(add.args.payload).toMatchObject({ description: "交周报", tags: ["工作"], reminderTime: `${tomorrow()}T15:00:00` });
+  await expect.poll(async () => (await invokeCalls(page, "open_sticky_note")).length).toBe(2);
+  const opened = (await invokeCalls(page, "open_sticky_note"))[1];
+  expect(opened.args.payload).toMatchObject({ title: "交周报", focus: true });
 
-  // 勾选完成后从清单中移除。
-  await page.locator(".todo-sticky-row", { hasText: "读书笔记" }).locator(".todo-sticky-check").click();
+  // 勾选后先显示勾与划线，可以撤销；再勾选则延迟后完成并从清单中移除。
+  const ideas = page.locator(".todo-sticky-row", { hasText: "读书笔记" });
+  const check = ideas.locator(".todo-sticky-check");
+  await check.click();
+  await expect(ideas).toHaveClass(/is-checked/);
+  await expect(check).toHaveAttribute("aria-checked", "true");
+  await check.click();
+  await expect(ideas).not.toHaveClass(/is-checked/);
+  await page.waitForTimeout(1100);
+  expect(await invokeCalls(page, "complete_task")).toHaveLength(0);
+  await check.click();
   await expect(page.locator(".todo-sticky-text", { hasText: "读书笔记" })).toHaveCount(0);
   const [complete] = await invokeCalls(page, "complete_task");
   expect(complete.args).toEqual({ id: "t-ideas" });
   // 完成不会误打开便签。
-  expect(await invokeCalls(page, "open_sticky_note")).toHaveLength(1);
+  expect(await invokeCalls(page, "open_sticky_note")).toHaveLength(2);
+
+  // 加急：醒目标识，并写入后端。
+  const report = page.locator(".todo-sticky-row", { hasText: "写季度报告" });
+  await report.hover();
+  await report.getByRole("button", { name: "加急：写季度报告" }).click();
+  await expect(report).toHaveClass(/is-urgent/);
+  await expect(report.locator(".todo-sticky-urgent-badge")).toHaveText("急");
+  await expect(page.locator(".todo-sticky-count")).toContainText("1 项加急");
+  const [urgent] = await invokeCalls(page, "set_task_urgent");
+  expect(urgent.args).toEqual({ id: "t-report", urgent: true });
+
+  // 拖动调整顺序：把“写季度报告”拖到最前。
+  const first = page.locator(".todo-sticky-row").first();
+  const reportBox = await report.boundingBox();
+  const firstBox = await first.boundingBox();
+  if (!reportBox || !firstBox) throw new Error("行不可见");
+  await page.mouse.move(reportBox.x + 60, reportBox.y + reportBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(firstBox.x + 60, firstBox.y + firstBox.height / 2, { steps: 4 });
+  await page.mouse.move(firstBox.x + 60, firstBox.y + 3, { steps: 2 });
+  await expect(first).toHaveClass(/is-drop-before/);
+  await page.mouse.up();
+  await expect(page.locator(".todo-sticky-text").first()).toHaveText("写季度报告");
+  const [order] = await invokeCalls(page, "set_task_order");
+  const orders = order.args.orders as Array<{ id: string; sortOrder: number }>;
+  const sorted = [...orders].sort((a, b) => a.sortOrder - b.sortOrder).map(entry => entry.id);
+  expect(sorted[0]).toBe("t-report");
+  // 拖动不会打开便签。
+  expect(await invokeCalls(page, "open_sticky_note")).toHaveLength(2);
+
+  // 清单颜色。
+  await page.getByTitle("清单颜色").click();
+  await page.locator(".todo-sticky-color-menu").getByTitle("绿色").click();
+  await expect(page.locator("html")).toHaveClass(/sticky-color-green/);
+  const [color] = await invokeCalls(page, "set_todo_sticky_color");
+  expect(color.args).toEqual({ color: "green" });
 
   // 锚定：置顶并锁定位置（标题栏不再可拖动）。
   await page.getByTitle("锚定清单（置顶并锁定位置）").click();

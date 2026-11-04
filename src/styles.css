@@ -18,6 +18,12 @@
   --danger: #ef5a5a;
   --danger-soft: rgba(239, 90, 90, 0.14);
   --danger-text: #ff9a9a;
+  /* 加急（v2.2.5）：待办清单便签与列表中的醒目标识。 */
+  --urgent: #ef5a5a;
+  --urgent-soft: rgba(239, 90, 90, 0.18);
+  --urgent-text: #ff9a9a;
+  --urgent-on: #ffffff;
+  --urgent-glow: rgba(239, 90, 90, 0.45);
   --success: #2fbf7a;
   --success-soft: rgba(47, 191, 122, 0.14);
   --success-text: #6fe0a8;
@@ -3046,7 +3052,7 @@ html.sticky-note-mode.is-linux .paper-note {
 
 /* 锚定后图钉常驻，标题给按钮组让出位置。 */
 .paper-note-header-pinned .paper-note-title-input {
-  margin-right: calc(116px * var(--sticky-ui-scale));
+  margin-right: calc(144px * var(--sticky-ui-scale));
 }
 
 .paper-note-title-input::placeholder {
@@ -3138,6 +3144,19 @@ html.sticky-note-mode.is-linux .paper-note {
 .paper-note-action.complete:hover {
   color: var(--success-text);
   background: var(--success-soft);
+}
+
+/* 一键复制（v2.2.5）：复制后短暂显示对勾，失败时显示警示色。 */
+.paper-note-action.copy.is-copied {
+  opacity: 1;
+  color: var(--success-text);
+  background: var(--success-soft);
+}
+
+.paper-note-action.copy.is-failed {
+  opacity: 1;
+  color: var(--danger-text);
+  background: var(--danger-soft);
 }
 
 .paper-note-close:hover {
@@ -3518,6 +3537,11 @@ html.sticky-note-mode.is-linux .paper-note {
   --danger: #e5484d;
   --danger-soft: rgba(229, 72, 77, 0.1);
   --danger-text: #d33a40;
+  --urgent: #e5484d;
+  --urgent-soft: rgba(229, 72, 77, 0.12);
+  --urgent-text: #c9353b;
+  --urgent-on: #ffffff;
+  --urgent-glow: rgba(229, 72, 77, 0.35);
   --success: #1fa968;
   --success-soft: rgba(31, 169, 104, 0.12);
   --success-text: #178a54;
@@ -4437,6 +4461,20 @@ html.sticky-note-mode.is-linux .paper-note {
 .priority-badge.is-p3 {
   background: var(--danger-soft);
   color: var(--danger-text);
+}
+
+/* 加急（v2.2.5）：实心红底，比优先级“高”更醒目。 */
+.urgent-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: var(--urgent);
+  color: var(--urgent-on);
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
 }
 
 .task-tag {

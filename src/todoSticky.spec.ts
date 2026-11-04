@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseTodoInput, todoStickyItems, todoStickySummary } from "./todoSticky";
+import { dropIndexAt, parseTodoInput, todoStickyItems, todoStickySummary } from "./todoSticky";
 import type { Task } from "./types";
 
 const task = (id: string, extra: Partial<Task> = {}): Task => ({
@@ -35,6 +35,44 @@ describe("待办清单便签", () => {
     expect(items[3].when).toBe("");
     expect(todoStickySummary(items)).toBe("5 项 · 1 项已过期");
     expect(todoStickySummary([])).toBe("没有待办");
+  });
+
+  it("拖动排过的按位置在前，之后新建的按默认顺序排在后面", () => {
+    const items = todoStickyItems(
+      [
+        task("a", { sortOrder: 2048 }),
+        task("bb", { sortOrder: 1024 }),
+        task("ccc", { reminderTime: "2026-11-05T09:00:00" }),
+        task("dddd"),
+        task("eeeee", { reminderTime: "2026-11-04T15:30:00", sortOrder: Number.NaN }),
+      ],
+      now
+    );
+    expect(items.map(item => item.task.id)).toEqual(["bb", "a", "eeeee", "ccc", "dddd"]);
+  });
+
+  it("加急的待办带标识并计入头部文案", () => {
+    const items = todoStickyItems(
+      [task("a", { urgent: true }), task("bb", { dueAt: "2026-11-03T18:00:00", urgent: true }), task("ccc")],
+      now
+    );
+    expect(items.map(item => item.urgent)).toEqual([true, true, false]);
+    expect(todoStickySummary(items)).toBe("3 项 · 2 项加急 · 1 项已过期");
+    expect(todoStickySummary(items.slice(2))).toBe("1 项");
+  });
+
+  it("按指针位置计算插入位置", () => {
+    const rows = [
+      { top: 0, height: 32 },
+      { top: 32, height: 32 },
+      { top: 64, height: 32 },
+    ];
+    expect(dropIndexAt(rows, -5)).toBe(0);
+    expect(dropIndexAt(rows, 15)).toBe(0);
+    expect(dropIndexAt(rows, 17)).toBe(1);
+    expect(dropIndexAt(rows, 60)).toBe(2);
+    expect(dropIndexAt(rows, 90)).toBe(3);
+    expect(dropIndexAt([], 10)).toBe(0);
   });
 
   it("标题只取第一行", () => {

@@ -1,5 +1,6 @@
 <template>
-  <span v-if="project || priority || tags.length" class="task-badges">
+  <span v-if="urgent || project || priority || tags.length" class="task-badges">
+    <span v-if="urgent" class="urgent-badge" title="加急">加急</span>
     <button
       v-if="project"
       type="button"
@@ -40,7 +41,7 @@ import { priorityLabel, priorityOf } from "../tasks";
 import type { Task } from "../types";
 
 const props = defineProps<{
-  task: Pick<Task, "tags" | "priority"> & { project?: string };
+  task: Pick<Task, "tags" | "priority"> & { project?: string; urgent?: boolean };
   clickable?: boolean;
   activeTag?: string;
   /** 当前筛选的项目（v2.2）；null / undefined 表示没有按项目筛选。 */
@@ -55,4 +56,5 @@ const emit = defineEmits<{
 const priority = computed(() => priorityOf(props.task));
 const tags = computed(() => props.task.tags ?? []);
 const project = computed(() => props.task.project ?? "");
+const urgent = computed(() => Boolean(props.task.urgent));
 </script>

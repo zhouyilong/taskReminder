@@ -240,6 +240,9 @@ fn markdown_task_line(task: &Task, show_project: bool) -> String {
     if show_project && !task.project.is_empty() {
         parts.push(format!("@{}", task.project));
     }
+    if task.urgent {
+        parts.push("🔥 加急".to_string());
+    }
     if let Some(due) = task.due_at.as_deref() {
         parts.push(format!("📅 截止 {}", short_time(due)));
     }
@@ -926,6 +929,7 @@ mod tests {
                 sticky_color: String::new(),
                 sort_order: None,
                 project: String::new(),
+                urgent: false,
             }],
             recurring_tasks: vec![weekly, monthly, interval, paused],
             reminder_records: Vec::new(),
@@ -969,6 +973,7 @@ mod tests {
             sticky_color: String::new(),
             sort_order: None,
             project: String::new(),
+            urgent: false,
         };
         let backup = BackupFile {
             app: BACKUP_APP_ID.to_string(),

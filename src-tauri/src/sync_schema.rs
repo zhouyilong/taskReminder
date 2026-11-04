@@ -69,6 +69,7 @@ pub(crate) const SYNC_TABLES: &[SyncTable] = &[
             added("sticky_color", "TEXT NOT NULL DEFAULT ''"),
             added("sort_order", "REAL"),
             added("project", "TEXT NOT NULL DEFAULT ''"),
+            added("urgent", "INTEGER NOT NULL DEFAULT 0"),
         ],
         local_only: &["sticky_is_pinned"],
     },

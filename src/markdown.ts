@@ -87,3 +87,31 @@ export const checklistProgress = (value: string | null | undefined): ChecklistPr
   }
   return total ? { done, total } : null;
 };
+
+const ZERO_WIDTH_PATTERN = /[​﻿]/g;
+const MARKDOWN_ESCAPE_PATTERN = /\\([\\`*_{}[\]()#+\-.!|~<>])/g;
+const STAR_BULLET_PATTERN = /^(\s*)[*+](\s+)/gm;
+const LONE_BREAK_PATTERN = /^\s*<br\s*\/?>\s*$/gim;
+const EXTRA_BLANK_LINES_PATTERN = /\n{3,}/g;
+/** 编辑器把列表存成“松散列表”（项之间空一行），复制时去掉相邻列表项之间的空行。 */
+const LOOSE_LIST_GAP_PATTERN = /^(\s*(?:[-*+]|\d+[.)])\s.*)\n\n(?=\s*(?:[-*+]|\d+[.)])\s)/gm;
+
+/**
+ * 便签“一键复制”（v2.2.5）的文本：保留 Markdown 的行结构（列表、勾选项、标题），
+ * 去掉编辑器保存时加的转义符、零宽字符与占位换行，`*` 列表符号换成更常见的 `-`。
+ */
+export const markdownToCopyText = (value: string | null | undefined): string => {
+  if (!value) {
+    return "";
+  }
+  return value
+    .replace(/\r\n?/g, "\n")
+    .replace(ZERO_WIDTH_PATTERN, "")
+    .replace(LONE_BREAK_PATTERN, "")
+    .replace(STAR_BULLET_PATTERN, "$1-$2")
+    .replace(MARKDOWN_ESCAPE_PATTERN, "$1")
+    .replace(/[ \t]+$/gm, "")
+    .replace(EXTRA_BLANK_LINES_PATTERN, "\n\n")
+    .replace(LOOSE_LIST_GAP_PATTERN, "$1\n")
+    .trim();
+};

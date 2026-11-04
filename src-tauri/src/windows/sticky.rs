@@ -47,6 +47,14 @@ fn sticky_note_item_refresh_event(note_id: &str) -> String {
     format!("sticky-note-item-refresh-{}", encode_note_id(note_id))
 }
 
+/// 让便签把光标放进正文（v2.2.5，待办清单添加待办后打开便签补充内容）。
+fn sticky_note_item_focus_event(note_id: &str) -> String {
+    format!("sticky-note-item-focus-{}", encode_note_id(note_id))
+}
+
+/// 新建的便签窗口还没载入页面、收不到事件，改由初始化脚本带上“聚焦正文”。
+const FOCUS_EDITOR_SCRIPT: &str = "window.__TASKREMINDER_FOCUS_EDITOR = true;";
+
 fn sticky_note_item_url() -> WebviewUrl {
     // Use App URL on every platform. In `tauri dev` Tauri rewrites this to
     // `build.devUrl`, which keeps the sticky-note window on the same origin as
@@ -336,6 +344,15 @@ pub fn show_sticky_note_item_window(
     app: &tauri::AppHandle,
     note: &StickyNote,
 ) -> Result<(), AppError> {
+    show_sticky_note_item_window_with(app, note, false)
+}
+
+/// 显示便签窗口；`focus_editor` 为真时取得焦点并把光标放进正文。
+pub fn show_sticky_note_item_window_with(
+    app: &tauri::AppHandle,
+    note: &StickyNote,
+    focus_editor: bool,
+) -> Result<(), AppError> {
     let label = sticky_note_item_label(&note.task_id);
     let refresh_event = sticky_note_item_refresh_event(&note.task_id);
     let is_pinned = note.is_pinned;
@@ -363,6 +380,9 @@ pub fn show_sticky_note_item_window(
         if let Some(script) = sticky_note_bootstrap_script(note) {
             builder = builder.initialization_script(script);
         }
+        if focus_editor {
+            builder = builder.initialization_script(FOCUS_EDITOR_SCRIPT);
+        }
         let window = builder
             .build()
             .map_err(|e| AppError::System(e.to_string()))?;
@@ -382,6 +402,10 @@ pub fn show_sticky_note_item_window(
     emit_cached_ui_state_to_window(app, &window);
     window.show().map_err(|e| AppError::System(e.to_string()))?;
     promote_sticky_item_over_peers(app, &label);
+    if focus_editor {
+        let _ = window.set_focus();
+        let _ = window.emit(&sticky_note_item_focus_event(&note.task_id), ());
+    }
     Ok(())
 }
 

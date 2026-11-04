@@ -1,4 +1,5 @@
 // 待办清单便签（v2.2.4）：列表顺序、时间文案与输入框新建待办的解析（纯函数，测试在 todoSticky.spec.ts）。
+// v2.2.5：拖拽调整顺序（与待办页“手动顺序”共用 sortOrder）、加急标识。
 import { taskAnchorTime } from "./due";
 import { toLocalDateTimeString } from "./format";
 import { parseQuickInput } from "./nlp";
@@ -15,7 +16,11 @@ export interface TodoStickyItem {
   /** 截止时间或提醒时间的简短文案（今天 / 明天 / 月日 + 钟点）；没有时为空字符串。 */
   when: string;
   tone: TodoTone;
+  /** 加急（v2.2.5）。 */
+  urgent: boolean;
 }
+
+const hasOrder = (task: Task) => typeof task.sortOrder === "number" && Number.isFinite(task.sortOrder);
 
 const firstLine = (value: string) => value.split(/\r?\n/).find(line => line.trim())?.trim() ?? "";
 
@@ -26,32 +31,57 @@ const toneOf = (anchor: string | null, now: Date): TodoTone => {
   return anchor.slice(0, 10) === nowText.slice(0, 10) ? "today" : "later";
 };
 
+type Anchored = { task: Task; anchor: string | null };
+
+/** 没有手动顺序时的默认顺序：有时间的按先后，没有时间的按优先级从高到低，相同时按创建时间。 */
+const compareDefault = (a: Anchored, b: Anchored) => {
+  if (a.anchor && b.anchor) return a.anchor.localeCompare(b.anchor) || a.task.createdAt.localeCompare(b.task.createdAt);
+  if (a.anchor) return -1;
+  if (b.anchor) return 1;
+  return priorityOf(b.task) - priorityOf(a.task) || a.task.createdAt.localeCompare(b.task.createdAt);
+};
+
 /**
- * 清单中的待办：只列未完成、未删除的；有时间的按时间先后（过期的自然在最前），
- * 没有时间的排在后面，按优先级从高到低；相同时按创建时间。
+ * 清单中的待办：只列未完成、未删除的。拖动排过的（有 sortOrder，与待办页“手动顺序”共用）按位置在前；
+ * 其余（还没排过、或之后新建的）排在后面，按默认顺序：有时间的按时间先后（过期的自然在最前），
+ * 没有时间的按优先级从高到低；相同时按创建时间。
  */
 export const todoStickyItems = (tasks: ReadonlyArray<Task>, now = new Date()): TodoStickyItem[] =>
   tasks
     .filter(task => task.status !== "COMPLETED" && !task.deletedAt)
     .map(task => ({ task, anchor: taskAnchorTime(task) }))
     .sort((a, b) => {
-      if (a.anchor && b.anchor) return a.anchor.localeCompare(b.anchor) || a.task.createdAt.localeCompare(b.task.createdAt);
-      if (a.anchor) return -1;
-      if (b.anchor) return 1;
-      return priorityOf(b.task) - priorityOf(a.task) || a.task.createdAt.localeCompare(b.task.createdAt);
+      const ordered = Number(hasOrder(b.task)) - Number(hasOrder(a.task));
+      if (ordered) return ordered;
+      if (hasOrder(a.task)) return (a.task.sortOrder as number) - (b.task.sortOrder as number) || compareDefault(a, b);
+      return compareDefault(a, b);
     })
     .map(({ task, anchor }) => ({
       task,
       title: firstLine(task.description) || "（无标题）",
       when: anchor ? formatTempTime(anchor, now) : "",
       tone: toneOf(anchor, now),
+      urgent: Boolean(task.urgent),
     }));
 
-/** 清单头部的计数文案：“3 项 · 1 项已过期”。 */
+/** 清单头部的计数文案：“3 项 · 1 项加急 · 1 项已过期”。 */
 export const todoStickySummary = (items: ReadonlyArray<TodoStickyItem>) => {
   if (!items.length) return "没有待办";
+  const parts = [`${items.length} 项`];
+  const urgent = items.filter(item => item.urgent).length;
+  if (urgent) parts.push(`${urgent} 项加急`);
   const overdue = items.filter(item => item.tone === "overdue").length;
-  return overdue ? `${items.length} 项 · ${overdue} 项已过期` : `${items.length} 项`;
+  if (overdue) parts.push(`${overdue} 项已过期`);
+  return parts.join(" · ");
+};
+
+/** 拖动时的插入位置（0 … 行数）：指针在某行上半部分时插到它前面，下半部分时插到它后面。 */
+export const dropIndexAt = (rows: ReadonlyArray<{ top: number; height: number }>, y: number) => {
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (y < row.top + row.height / 2) return index;
+  }
+  return rows.length;
 };
 
 export type TodoInputResult =

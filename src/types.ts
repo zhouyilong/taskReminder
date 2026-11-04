@@ -35,6 +35,8 @@ export interface Task {
   sortOrder?: number | null;
   /** 项目（v2.2），空为未分组。 */
   project?: string;
+  /** 加急（v2.2.5）。 */
+  urgent?: boolean;
 }
 
 export interface RecurringTask {
@@ -222,6 +224,8 @@ export interface TodoStickyState {
   height: number;
   /** 锚定：置顶并锁定位置。 */
   pinned: boolean;
+  /** 清单颜色（v2.2.5），取值同便签颜色，空为默认颜色。 */
+  color?: string;
 }
 
 export interface ExportResult {
