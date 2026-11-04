@@ -66,6 +66,10 @@ export interface RecurringTask {
   endsOn?: string | null;
   /** 剩余提醒次数（v2.2），每次触发减一，到 0 时结束；空为不限。 */
   remainingCount?: number | null;
+  /** 临时提醒时间（v2.2.4）：到点提醒一次后清空，暂停时也提醒；空为没有。 */
+  tempTrigger?: string | null;
+  /** 临时提醒替代的那一次常规提醒的原定时间（v2.2.4）；空为不替代，只多提醒一次。 */
+  tempReplaces?: string | null;
 }
 
 export interface ReminderRecord {
@@ -203,8 +207,21 @@ export interface TrashPayload {
 
 export interface RecurringPreview {
   taskId: string;
-  /** 预估的触发时间（本地时间），按先后排列。 */
+  /** 预估的触发时间（本地时间），按先后排列；含临时提醒，不含被它替代的那一次。 */
   times: string[];
+  /** 其中的临时提醒（v2.2.4）。 */
+  tempTime?: string | null;
+}
+
+/** 待办清单便签（v2.2.4）的窗口状态，本机设置。 */
+export interface TodoStickyState {
+  open: boolean;
+  x?: number | null;
+  y?: number | null;
+  width: number;
+  height: number;
+  /** 锚定：置顶并锁定位置。 */
+  pinned: boolean;
 }
 
 export interface ExportResult {

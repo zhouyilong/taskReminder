@@ -96,6 +96,7 @@ jobs:
         run: |
           version="${RELEASE_TAG#v}"
           dir="src-tauri/target/release/bundle/msi"
+          # 安装包按 productName 生成为“任务提醒_….msi”，上一步已复制为这个 ASCII 名称（见 scripts/release-assets.mjs）。
           msi="$dir/TaskReminderApp_${version}_x64_zh-CN.msi"
           files=("$msi" "$msi.sig" "$dir/latest.json")
           for file in "${files[@]}"; do
@@ -110,7 +111,7 @@ jobs:
             if [ -f "$notes_file" ]; then
               args+=(--notes-file "$notes_file")
             else
-              args+=(--notes "TaskReminderApp ${version}")
+              args+=(--notes "任务提醒 ${version}")
             fi
             if [ "$RELEASE_DRAFT" = "true" ]; then
               args+=(--draft)

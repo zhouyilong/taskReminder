@@ -84,9 +84,10 @@ impl DbManager {
                     id, description, type, status, created_at, completed_at, interval_minutes,
                     last_triggered, next_trigger, is_paused, start_time, end_time,
                     repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
-                    updated_at, deleted_at, schedule_weekdays, tags, ends_on, remaining_count
+                    updated_at, deleted_at, schedule_weekdays, tags, ends_on, remaining_count,
+                    temp_trigger, temp_replaces
                  )
-                 VALUES (?, ?, 'RECURRING', 'PENDING', ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 VALUES (?, ?, 'RECURRING', 'PENDING', ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT(id) DO UPDATE SET
                     description = excluded.description, type = excluded.type, status = excluded.status,
                     created_at = excluded.created_at, completed_at = excluded.completed_at,
@@ -98,7 +99,8 @@ impl DbManager {
                     cron_expression = excluded.cron_expression, updated_at = excluded.updated_at,
                     deleted_at = excluded.deleted_at, schedule_weekdays = excluded.schedule_weekdays,
                     tags = excluded.tags, ends_on = excluded.ends_on,
-                    remaining_count = excluded.remaining_count",
+                    remaining_count = excluded.remaining_count,
+                    temp_trigger = excluded.temp_trigger, temp_replaces = excluded.temp_replaces",
                 params![
                     task.id,
                     task.description.trim(),
@@ -120,6 +122,8 @@ impl DbManager {
                     tags_to_db(&task.tags),
                     task.ends_on,
                     task.remaining_count.map(|count| count.max(0)),
+                    task.temp_trigger,
+                    task.temp_replaces,
                 ],
             )?;
             summary.count(outcome);

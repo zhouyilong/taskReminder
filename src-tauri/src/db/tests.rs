@@ -49,6 +49,8 @@ fn sample_recurring() -> RecurringTask {
         tags: Vec::new(),
         ends_on: None,
         remaining_count: None,
+        temp_trigger: None,
+        temp_replaces: None,
     }
 }
 
@@ -1068,5 +1070,74 @@ fn rename_project_moves_merges_and_clears() {
         })
         .unwrap();
     assert_eq!(deleted, "装修");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn recurring_temp_reminder_roundtrips_and_survives_edits() {
+    let (db, dir) = temp_db();
+    let mut draft = sample_recurring();
+    draft.next_trigger = "2026-11-05T09:00:00".to_string();
+    let task = db.create_recurring_task(&draft).unwrap();
+    assert_eq!(task.temp_trigger, None);
+
+    db.set_recurring_temp(
+        &task.id,
+        Some("2026-11-05T08:45:00"),
+        Some("2026-11-05T09:00:00"),
+    )
+    .unwrap();
+    let saved = db.get_recurring_task(&task.id).unwrap().unwrap();
+    assert_eq!(saved.temp_trigger.as_deref(), Some("2026-11-05T08:45:00"));
+    assert_eq!(saved.temp_replaces.as_deref(), Some("2026-11-05T09:00:00"));
+    assert!(saved.updated_at >= task.updated_at);
+
+    // 编辑规则（`update_recurring_task`）不改临时提醒。
+    let mut edited = saved.clone();
+    edited.description = "晨会".to_string();
+    edited.temp_trigger = None;
+    edited.temp_replaces = None;
+    db.update_recurring_task(&edited).unwrap();
+    let after_edit = db.get_recurring_task(&task.id).unwrap().unwrap();
+    assert_eq!(after_edit.description, "晨会");
+    assert_eq!(after_edit.temp_trigger, saved.temp_trigger);
+    assert_eq!(after_edit.temp_replaces, saved.temp_replaces);
+
+    // JSON 导出、导入保留临时提醒（同一 id、同一 updated_at 时不覆盖，换新库导入）。
+    let (other, other_dir) = temp_db();
+    other
+        .import_rows(&[], std::slice::from_ref(&after_edit), &[])
+        .unwrap();
+    let imported = other.get_recurring_task(&task.id).unwrap().unwrap();
+    assert_eq!(imported.temp_trigger, after_edit.temp_trigger);
+    assert_eq!(imported.temp_replaces, after_edit.temp_replaces);
+
+    // 清除时一并清掉替代的那一次；只设置替代、不设时间的不保存替代。
+    db.set_recurring_temp(&task.id, None, Some("2026-11-05T09:00:00"))
+        .unwrap();
+    let cleared = db.get_recurring_task(&task.id).unwrap().unwrap();
+    assert_eq!((cleared.temp_trigger, cleared.temp_replaces), (None, None));
+    let _ = std::fs::remove_dir_all(dir);
+    let _ = std::fs::remove_dir_all(other_dir);
+}
+
+#[test]
+fn todo_sticky_state_defaults_and_roundtrips() {
+    let (db, dir) = temp_db();
+    assert_eq!(db.todo_sticky_state().unwrap(), TodoStickyState::default());
+    let saved = db
+        .update_todo_sticky_state(|state| {
+            state.open = true;
+            state.x = Some(-120.0);
+            state.y = Some(40.0);
+            state.pinned = true;
+        })
+        .unwrap();
+    assert_eq!(db.todo_sticky_state().unwrap(), saved);
+    assert_eq!(saved.x, Some(-120.0));
+    let closed = db
+        .update_todo_sticky_state(|state| state.open = false)
+        .unwrap();
+    assert!(!closed.open && closed.pinned);
     let _ = std::fs::remove_dir_all(dir);
 }

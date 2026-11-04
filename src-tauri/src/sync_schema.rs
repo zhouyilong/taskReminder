@@ -99,6 +99,8 @@ pub(crate) const SYNC_TABLES: &[SyncTable] = &[
             added("tags", "TEXT NOT NULL DEFAULT ''"),
             added("ends_on", "TEXT"),
             added("remaining_count", "INTEGER"),
+            added("temp_trigger", "TEXT"),
+            added("temp_replaces", "TEXT"),
         ],
         local_only: &[],
     },

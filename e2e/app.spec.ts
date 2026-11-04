@@ -344,3 +344,77 @@ test("管理标签与项目：重命名、合并与移除，筛选跟随", async
   await expect(projectFilter.locator("option:checked")).toHaveText(/^季度总结/);
   await expect(taskRow(app, "买菜").locator(".task-project")).toHaveText("季度总结");
 });
+
+test("循环提醒右键设置与取消临时提醒", async ({ app }) => {
+  await app.locator(".sidebar").getByText("循环提醒").click();
+  const row = app.locator(".table-row", { hasText: "站会" });
+  await row.click({ button: "right" });
+  await app.locator(".context-menu-item", { hasText: "临时提醒…" }).click();
+
+  const modal = app.locator(".modal", { has: app.locator(".modal-header", { hasText: "临时提醒" }) });
+  await expect(modal).toContainText("站会");
+  await modal.locator("input[type='datetime-local']").fill(`${tomorrow()}T08:45`);
+  // 默认替代离它最近的那一次常规提醒。
+  const replace = modal.getByRole("checkbox");
+  await expect(replace).toBeChecked();
+  await expect(modal).toContainText("明天 09:00 的那一次不再提醒");
+  await modal.getByRole("button", { name: "确认" }).click();
+  await expect(modal).toBeHidden();
+
+  const [call] = await invokeCalls(app, "set_recurring_temp_reminder");
+  expect(call.args).toEqual({ id: "r-standup", at: `${tomorrow()}T08:45:00`, replaceNext: true });
+  await expect(row.locator(".temp-reminder-chip")).toHaveText("临时 明天 08:45 · 替代 09:00");
+  await expect(row.locator(".col-next-trigger .is-replaced")).toBeVisible();
+
+  // 右键取消。
+  await row.click({ button: "right" });
+  await expect(app.locator(".context-menu-item", { hasText: "修改临时提醒（明天 08:45）" })).toBeVisible();
+  await app.locator(".context-menu-item", { hasText: "取消临时提醒" }).click();
+  await expect(row.locator(".temp-reminder-chip")).toHaveCount(0);
+  const calls = await invokeCalls(app, "set_recurring_temp_reminder");
+  expect(calls[1].args).toEqual({ id: "r-standup", at: null, replaceNext: false });
+});
+
+test("待办页打开待办清单便签", async ({ app }) => {
+  await app.locator(".task-toolbar").getByRole("button", { name: "清单便签" }).click();
+  expect(await invokeCalls(app, "open_todo_sticky")).toHaveLength(1);
+});
+
+test("待办清单便签：列表、添加、完成、打开便签与锚定", async ({ todoSticky: page }) => {
+  // 有时间的按先后（过期的在前），没有时间的在后。
+  await expect(page.locator(".todo-sticky-text")).toHaveText(["预约牙医", "买菜", "写季度报告", "读书笔记"]);
+  await expect(page.locator(".todo-sticky-row").first()).toHaveClass(/is-overdue/);
+  await expect(page.locator(".todo-sticky-count")).toContainText("4 项");
+
+  // 点击待办打开它的便签。
+  await page.locator(".todo-sticky-row", { hasText: "买菜" }).click();
+  const [open] = await invokeCalls(page, "open_sticky_note");
+  expect(open.args.payload).toMatchObject({ taskId: "t-groceries", title: "买菜" });
+
+  // 输入框按自然语言新建待办。
+  const input = page.locator(".todo-sticky-input");
+  await input.fill("明天下午3点 交周报 #工作");
+  await input.press("Enter");
+  await expect(page.locator(".todo-sticky-toast")).toContainText("已添加，明天 15:00 提醒");
+  await expect(page.locator(".todo-sticky-text", { hasText: "交周报" })).toBeVisible();
+  await expect(input).toHaveValue("");
+  const [add] = await invokeCalls(page, "quick_add_task");
+  expect(add.args.payload).toMatchObject({ description: "交周报", tags: ["工作"], reminderTime: `${tomorrow()}T15:00:00` });
+
+  // 勾选完成后从清单中移除。
+  await page.locator(".todo-sticky-row", { hasText: "读书笔记" }).locator(".todo-sticky-check").click();
+  await expect(page.locator(".todo-sticky-text", { hasText: "读书笔记" })).toHaveCount(0);
+  const [complete] = await invokeCalls(page, "complete_task");
+  expect(complete.args).toEqual({ id: "t-ideas" });
+  // 完成不会误打开便签。
+  expect(await invokeCalls(page, "open_sticky_note")).toHaveLength(1);
+
+  // 锚定：置顶并锁定位置（标题栏不再可拖动）。
+  await page.getByTitle("锚定清单（置顶并锁定位置）").click();
+  await expect(page.locator(".todo-sticky-header")).toHaveClass(/paper-note-header-pinned/);
+  const [pin] = await invokeCalls(page, "set_todo_sticky_pinned");
+  expect(pin.args).toEqual({ pinned: true });
+
+  await page.getByTitle("关闭清单").click();
+  expect(await invokeCalls(page, "close_todo_sticky")).toHaveLength(1);
+});

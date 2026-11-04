@@ -207,6 +207,11 @@ pub(super) fn migration_scripts() -> Vec<MigrationScript> {
             description: "add auto backup keep".to_string(),
             sql: include_str!("../../migrations/V2.2.4__add_auto_backup_keep.sql"),
         },
+        MigrationScript {
+            version: "2.2.5".to_string(),
+            description: "add recurring temporary reminder and todo list sticky".to_string(),
+            sql: include_str!("../../migrations/V2.2.5__add_recurring_temp_and_todo_sticky.sql"),
+        },
     ]
 }
 

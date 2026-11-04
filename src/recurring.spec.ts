@@ -15,7 +15,11 @@ import {
   isRecurringEnded,
   recurringStatus,
   workdayDraftWarning,
-  workdayHolidayWarning
+  workdayHolidayWarning,
+  canSetTempReminder,
+  defaultTempReminderTime,
+  describeTempReminder,
+  formatTempTime
 } from "./recurring";
 import type { RecurringTask } from "./types";
 
@@ -207,5 +211,45 @@ describe("recurring end condition", () => {
     expect(formatRecurringEnd({ endsOn: "2026-12-31" }, NOW)).toBe("到 12月31日");
     expect(formatRecurringEnd({ endsOn: "2027-01-31", remainingCount: 3 }, NOW)).toBe("到 2027年1月31日，剩 3 次");
     expect(formatRecurringEnd({ remainingCount: -1 }, NOW)).toBe("剩 0 次");
+  });
+});
+
+describe("临时提醒（v2.2.4）", () => {
+  const now = new Date(2026, 10, 4, 20, 0);
+
+  it("简短时间区分今天、明天与其他日期", () => {
+    expect(formatTempTime("2026-11-04T21:30:00", now)).toBe("今天 21:30");
+    expect(formatTempTime("2026-11-05T08:45:00", now)).toBe("明天 08:45");
+    expect(formatTempTime("2026-11-20T08:45:00", now)).toBe("11月20日 08:45");
+    expect(formatTempTime("2027-01-02T08:45:00", now)).toBe("2027年1月2日 08:45");
+  });
+
+  it("说明包含替代的那一次，同一天时只写钟点", () => {
+    expect(describeTempReminder({ tempTrigger: null }, now)).toBeNull();
+    expect(describeTempReminder({ tempTrigger: "2026-11-05T08:45:00" }, now)?.text).toBe("临时 明天 08:45");
+    expect(
+      describeTempReminder({ tempTrigger: "2026-11-05T08:45:00", tempReplaces: "2026-11-05T09:00:00" }, now)?.text
+    ).toBe("临时 明天 08:45 · 替代 09:00");
+    expect(
+      describeTempReminder({ tempTrigger: "2026-11-06T08:45:00", tempReplaces: "2026-11-05T09:00:00" }, now)?.replaces
+    ).toBe("替代 明天 09:00");
+  });
+
+  it("默认时间：已有临时提醒、下次触发提前 15 分钟、或 1 小时后", () => {
+    expect(defaultTempReminderTime({ tempTrigger: "2026-11-06T07:00:00", nextTrigger: "", isPaused: false }, now)).toBe(
+      "2026-11-06T07:00"
+    );
+    expect(defaultTempReminderTime({ nextTrigger: "2026-11-05T09:00:00", isPaused: false }, now)).toBe("2026-11-05T08:45");
+    // 提前 15 分钟已过时用下次触发本身。
+    expect(defaultTempReminderTime({ nextTrigger: "2026-11-04T20:10:00", isPaused: false }, now)).toBe("2026-11-04T20:10");
+    // 暂停或没有将来的下次触发：1 小时后，取整到 5 分钟。
+    expect(
+      defaultTempReminderTime({ nextTrigger: "2026-11-05T09:00:00", isPaused: true }, new Date(2026, 10, 4, 20, 2))
+    ).toBe("2026-11-04T21:05");
+  });
+
+  it("本机认识的模式才能设置临时提醒", () => {
+    expect(canSetTempReminder({ repeatMode: "DAILY" })).toBe(true);
+    expect(canSetTempReminder({ repeatMode: "BIWEEKLY" as never })).toBe(false);
   });
 });

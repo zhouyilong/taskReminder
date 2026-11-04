@@ -8,8 +8,14 @@ export interface InvokeCall {
   args: Record<string, unknown>;
 }
 
-/** 每个页面在脚本执行前注入 Tauri 运行时模拟。 */
-export const test = base.extend<{ app: Page }>({
+/** 每个页面在脚本执行前注入 Tauri 运行时模拟。`todoSticky` 打开待办清单便签窗口（v2.2.4）。 */
+export const test = base.extend<{ app: Page; todoSticky: Page }>({
+  todoSticky: async ({ page }, use) => {
+    await page.addInitScript({ path: MOCK_PATH });
+    await page.goto("/sticky-todo-list.html");
+    await expect(page.locator(".todo-sticky")).toBeVisible();
+    await use(page);
+  },
   app: async ({ page }, use) => {
     await page.addInitScript({ path: MOCK_PATH });
     await page.addInitScript(() => {

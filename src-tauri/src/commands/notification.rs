@@ -164,10 +164,24 @@ pub fn snooze_notification(
         }
         ReminderKind::Recurring => {
             if let Some(mut task) = into_api(state.db.get_recurring_task(&payload.reminder_id))? {
-                task.next_trigger = snooze_until.clone();
-                task.is_paused = false;
-                into_api(state.db.update_recurring_task(&task))?;
-                into_api(state.scheduler.schedule_recurring(task))?;
+                if task.temp_trigger.is_none() {
+                    // 推迟记为一次临时提醒（v2.2.4）：不改常规的下次触发，也不恢复已暂停（含已结束）的循环；
+                    // 被临时提醒替代的那一次也不会因为推迟重新出现。
+                    into_api(
+                        state
+                            .db
+                            .set_recurring_temp(&task.id, Some(&snooze_until), None),
+                    )?;
+                    if let Some(task) = into_api(state.db.get_recurring_task(&task.id))? {
+                        into_api(state.scheduler.schedule_temp(&task))?;
+                    }
+                } else {
+                    // 已有另一条临时提醒时不覆盖它，按原方式把下次触发改到推迟后的时间。
+                    task.next_trigger = snooze_until.clone();
+                    task.is_paused = false;
+                    into_api(state.db.update_recurring_task(&task))?;
+                    into_api(state.scheduler.schedule_recurring(task))?;
+                }
             }
         }
         ReminderKind::Unknown(_) => {}

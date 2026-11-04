@@ -14,8 +14,9 @@ use crate::models::{AppSettings, NotificationPayload, NotificationPrefs, Recurri
 use crate::notification_queue::NotificationQueue;
 use crate::quiet_hours;
 use crate::recurrence::{
-    advance_after_trigger, apply_end_condition, compute_next_trigger, has_ended,
-    refreshed_workday_trigger, sanitize_recurring_task, should_trigger_now,
+    advance_after_trigger, apply_end_condition, compute_next_trigger, consume_replaced_occurrence,
+    has_ended, next_is_replaced, refreshed_workday_trigger, sanitize_recurring_task,
+    should_trigger_now,
 };
 use crate::sync::CloudSyncService;
 use crate::time::{self, parse_datetime_any};
@@ -46,6 +47,8 @@ pub struct ReminderScheduler {
     sync: CloudSyncService,
     recurring_jobs: Arc<Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>>,
     task_jobs: Arc<Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>>,
+    /// 循环提醒的临时提醒（v2.2.4）计时器，与常规触发分开，暂停时照常提醒。
+    temp_jobs: Arc<Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>>,
     queue: NotificationQueue,
     /// 串行化“判断是否到点 + 写记录 + 推进下次时间”，
     /// 防止计时器与巡检同时命中同一条提醒而重复触发。
@@ -69,6 +72,7 @@ impl ReminderScheduler {
             sync,
             recurring_jobs: Arc::new(Mutex::new(HashMap::new())),
             task_jobs: Arc::new(Mutex::new(HashMap::new())),
+            temp_jobs: Arc::new(Mutex::new(HashMap::new())),
             queue,
             fire_lock: Arc::new(Mutex::new(())),
             quiet_held: Arc::new(AtomicBool::new(false)),
@@ -116,6 +120,16 @@ impl ReminderScheduler {
             }
         }
         for task in self.db.list_recurring_tasks()? {
+            let temp_due = task
+                .temp_trigger
+                .as_deref()
+                .and_then(parse_datetime_any)
+                .is_some_and(|temp| temp <= now);
+            if temp_due {
+                if let Err(err) = self.handle_recurring_temp(task.id.clone()) {
+                    eprintln!("[scheduler] 补发临时提醒失败: {}", err);
+                }
+            }
             if task.is_paused {
                 continue;
             }
@@ -258,9 +272,8 @@ impl ReminderScheduler {
     pub fn schedule_existing(&self) -> Result<(), AppError> {
         let recurring = self.db.list_recurring_tasks()?;
         for task in recurring {
-            if !task.is_paused {
-                self.schedule_recurring(task)?;
-            }
+            // 暂停的也要排上临时提醒（`schedule_recurring` 内部跳过常规触发）。
+            self.schedule_recurring(task)?;
         }
         let tasks = self.db.list_active_tasks()?;
         for task in tasks {
@@ -296,6 +309,7 @@ impl ReminderScheduler {
     }
 
     pub fn schedule_recurring(&self, task: RecurringTask) -> Result<(), AppError> {
+        self.schedule_temp(&task)?;
         self.cancel_recurring(&task.id);
         // 不认识的循环模式（来自更新版本的设备）本机不触发，交给认识它的设备。
         if task.is_paused || !task.repeat_mode.is_known() {
@@ -310,6 +324,35 @@ impl ReminderScheduler {
         });
         self.recurring_jobs.lock().unwrap().insert(task.id, handle);
         Ok(())
+    }
+
+    /// 按任务当前的临时提醒重新计时（没有临时提醒时只取消）。临时提醒不受暂停影响。
+    pub fn schedule_temp(&self, task: &RecurringTask) -> Result<(), AppError> {
+        self.cancel_temp(&task.id);
+        if task.deleted_at.is_some() || !task.repeat_mode.is_known() {
+            return Ok(());
+        }
+        let Some(temp) = task.temp_trigger.clone() else {
+            return Ok(());
+        };
+        let delay = seconds_until(&temp)?;
+        let scheduler = self.clone();
+        let task_id = task.id.clone();
+        let handle = tauri::async_runtime::spawn(async move {
+            sleep(std::time::Duration::from_secs(delay)).await;
+            let _ = scheduler.handle_recurring_temp(task_id);
+        });
+        self.temp_jobs
+            .lock()
+            .unwrap()
+            .insert(task.id.clone(), handle);
+        Ok(())
+    }
+
+    pub fn cancel_temp(&self, task_id: &str) {
+        if let Some(handle) = self.temp_jobs.lock().unwrap().remove(task_id) {
+            handle.abort();
+        }
     }
 
     pub fn schedule_task(&self, task: Task) -> Result<(), AppError> {
@@ -365,6 +408,14 @@ impl ReminderScheduler {
                 return Ok(());
             }
         }
+        // 这一次已由临时提醒替代（例如推迟到 9:30 的晨会）：不弹出，推进到下一次。
+        if next_is_replaced(&task) {
+            consume_replaced_occurrence(&mut task, now)?;
+            self.db.update_recurring_task(&task)?;
+            self.sync.notify_local_change()?;
+            self.schedule_recurring(task)?;
+            return Ok(());
+        }
         if !should_trigger_now(&task, now)? {
             task.next_trigger = compute_next_trigger(&task, Some(now))?;
             apply_end_condition(&mut task);
@@ -394,6 +445,58 @@ impl ReminderScheduler {
         };
         self.present(payload, &settings)?;
 
+        self.schedule_recurring(task)?;
+        Ok(())
+    }
+
+    /// 临时提醒到点：提醒一次并清掉临时提醒；替代的那一次若还没到，推进到之后的一次。
+    /// 暂停（含已结束）的循环提醒也会提醒，超过补发回溯窗口的只清除不弹出。
+    fn handle_recurring_temp(&self, task_id: String) -> Result<(), AppError> {
+        let _guard = self.fire_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut task) = self.db.get_recurring_task(&task_id)? else {
+            return Ok(());
+        };
+        if task.deleted_at.is_some() || !task.repeat_mode.is_known() {
+            return Ok(());
+        }
+        let Some(temp_text) = task.temp_trigger.clone() else {
+            return Ok(());
+        };
+        let temp = parse_datetime(&temp_text)?;
+        let now = time::now();
+        if now < temp {
+            self.schedule_temp(&task)?;
+            return Ok(());
+        }
+        if !task.is_paused && next_is_replaced(&task) {
+            consume_replaced_occurrence(&mut task, now)?;
+            self.db.update_recurring_task(&task)?;
+        }
+        self.db.set_recurring_temp(&task.id, None, None)?;
+        task.temp_trigger = None;
+        task.temp_replaces = None;
+        self.cancel_temp(&task.id);
+        if temp < now - Duration::days(MISSED_REMINDER_LOOKBACK_DAYS) {
+            self.sync.notify_local_change()?;
+            self.schedule_recurring(task)?;
+            return Ok(());
+        }
+
+        let record =
+            self.db
+                .create_reminder_record(&task.id, &task.description, ReminderKind::Recurring)?;
+        self.sync.notify_local_change()?;
+        let settings = self.db.load_settings()?;
+        let payload = NotificationPayload {
+            record_id: record.id.clone(),
+            reminder_id: task.id.clone(),
+            reminder_type: ReminderKind::Recurring,
+            description: task.description.clone(),
+            snooze_minutes: settings.snooze_minutes,
+            scheduled_time: Some(temp_text),
+            sound: false,
+        };
+        self.present(payload, &settings)?;
         self.schedule_recurring(task)?;
         Ok(())
     }

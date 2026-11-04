@@ -219,7 +219,7 @@ pub fn emit_ui_state_to_sticky_windows(app: &tauri::AppHandle, payload: &UiState
     // used by the working `settings-updated` broadcast.
     let _ = app.emit("ui-state-changed", payload.clone());
     for (label, window) in app.webview_windows() {
-        if label.starts_with(STICKY_NOTE_ITEM_PREFIX) {
+        if is_sticky_window_label(&label) {
             let _ = window.emit("ui-state-changed", payload.clone());
             apply_ui_state_via_eval(&window, payload);
         }
@@ -262,7 +262,7 @@ fn is_at_corrected_position(note_id: &str, x: f64, y: f64) -> bool {
 }
 
 /// 显示器工作区（按窗口当前缩放换算为逻辑像素，与 `set_position` 的换算一致）。
-fn monitor_work_areas(window: &tauri::WebviewWindow) -> Vec<Rect> {
+pub(crate) fn monitor_work_areas(window: &tauri::WebviewWindow) -> Vec<Rect> {
     let scale_factor = window.scale_factor().unwrap_or(1.0);
     window
         .available_monitors()
@@ -403,10 +403,21 @@ pub fn restore_open_sticky_note_items(
     Ok(())
 }
 
-/// 是否有正在显示的便签窗口。
+/// 给便签类窗口（含待办清单便签）挂上贴边吸附与屏蔽系统贴靠（仅 Windows）。
+#[cfg(target_os = "windows")]
+pub fn install_snap(window: &tauri::WebviewWindow) {
+    snap::install(window);
+}
+
+/// 便签类窗口：每张便签与待办清单便签，贴边吸附时互相作为参照。
+pub fn is_sticky_window_label(label: &str) -> bool {
+    label.starts_with(STICKY_NOTE_ITEM_PREFIX) || label == super::todo_sticky::TODO_STICKY_LABEL
+}
+
+/// 是否有正在显示的便签窗口（含待办清单便签）。
 pub fn any_sticky_window_visible(app: &tauri::AppHandle) -> bool {
     app.webview_windows().iter().any(|(label, window)| {
-        label.starts_with(STICKY_NOTE_ITEM_PREFIX) && window.is_visible().unwrap_or(false)
+        is_sticky_window_label(label) && window.is_visible().unwrap_or(false)
     })
 }
 
@@ -418,6 +429,7 @@ pub fn hide_all_sticky_windows(app: &tauri::AppHandle) {
             let _ = window.hide();
         }
     }
+    super::todo_sticky::hide_window(app);
     // 便签管理列表据此刷新“显示中 / 已隐藏”。
     let _ = app.emit("sticky-note-changed", "");
 }
@@ -430,6 +442,7 @@ pub fn show_all_sticky_windows(app: &tauri::AppHandle) {
             if let Err(err) = restore_open_sticky_note_items(&handle, &state.db) {
                 eprintln!("[sticky-note] 显示全部便签失败: {}", err);
             }
+            super::todo_sticky::restore_todo_sticky(&handle, &state.db);
         }
         let _ = handle.emit("sticky-note-changed", "");
     });
@@ -508,7 +521,7 @@ mod snap {
         WS_MAXIMIZEBOX, WS_THICKFRAME,
     };
 
-    use super::{monitor_work_areas, STICKY_NOTE_ITEM_PREFIX};
+    use super::{is_sticky_window_label, monitor_work_areas};
     use crate::state::AppState;
     use crate::windows::placement::{self, Rect};
 
@@ -614,7 +627,7 @@ mod snap {
             .webview_windows()
             .into_iter()
             .filter(|(label, peer)| {
-                label.starts_with(STICKY_NOTE_ITEM_PREFIX)
+                is_sticky_window_label(label)
                     && label.as_str() != window.label()
                     && peer.is_visible().unwrap_or(false)
             })

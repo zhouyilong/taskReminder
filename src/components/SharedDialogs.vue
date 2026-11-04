@@ -1,6 +1,7 @@
 <template>
   <TaskEditModal />
   <RecurringEditModal />
+  <RecurringTempModal />
 
   <Modal :open="detailState.open" :title="detailState.title" @close="detailState.open = false" @confirm="detailState.open = false">
     <div class="detail-list">
@@ -23,6 +24,7 @@ import Modal from "./Modal.vue";
 import ContextMenu from "./ContextMenu.vue";
 import TaskEditModal from "./TaskEditModal.vue";
 import RecurringEditModal from "./RecurringEditModal.vue";
+import RecurringTempModal from "./RecurringTempModal.vue";
 import { useDialogs } from "../composables/useDialogs";
 
 const { detailState, confirmState, closeConfirm, runConfirm } = useDialogs();

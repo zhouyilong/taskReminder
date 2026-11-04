@@ -148,6 +148,12 @@ pub struct RecurringTask {
     /// 剩余提醒次数（v2.2），每次触发减一，到 0 时结束；空为不限。
     #[serde(default)]
     pub remaining_count: Option<i64>,
+    /// 临时提醒时间（v2.2.4）：到点提醒一次后清空；空为没有临时提醒。
+    #[serde(default)]
+    pub temp_trigger: Option<String>,
+    /// 临时提醒替代的那一次常规提醒的原定时间（v2.2.4）；空为不替代，只多提醒一次。
+    #[serde(default)]
+    pub temp_replaces: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -163,6 +169,64 @@ pub struct ReminderRecord {
     pub action: ReminderAction,
     pub updated_at: Option<String>,
     pub deleted_at: Option<String>,
+}
+
+/// 待办清单便签（v2.2.4）的窗口状态。本机设置（`settings.todo_sticky_state`，JSON），不参与同步。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TodoStickyState {
+    /// 是否打开（重启应用后恢复）。
+    pub open: bool,
+    /// 窗口位置（逻辑像素）；空为还没有放过，按默认位置显示。
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+    pub width: f64,
+    pub height: f64,
+    /// 是否锚定：置顶并锁定位置。
+    pub pinned: bool,
+}
+
+pub const TODO_STICKY_WIDTH: f64 = 300.0;
+pub const TODO_STICKY_HEIGHT: f64 = 420.0;
+pub const TODO_STICKY_MIN_WIDTH: f64 = 240.0;
+pub const TODO_STICKY_MIN_HEIGHT: f64 = 220.0;
+
+impl Default for TodoStickyState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            x: None,
+            y: None,
+            width: TODO_STICKY_WIDTH,
+            height: TODO_STICKY_HEIGHT,
+            pinned: false,
+        }
+    }
+}
+
+impl TodoStickyState {
+    /// 从设置列解析；空值、无法解析或数值异常的按默认处理。
+    pub fn parse(value: &str) -> Self {
+        let mut state: Self = serde_json::from_str(value).unwrap_or_default();
+        let finite = |v: Option<f64>| v.filter(|v| v.is_finite());
+        state.x = finite(state.x);
+        state.y = finite(state.y);
+        if state.x.is_none() || state.y.is_none() {
+            state.x = None;
+            state.y = None;
+        }
+        state.width = if state.width.is_finite() {
+            state.width.max(TODO_STICKY_MIN_WIDTH)
+        } else {
+            TODO_STICKY_WIDTH
+        };
+        state.height = if state.height.is_finite() {
+            state.height.max(TODO_STICKY_MIN_HEIGHT)
+        } else {
+            TODO_STICKY_HEIGHT
+        };
+        state
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
