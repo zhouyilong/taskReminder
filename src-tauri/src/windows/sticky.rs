@@ -10,15 +10,16 @@ use tauri::{
 
 use crate::db::DbManager;
 use crate::errors::AppError;
-use crate::models::{StickyNote, UiStatePayload};
+use crate::models::{
+    StickyNote, UiStatePayload, STICKY_NOTE_HEIGHT as STICKY_NOTE_ITEM_HEIGHT,
+    STICKY_NOTE_MIN_HEIGHT as STICKY_NOTE_ITEM_MIN_HEIGHT,
+    STICKY_NOTE_MIN_WIDTH as STICKY_NOTE_ITEM_MIN_WIDTH,
+    STICKY_NOTE_WIDTH as STICKY_NOTE_ITEM_WIDTH,
+};
 use crate::state::AppState;
 use crate::windows::placement::{self, Rect};
 
 pub const STICKY_NOTE_ITEM_PREFIX: &str = "sticky-note-item-";
-const STICKY_NOTE_ITEM_WIDTH: f64 = 284.0;
-const STICKY_NOTE_ITEM_HEIGHT: f64 = 280.0;
-const STICKY_NOTE_ITEM_MIN_WIDTH: f64 = 220.0;
-const STICKY_NOTE_ITEM_MIN_HEIGHT: f64 = 180.0;
 
 fn encode_note_id(note_id: &str) -> String {
     note_id

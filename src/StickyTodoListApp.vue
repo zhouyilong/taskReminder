@@ -12,12 +12,12 @@
 
       <header
         class="paper-note-header todo-sticky-header"
-        :data-tauri-drag-region="pinned ? null : ''"
+        data-tauri-drag-region
         :class="{ 'paper-note-header-pinned': pinned }"
       >
-        <div class="todo-sticky-heading" :data-tauri-drag-region="pinned ? null : ''">
-          <span class="todo-sticky-title" :data-tauri-drag-region="pinned ? null : ''">待办清单</span>
-          <span class="todo-sticky-count" :data-tauri-drag-region="pinned ? null : ''">{{ summary }}</span>
+        <div class="todo-sticky-heading" data-tauri-drag-region>
+          <span class="todo-sticky-title" data-tauri-drag-region>待办清单</span>
+          <span class="todo-sticky-count" data-tauri-drag-region>{{ summary }}</span>
         </div>
         <div class="paper-note-actions">
           <div class="paper-note-color todo-sticky-color">
@@ -51,7 +51,7 @@
             class="paper-note-action pin"
             :class="{ active: pinned }"
             type="button"
-            :title="pinned ? '取消锚定（取消置顶并恢复可移动）' : '锚定清单（置顶并锁定位置）'"
+            :title="pinned ? '取消锚定（取消置顶）' : '锚定清单（置顶，仍可拖动）'"
             @mousedown.stop.prevent
             @click.stop="togglePin"
           >

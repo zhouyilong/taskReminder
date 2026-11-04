@@ -538,6 +538,56 @@ fn reopening_sticky_note_keeps_negative_coordinates() {
 }
 
 #[test]
+fn sticky_note_default_size_is_landscape_and_upgrades_legacy_default() {
+    let (db, dir) = temp_db();
+    let created = db
+        .create_custom_sticky_note("note", None, None, None, None, None)
+        .unwrap();
+    assert_eq!((created.width, created.height), (420.0, 300.0));
+    assert!(created.width > created.height);
+
+    // 2.2.6 之前的默认尺寸（列默认值）在关闭状态下重新打开时改用新的默认尺寸。
+    db.resize_sticky_note(&created.task_id, 284.0, 280.0)
+        .unwrap();
+    db.close_sticky_note(&created.task_id).unwrap();
+    let reopened = db
+        .open_sticky_note(&created.task_id, None, None, None)
+        .unwrap();
+    assert_eq!((reopened.width, reopened.height), (420.0, 300.0));
+    let stored = db.get_sticky_note(&created.task_id).unwrap().unwrap();
+    assert_eq!((stored.width, stored.height), (420.0, 300.0));
+
+    // 调整过的尺寸保持不变。
+    db.resize_sticky_note(&created.task_id, 300.0, 260.0)
+        .unwrap();
+    db.close_sticky_note(&created.task_id).unwrap();
+    let reopened = db
+        .open_sticky_note(&created.task_id, None, None, None)
+        .unwrap();
+    assert_eq!((reopened.width, reopened.height), (300.0, 260.0));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn saving_sticky_note_does_not_reopen_closed_note() {
+    let (db, dir) = temp_db();
+    let note = db
+        .create_custom_sticky_note("note", None, None, None, None, None)
+        .unwrap();
+    db.close_sticky_note(&note.task_id).unwrap();
+    // 关闭时最后一次保存晚于关闭到达，便签仍保持关闭。
+    db.save_sticky_note_content(&note.task_id, "最后的输入")
+        .unwrap();
+    db.update_sticky_note_title(&note.task_id, "新标题")
+        .unwrap();
+    let stored = db.get_sticky_note(&note.task_id).unwrap().unwrap();
+    assert!(!stored.is_open);
+    assert_eq!(stored.content, "最后的输入");
+    assert_eq!(stored.title, "新标题");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn sticky_snap_setting_defaults_on_and_roundtrips() {
     let (db, dir) = temp_db();
     assert!(db.sticky_snap_enabled().unwrap());

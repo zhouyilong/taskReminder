@@ -185,10 +185,26 @@ pub struct TodoStickyState {
     pub y: Option<f64>,
     pub width: f64,
     pub height: f64,
-    /// 是否锚定：置顶并锁定位置。
+    /// 是否锚定：置顶（v2.2.6 起不再锁定位置）。
     pub pinned: bool,
     /// 清单颜色（v2.2.5），取值同便签颜色（`STICKY_COLORS`），空字符串为默认颜色。
     pub color: String,
+}
+
+/// 便签窗口的默认尺寸（逻辑像素，v2.2.6 起为横向长方形，此前为 284 × 280）。
+pub const STICKY_NOTE_WIDTH: f64 = 420.0;
+pub const STICKY_NOTE_HEIGHT: f64 = 300.0;
+/// 2.2.6 之前的默认尺寸，也是 `sticky_width` / `sticky_height` 列的默认值：
+/// 关闭状态下仍是这个尺寸的便签（没调整过大小）重新打开时改用新的默认尺寸。
+pub const LEGACY_STICKY_NOTE_WIDTH: f64 = 284.0;
+pub const LEGACY_STICKY_NOTE_HEIGHT: f64 = 280.0;
+pub const STICKY_NOTE_MIN_WIDTH: f64 = 220.0;
+pub const STICKY_NOTE_MIN_HEIGHT: f64 = 180.0;
+
+/// 是否为 2.2.6 之前的默认尺寸（没有调整过大小）。
+pub fn is_legacy_sticky_size(width: f64, height: f64) -> bool {
+    (width - LEGACY_STICKY_NOTE_WIDTH).abs() < 0.5
+        && (height - LEGACY_STICKY_NOTE_HEIGHT).abs() < 0.5
 }
 
 pub const TODO_STICKY_WIDTH: f64 = 300.0;

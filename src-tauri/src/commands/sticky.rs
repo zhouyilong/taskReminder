@@ -413,7 +413,7 @@ pub fn close_todo_sticky(
     into_api(todo_sticky::close_todo_sticky(&app, &state.db))
 }
 
-/// 锚定（置顶并锁定位置）或取消，返回新的状态。
+/// 锚定（置顶，不锁定位置）或取消，返回新的状态。
 #[tauri::command]
 pub fn set_todo_sticky_pinned(
     app: tauri::AppHandle,

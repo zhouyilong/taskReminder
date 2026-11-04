@@ -13,7 +13,7 @@
 
       <header
         class="paper-note-header"
-        :data-tauri-drag-region="isPinned ? null : ''"
+        data-tauri-drag-region
         :class="{ 'paper-note-header-pinned': isPinned }"
       >
         <input
@@ -47,7 +47,7 @@
             class="paper-note-action pin"
             :class="{ active: isPinned }"
             type="button"
-            :title="isPinned ? '取消锚定（取消置顶并恢复可移动）' : '锚定便签（置顶并锁定位置）'"
+            :title="isPinned ? '取消锚定（取消置顶）' : '锚定便签（置顶，仍可拖动）'"
             @mousedown.stop.prevent
             @click.stop="handleTogglePin"
           >
@@ -622,9 +622,10 @@ const clearAutoSaveTrackers = () => {
   clearSaveCountdownTimer();
 };
 
-const flushPendingSave = async (force = false) => {
+/** 保存还没保存的标题与正文；返回是否已全部保存（没有改动也算成功）。 */
+const flushPendingSave = async (force = false): Promise<boolean> => {
   if (!note.value) {
-    return;
+    return true;
   }
 
   if (!force && saveTimer) {
@@ -640,7 +641,7 @@ const flushPendingSave = async (force = false) => {
 
   if (!titleChanged && !contentChanged) {
     saveHint.value = "";
-    return;
+    return true;
   }
 
   saveHint.value = "保存中...";
@@ -667,9 +668,52 @@ const flushPendingSave = async (force = false) => {
         saveHint.value = "";
       }
     }, 4000);
+    return true;
   } catch (error) {
     console.error("[sticky-note-item] 自动保存失败", error);
     saveHint.value = "保存失败";
+    return false;
+  }
+};
+
+/**
+ * 关闭、完成前收齐还没进入 note 的输入（v2.2.6）：失焦让输入法把正在组合的文字上屏
+ * （ProseMirror 在 compositionend 后约 20ms 才读取 DOM 改动，所以稍等一下），
+ * 再冲刷编辑器 200ms 的防抖。
+ */
+const settleEditorInput = async () => {
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && active !== document.body) {
+    active.blur();
+    await new Promise(resolve => window.setTimeout(resolve, 60));
+  }
+  editorRef.value?.flush();
+};
+
+/** 关闭、完成前立即保存；保存失败时询问是否仍然关闭，返回是否继续。 */
+const saveBeforeClose = async () => {
+  clearAutoSaveTrackers();
+  await settleEditorInput();
+  clearAutoSaveTrackers();
+  if (await flushPendingSave(true)) {
+    return true;
+  }
+  return window.confirm("便签内容保存失败，仍要关闭吗？未保存的修改会丢失。");
+};
+
+/**
+ * 便签窗口失去焦点或被隐藏时（在主窗口关闭、完成这张便签，或系统关闭窗口）立即保存
+ * 还在倒计时的修改，不再等 5 秒（v2.2.6）。
+ */
+const savePendingNow = () => {
+  editorRef.value?.flush();
+  if (saveTimer) {
+    void flushPendingSave();
+  }
+};
+const handleVisibilityChange = () => {
+  if (document.visibilityState === "hidden") {
+    savePendingNow();
   }
 };
 
@@ -700,9 +744,24 @@ const handleContentInput = () => {
   scheduleAutoSave();
 };
 
+// 正在关闭或完成时忽略重复点击。
+let closing = false;
+
 const closeNote = async () => {
-  clearAutoSaveTrackers();
-  await flushPendingSave(true);
+  if (closing) {
+    return;
+  }
+  closing = true;
+  try {
+    if (await saveBeforeClose()) {
+      await hideAndCloseNote();
+    }
+  } finally {
+    closing = false;
+  }
+};
+
+const hideAndCloseNote = async () => {
   try {
     await windowRef.hide();
   } catch (error) {
@@ -867,15 +926,22 @@ const completeAndCloseNote = async () => {
   if (!note.value) {
     return;
   }
+  if (closing) {
+    return;
+  }
+  closing = true;
   const taskId = note.value.taskId;
-  clearAutoSaveTrackers();
-  await flushPendingSave(true);
   try {
+    if (!(await saveBeforeClose())) {
+      return;
+    }
     await api.completeTask(taskId);
   } catch (error) {
     console.error("[sticky-note-item] 标记完成失败", error);
     const message = error instanceof Error ? error.message : String(error);
     alert(`标记完成失败：${message}`);
+  } finally {
+    closing = false;
   }
   // 完成待办时后端已收起便签窗口并清掉 sticky_is_open，不需要再调用 closeStickyNote。
 };
@@ -928,6 +994,9 @@ const loadCurrentNoteWithRetry = async () => {
 
 onMounted(async () => {
   window.addEventListener("mousedown", closeColorMenu);
+  window.addEventListener("blur", savePendingNow);
+  window.addEventListener("pagehide", savePendingNow);
+  document.addEventListener("visibilitychange", handleVisibilityChange);
   applyThemeFromStorage();
   applyUiScale(Number(safeStorage.getItem("uiScale") ?? DEFAULT_UI_SCALE));
   applyWindowOpacity(Number(safeStorage.getItem("windowOpacity") ?? DEFAULT_WINDOW_OPACITY));
@@ -1089,6 +1158,9 @@ onBeforeUnmount(() => {
   unlistenFocus?.();
   window.clearTimeout(copyStateTimer);
   window.removeEventListener("mousedown", closeColorMenu);
+  window.removeEventListener("blur", savePendingNow);
+  window.removeEventListener("pagehide", savePendingNow);
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
   if (reminderClockTimer) {
     window.clearInterval(reminderClockTimer);
     reminderClockTimer = 0;

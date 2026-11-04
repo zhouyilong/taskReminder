@@ -31,6 +31,13 @@ export const test = base.extend<{ app: Page; todoSticky: Page }>({
   }
 });
 
+/** 打开单张便签窗口（`sticky-note-item.html?noteId=...`，v2.2.6），等编辑器就绪。 */
+export const openStickyNote = async (page: Page, noteId: string) => {
+  await page.addInitScript({ path: MOCK_PATH });
+  await page.goto(`/sticky-note-item.html?noteId=${encodeURIComponent(noteId)}`);
+  await expect(page.locator(".paper-note-window .ProseMirror")).toBeVisible();
+};
+
 /** 读取模拟运行时记录的 invoke 调用（可按命令名过滤）。 */
 export const invokeCalls = async (page: Page, cmd?: string): Promise<InvokeCall[]> => {
   const calls = await page.evaluate(() => (window as unknown as { __TAURI_MOCK__: { calls: InvokeCall[] } }).__TAURI_MOCK__.calls);

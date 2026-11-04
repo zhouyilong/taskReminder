@@ -2,7 +2,7 @@
 //!
 //! 只有一个窗口（标签 `sticky-todo-list`）。打开、位置、尺寸与锚定都是本机设置
 //! （`settings.todo_sticky_state`），不参与同步；层级与普通便签相同：未锚定时在桌面层，
-//! 锚定时置顶并锁定位置。
+//! 锚定时置顶（仍可拖动）。
 
 use tauri::{Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -130,7 +130,7 @@ pub fn close_todo_sticky(
     Ok(state)
 }
 
-/// 锚定（置顶并锁定位置）或取消。
+/// 锚定（置顶，不锁定位置）或取消。
 pub fn set_todo_sticky_pinned(
     app: &tauri::AppHandle,
     db: &DbManager,
@@ -175,7 +175,7 @@ pub fn hide_window(app: &tauri::AppHandle) {
     }
 }
 
-/// 窗口事件：关闭时隐藏并记为关闭，移动与缩放时保存位置和尺寸（锚定时位置不变）。
+/// 窗口事件：关闭时隐藏并记为关闭，移动与缩放时保存位置和尺寸。
 pub fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     let app = window.app_handle();
     let Some(state) = app.try_state::<AppState>() else {

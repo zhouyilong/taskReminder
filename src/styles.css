@@ -3025,15 +3025,6 @@ html.sticky-note-mode.is-linux .paper-note {
   cursor: move;
 }
 
-.paper-note-header-pinned {
-  -webkit-app-region: no-drag;
-  cursor: default;
-}
-
-.paper-note-header-pinned .paper-note-title-input {
-  cursor: text;
-}
-
 .paper-note-title-input {
   flex: 1;
   min-width: 0;
@@ -3090,7 +3081,7 @@ html.sticky-note-mode.is-linux .paper-note {
   color: var(--sticky-text-muted);
   border-radius: calc(7px * var(--sticky-ui-scale));
   cursor: pointer;
-  /* 按钮平时隐藏，悬停或编辑便签时出现；已锚定的图钉常驻，提示便签被锁定。 */
+  /* 按钮平时隐藏，悬停或编辑便签时出现；已锚定的图钉常驻，提示便签已置顶。 */
   opacity: 0;
   transition: opacity 0.16s ease, background-color 0.16s ease, color 0.16s ease;
 }

@@ -187,6 +187,12 @@
 - 清单中添加待办后用 `open_sticky_note` 的 `focus: true` 打开便签：后端显示后 `set_focus`，新窗口经初始化脚本 `__TASKREMINDER_FOCUS_EDITOR`、已打开的窗口经 `sticky-note-item-focus-<编码后的 id>` 事件让编辑器聚焦正文。
 - 便签“一键复制”复制 `markdownToCopyText(正文)`（保留行结构、去掉转义符与零宽字符、紧凑列表），正文为空时复制标题。
 
+### 便签锚定、默认尺寸与关闭时保存（v2.2.6）
+- 锚定只置顶，**不锁定位置**：便签与清单便签的标题栏始终带 `data-tauri-drag-region`，`paper-note-header-pinned` 只用于图钉常驻的样式。
+- 默认尺寸只在 `models::STICKY_NOTE_WIDTH` / `STICKY_NOTE_HEIGHT`（420 × 300）定义；`sticky_width` / `sticky_height` 的列默认值仍是旧的 284 × 280（迁移不改），`open_sticky_note` 对关闭状态下仍是旧默认尺寸（`is_legacy_sticky_size`）的便签改用新尺寸。
+- 关闭、完成前经 `saveBeforeClose`：先让焦点离开（输入法上屏）、`flush()` 编辑器，再立即保存，成功才关闭；窗口失焦 / 隐藏时 `savePendingNow` 立即保存倒计时中的修改。新增关闭便签的入口时同样先保存。
+- `save_sticky_note_content` / `update_sticky_note_title` 不改 `sticky_is_open`（晚于关闭到达的保存不能让便签重新记为打开）；移动、缩放仍会记为打开。
+
 ### 应用名称（v2.2.4）
 - 显示名称（`productName`、窗口标题、托盘）为“任务提醒”；**不要改**这些内部标识：`identifier`（`ylfty.top`，WebView 数据目录、系统通知）、数据目录名 `TaskReminderApp`（`paths.rs`）、凭据库服务名（`secrets.rs`）、开机自启项名（`autostart.rs`）、Cargo 包名（exe 名）。
 - `bundle.windows.wix.upgradeCode` 固定为旧 productName 推导出的 `c07d9d18-1428-57a1-8abe-04831ec6eead`，不能修改，否则 Windows 会把新版本当作另一个应用并装出两份。

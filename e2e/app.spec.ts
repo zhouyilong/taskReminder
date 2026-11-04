@@ -1,4 +1,4 @@
-import { expect, invokeCalls, test } from "./fixtures";
+import { expect, invokeCalls, openStickyNote, test } from "./fixtures";
 
 // 主窗口的关键流程：只断言界面与 invoke 参数（Tauri 运行时由 tauri-mock.js 模拟）。
 
@@ -476,12 +476,55 @@ test("待办清单便签：列表、添加、完成、打开便签与锚定", as
   const [color] = await invokeCalls(page, "set_todo_sticky_color");
   expect(color.args).toEqual({ color: "green" });
 
-  // 锚定：置顶并锁定位置（标题栏不再可拖动）。
-  await page.getByTitle("锚定清单（置顶并锁定位置）").click();
+  // 锚定：只置顶，不锁定位置（v2.2.6 起标题栏仍可拖动）。
+  await page.getByTitle("锚定清单（置顶，仍可拖动）").click();
   await expect(page.locator(".todo-sticky-header")).toHaveClass(/paper-note-header-pinned/);
+  await expect(page.locator(".todo-sticky-header")).toHaveAttribute("data-tauri-drag-region", "");
   const [pin] = await invokeCalls(page, "set_todo_sticky_pinned");
   expect(pin.args).toEqual({ pinned: true });
 
   await page.getByTitle("关闭清单").click();
   expect(await invokeCalls(page, "close_todo_sticky")).toHaveLength(1);
+});
+
+// 单张便签窗口（v2.2.6）：输入后立刻关闭或完成，不等 5 秒自动保存。
+test("便签输入后立刻关闭也会保存", async ({ page }) => {
+  await openStickyNote(page, "t-ideas");
+  await page.locator(".paper-note-window .ProseMirror").click();
+  await page.keyboard.press("End");
+  await page.keyboard.type("补充一句");
+  // 不等编辑器 200ms 防抖与 5 秒自动保存，直接关闭。
+  await page.getByTitle("关闭", { exact: true }).click();
+  await expect.poll(async () => (await invokeCalls(page, "close_sticky_note_by_window_label")).length).toBe(1);
+  const calls = await invokeCalls(page);
+  const saveIndex = calls.findIndex(call => call.cmd === "save_sticky_note_content");
+  const closeIndex = calls.findIndex(call => call.cmd === "close_sticky_note_by_window_label");
+  expect(saveIndex).toBeGreaterThanOrEqual(0);
+  expect(saveIndex).toBeLessThan(closeIndex);
+  const payload = calls[saveIndex].args.payload as { taskId: string; content: string };
+  expect(payload.taskId).toBe("t-ideas");
+  expect(payload.content).toContain("补充一句");
+});
+
+test("便签输入后立刻标记完成也会先保存", async ({ page }) => {
+  await openStickyNote(page, "t-ideas");
+  await page.locator(".paper-note-window .paper-note-title-input").fill("读书笔记（已读完）");
+  await page.locator(".paper-note-window .ProseMirror").click();
+  await page.keyboard.press("End");
+  await page.keyboard.type("结论");
+  await page.getByTitle("标记完成并关闭").click();
+  await expect.poll(async () => (await invokeCalls(page, "complete_task")).length).toBe(1);
+  const calls = await invokeCalls(page);
+  const cmds = calls.map(call => call.cmd);
+  expect(cmds.indexOf("update_sticky_note_title")).toBeLessThan(cmds.indexOf("complete_task"));
+  expect(cmds.indexOf("save_sticky_note_content")).toBeLessThan(cmds.indexOf("complete_task"));
+  const content = calls.find(call => call.cmd === "save_sticky_note_content")!.args.payload as { content: string };
+  expect(content.content).toContain("结论");
+});
+
+test("便签锚定后仍可拖动", async ({ page }) => {
+  await openStickyNote(page, "t-ideas");
+  await page.getByTitle("锚定便签（置顶，仍可拖动）").click();
+  await expect.poll(async () => (await invokeCalls(page, "set_sticky_note_pinned_by_window_label")).length).toBe(1);
+  await expect(page.locator(".paper-note-window .paper-note-header")).toHaveAttribute("data-tauri-drag-region", "");
 });

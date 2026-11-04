@@ -6,13 +6,13 @@ pub(super) const STICKY_NOTE_DEFAULT_POS_X: f64 = 48.0;
 
 pub(super) const STICKY_NOTE_DEFAULT_POS_Y: f64 = 76.0;
 
-pub(super) const STICKY_NOTE_ITEM_DEFAULT_WIDTH: f64 = 284.0;
+pub(super) const STICKY_NOTE_ITEM_DEFAULT_WIDTH: f64 = crate::models::STICKY_NOTE_WIDTH;
 
-pub(super) const STICKY_NOTE_ITEM_DEFAULT_HEIGHT: f64 = 280.0;
+pub(super) const STICKY_NOTE_ITEM_DEFAULT_HEIGHT: f64 = crate::models::STICKY_NOTE_HEIGHT;
 
-pub(super) const STICKY_NOTE_ITEM_MIN_WIDTH: f64 = 220.0;
+pub(super) const STICKY_NOTE_ITEM_MIN_WIDTH: f64 = crate::models::STICKY_NOTE_MIN_WIDTH;
 
-pub(super) const STICKY_NOTE_ITEM_MIN_HEIGHT: f64 = 180.0;
+pub(super) const STICKY_NOTE_ITEM_MIN_HEIGHT: f64 = crate::models::STICKY_NOTE_MIN_HEIGHT;
 
 pub(super) fn normalize_sticky_item_width(width: Option<f64>) -> f64 {
     width
@@ -94,14 +94,27 @@ impl DbManager {
                 .or_else(|| existing.as_ref().map(|note| note.pos_y))
                 .unwrap_or(STICKY_NOTE_DEFAULT_POS_Y)
         };
-        let width = existing
-            .as_ref()
-            .map(|note| normalize_sticky_item_width(Some(note.width)))
-            .unwrap_or(STICKY_NOTE_ITEM_DEFAULT_WIDTH);
-        let height = existing
-            .as_ref()
-            .map(|note| normalize_sticky_item_height(Some(note.height)))
-            .unwrap_or(STICKY_NOTE_ITEM_DEFAULT_HEIGHT);
+        // 关闭状态下仍是旧默认尺寸（从没打开过或没调整过大小）的便签改用新的默认尺寸；
+        // 已打开的便签保持当前窗口大小。
+        let (width, height) = match existing.as_ref() {
+            Some(note)
+                if !note.is_open
+                    && crate::models::is_legacy_sticky_size(note.width, note.height) =>
+            {
+                (
+                    STICKY_NOTE_ITEM_DEFAULT_WIDTH,
+                    STICKY_NOTE_ITEM_DEFAULT_HEIGHT,
+                )
+            }
+            Some(note) => (
+                normalize_sticky_item_width(Some(note.width)),
+                normalize_sticky_item_height(Some(note.height)),
+            ),
+            None => (
+                STICKY_NOTE_ITEM_DEFAULT_WIDTH,
+                STICKY_NOTE_ITEM_DEFAULT_HEIGHT,
+            ),
+        };
         let resolved_title = title
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
@@ -198,12 +211,14 @@ impl DbManager {
         Ok(changed > 0)
     }
 
+    /// 保存便签正文。不改打开状态（v2.2.6）：便签关闭时最后一次保存可能晚于关闭到达，
+    /// 便签页清空已关闭便签的内容也不应把它记为打开。
     pub fn save_sticky_note_content(&self, task_id: &str, content: &str) -> Result<(), AppError> {
         let conn = self.get_conn()?;
         let now = now_string();
         conn.execute(
             "UPDATE tasks
-             SET sticky_content = ?, sticky_is_open = 1, updated_at = ?
+             SET sticky_content = ?, updated_at = ?
              WHERE id = ?",
             params![content, now, task_id],
         )?;
@@ -225,7 +240,6 @@ impl DbManager {
                      WHEN TRIM(COALESCE(sticky_content, '')) = '' THEN ?
                      ELSE sticky_content
                  END,
-                 sticky_is_open = 1,
                  updated_at = ?
              WHERE id = ?",
             params![resolved_title, resolved_title, now, task_id],

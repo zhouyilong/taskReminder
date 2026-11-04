@@ -212,8 +212,8 @@
     content: item.stickyContent ?? "",
     posX: 48,
     posY: 76,
-    width: 284,
-    height: 280,
+    width: 420,
+    height: 300,
     isOpen: !!item.stickyIsOpen,
     isPinned: false,
     createdAt: item.createdAt,
@@ -399,6 +399,16 @@
       if (item) item.stickyIsOpen = true;
       return item ? stickySummary(item) : null;
     },
+    // 单张便签窗口（sticky-note-item.html?noteId=...）读取便签。
+    get_sticky_note: ({ noteId }) => {
+      const item = findTask(noteId);
+      return item ? stickySummary(item) : null;
+    },
+    save_sticky_note_content: ({ payload }) => {
+      const item = findTask(payload.taskId);
+      if (item) item.stickyContent = payload.content;
+    },
+    close_sticky_note_by_window_label: () => null,
     close_sticky_note: ({ taskId }) => {
       const item = findTask(taskId);
       if (item) item.stickyIsOpen = false;

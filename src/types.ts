@@ -222,7 +222,7 @@ export interface TodoStickyState {
   y?: number | null;
   width: number;
   height: number;
-  /** 锚定：置顶并锁定位置。 */
+  /** 锚定：置顶（v2.2.6 起不再锁定位置）。 */
   pinned: boolean;
   /** 清单颜色（v2.2.5），取值同便签颜色，空为默认颜色。 */
   color?: string;
