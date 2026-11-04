@@ -90,7 +90,8 @@ jobs:
   # 主窗口端到端测试：浏览器中运行前端，Tauri 运行时由 e2e/tauri-mock.js 模拟。
   e2e:
     name: e2e (chromium)
-    runs-on: ubuntu-latest
+    # ubuntu-latest 已是 Ubuntu 26.04，Playwright 1.56 不支持在上面安装 Chromium；升级 Playwright 后再改回。
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
