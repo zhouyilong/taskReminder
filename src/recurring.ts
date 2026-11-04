@@ -91,6 +91,66 @@ export const RECURRING_STATUS_LABELS: Record<RecurringStatus, string> = {
 export const canSkipRecurring = (task: Pick<RecurringTask, "isPaused" | "repeatMode" | "nextTrigger">) =>
   !task.isPaused && isSupportedRecurringMode(task.repeatMode) && Boolean(task.nextTrigger);
 
+const pad2 = (value: number) => String(value).padStart(2, "0");
+const localMinute = (date: Date) =>
+  `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+
+/** 临时提醒用的简短时间：今天 / 明天 / 月日（不是今年的带上年份）加钟点。 */
+export const formatTempTime = (value: string, now = new Date()) => {
+  const date = value.slice(0, 10);
+  const clock = value.slice(11, 16);
+  const today = localMinute(now).slice(0, 10);
+  const tomorrowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const tomorrow = localMinute(tomorrowDate).slice(0, 10);
+  if (date === today) return `今天 ${clock}`;
+  if (date === tomorrow) return `明天 ${clock}`;
+  const [year, month, day] = date.split("-").map(Number);
+  if (!year || !month || !day) return value.replace("T", " ");
+  return `${year === now.getFullYear() ? "" : `${year}年`}${month}月${day}日 ${clock}`;
+};
+
+/** 能否设置临时提醒（v2.2.4）：本机认识的模式即可，暂停、已结束的也能设置（临时提醒照常提醒）。 */
+export const canSetTempReminder = (task: Pick<RecurringTask, "repeatMode">) =>
+  isSupportedRecurringMode(task.repeatMode);
+
+/**
+ * 临时提醒的说明：`label` 如“临时 今天 08:45”，`replaces` 如“替代 09:00”（与临时提醒同一天时只写钟点）。
+ * 没有临时提醒时返回 null。
+ */
+export const describeTempReminder = (
+  task: Pick<RecurringTask, "tempTrigger" | "tempReplaces">,
+  now = new Date()
+) => {
+  if (!task.tempTrigger) return null;
+  const label = `临时 ${formatTempTime(task.tempTrigger, now)}`;
+  let replaces = "";
+  if (task.tempReplaces) {
+    const sameDay = task.tempReplaces.slice(0, 10) === task.tempTrigger.slice(0, 10);
+    replaces = `替代 ${sameDay ? task.tempReplaces.slice(11, 16) : formatTempTime(task.tempReplaces, now)}`;
+  }
+  return { label, replaces, text: replaces ? `${label} · ${replaces}` : label };
+};
+
+/**
+ * 临时提醒对话框的默认时间（datetime-local，YYYY-MM-DDTHH:mm）：已有临时提醒时用它；
+ * 否则取下次触发提前 15 分钟（已过时用下次触发本身）；没有将来的下次触发时取 1 小时后（取整到 5 分钟）。
+ */
+export const defaultTempReminderTime = (
+  task: Pick<RecurringTask, "tempTrigger" | "nextTrigger" | "isPaused">,
+  now = new Date()
+) => {
+  if (task.tempTrigger) return task.tempTrigger.slice(0, 16);
+  const next = task.nextTrigger && !task.isPaused ? new Date(task.nextTrigger) : null;
+  if (next && !Number.isNaN(next.getTime()) && next.getTime() > now.getTime()) {
+    const earlier = new Date(next.getTime() - 15 * 60 * 1000);
+    return localMinute(earlier.getTime() > now.getTime() ? earlier : next);
+  }
+  const later = new Date(now.getTime() + 60 * 60 * 1000);
+  later.setSeconds(0, 0);
+  later.setMinutes(Math.ceil(later.getMinutes() / 5) * 5);
+  return localMinute(later);
+};
+
 export const formatRecurringMode = (mode?: RecurringMode | string | null) => {
   // 空值按区间间隔（旧数据的默认值）；其他不认识的模式不能冒充区间间隔。
   if (!mode) {

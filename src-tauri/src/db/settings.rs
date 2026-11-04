@@ -13,6 +13,36 @@ pub(super) fn normalize_window_opacity(opacity: Option<f64>) -> f64 {
 }
 
 impl DbManager {
+    /// 待办清单便签的窗口状态（本机设置）。只读一列，不访问凭据库。
+    pub fn todo_sticky_state(&self) -> Result<TodoStickyState, AppError> {
+        let conn = self.get_conn()?;
+        let value: Option<String> = conn
+            .query_row(
+                "SELECT todo_sticky_state FROM settings WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(TodoStickyState::parse(value.as_deref().unwrap_or("")))
+    }
+
+    /// 读取、修改并保存待办清单便签的窗口状态，返回修改后的状态。
+    pub fn update_todo_sticky_state(
+        &self,
+        change: impl FnOnce(&mut TodoStickyState),
+    ) -> Result<TodoStickyState, AppError> {
+        let mut state = self.todo_sticky_state()?;
+        change(&mut state);
+        let json = serde_json::to_string(&state)
+            .map_err(|e| AppError::System(format!("保存待办清单便签状态失败: {}", e)))?;
+        let conn = self.get_conn()?;
+        conn.execute(
+            "UPDATE settings SET todo_sticky_state = ? WHERE id = 1",
+            [json],
+        )?;
+        Ok(state)
+    }
+
     /// 是否开启便签贴边吸附。只读一列，拖动结束时调用，避免 `load_settings` 访问凭据库。
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub fn sticky_snap_enabled(&self) -> Result<bool, AppError> {

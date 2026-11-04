@@ -37,6 +37,7 @@
           {{ option.value ? option.label : "默认颜色" }}
         </option>
       </select>
+      <button class="button secondary" type="button" title="桌面上常驻的全部待办列表" @click="openTodoSticky">待办清单便签</button>
       <button class="button" type="button" :disabled="busy" @click="createNote">新建便签</button>
     </div>
     <div class="table-card">
@@ -215,6 +216,15 @@ const bringToFront = (item: StickyListItem) =>
   });
 
 const closeNote = (item: StickyListItem) => withBusy(() => api.closeStickyNote(item.note.taskId));
+
+// 待办清单便签（v2.2.4）。
+const openTodoSticky = async () => {
+  try {
+    await api.openTodoSticky();
+  } catch (error) {
+    alert(`打开待办清单便签失败：${errorMessage(error)}`);
+  }
+};
 
 const createNote = () =>
   withBusy(async () => {

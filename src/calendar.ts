@@ -183,12 +183,15 @@ export const bucketCalendarItems = (input: CalendarInput): Map<string, CalendarI
 
   for (const preview of input.previews) {
     const recurring = recurringById.get(preview.taskId);
-    if (!recurring || recurring.isPaused) {
+    if (!recurring) {
       continue;
     }
-    for (const time of preview.times) {
+    // 暂停的循环提醒只有临时提醒（v2.2.4）照常提醒。
+    const times = recurring.isPaused ? (preview.tempTime ? [preview.tempTime] : []) : preview.times;
+    for (const time of times) {
       if (inRange(time) && time > now) {
-        addRecurring(recurring.id, time, recurring.description, "upcoming");
+        const title = time === preview.tempTime ? `${recurring.description}（临时）` : recurring.description;
+        addRecurring(recurring.id, time, title, "upcoming");
       }
     }
   }

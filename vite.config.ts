@@ -3,7 +3,7 @@ import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { resolve } from "path";
 
-// 使用多入口以支持通知、全屏提醒效果、快速添加与便签窗口
+// 使用多入口以支持通知、全屏提醒效果、快速添加、便签与待办清单便签窗口
 export default defineConfig({
   // Use relative asset paths so packaged desktop builds can always resolve JS/CSS.
   base: "./",
@@ -29,7 +29,8 @@ export default defineConfig({
         notification: resolve(__dirname, "notification.html"),
         attention: resolve(__dirname, "attention.html"),
         quickAdd: resolve(__dirname, "quick-add.html"),
-        stickyNoteItem: resolve(__dirname, "sticky-note-item.html")
+        stickyNoteItem: resolve(__dirname, "sticky-note-item.html"),
+        stickyTodoList: resolve(__dirname, "sticky-todo-list.html")
       }
     }
   }

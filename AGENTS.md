@@ -1,7 +1,7 @@
 # 仓库指南
 
 ## 项目结构与模块组织
-- `src/` 存放 Vue 3 + TypeScript 前端，共三个窗口入口：
+- `src/` 存放 Vue 3 + TypeScript 前端，窗口入口如下：
   - 主窗口：`index.html` → `src/main.ts` → `src/App.vue`（只负责外壳：标题栏、侧边栏、按 Tab 切换视图、挂载共享弹窗与全局事件监听）。
     - `src/views/`：每个 Tab 一个视图——`TodayView`（今天时间线）、`CalendarView`（日历月视图 / 周视图，可拖动待办改期到某天或某个时段）、`TasksView`（含搜索、标签/优先级筛选与排序）、`CompletedView`、`RecurringView`、`StickiesView`（便签管理列表：显示中 / 已隐藏 / 已关闭，打开、置前、关闭）、`RecordsView`、`StatsView`（统计）、`TrashView`（回收站）。Tab 键定义在 `src/navigation.ts`，上次打开的 Tab 记在 `localStorage.activeTab`。
     - `src/composables/`：模块级单例的共享状态——`useAppData`（四个列表、`refreshAll`、`dataVersion`）、`useSettings`（设置草稿、同步状态、设置/云同步弹窗开关）、`useUpdater`、`useUiPrefs`（主题、缩放、透明度、侧边栏）、`useDialogs`（确认框、详情、编辑待办/循环提醒）、`useItemActions`（完成、删除、右键菜单等通用操作）、`useSmartAdd`（带自然语言识别的新建待办/循环提醒）、`useContextMenu`、`usePagination`、`useNow`、`useSearchPalette`（全局搜索面板开关）、`useLabelManager`（标签与项目管理弹窗开关与最近一次改名，待办视图据此让筛选跟随）。
@@ -9,12 +9,14 @@
   - 全屏提醒效果：`attention.html` → `src/attention.ts` → `src/AttentionApp.vue`（每块屏幕一个透明、鼠标穿透、不可聚焦的置顶窗口，标签为 `attention-<批次>-<序号>`，内容由后端注入到 `window.__ATTENTION__`）。
   - 桌面便签：`sticky-note-item.html` → `src/stickyNoteItem.ts` → `src/StickyNoteItemApp.vue`（每张便签一个独立窗口，窗口标签为 `sticky-note-item-<编码后的 id>`）。
   - 快速添加：`quick-add.html` → `src/quickAdd.ts` → `src/QuickAddApp.vue`（窗口标签 `quick-add`，由全局快捷键或托盘菜单打开）。
+  - 待办清单便签（v2.2.4）：`sticky-todo-list.html` → `src/stickyTodoList.ts` → `src/StickyTodoListApp.vue`（窗口标签 `sticky-todo-list`，只有一个；列出全部未完成待办，点击打开该待办的便签，底部输入框添加待办；从待办页“清单便签”或便签页打开）。
 - `src/components/` 存放可复用 UI 组件：
   - `MarkdownNoteEditor.vue`：基于 Milkdown Crepe 的 Markdown 所见即所得编辑器，`variant` 支持 `card`（带边框）与 `ghost`（无边框，嵌入卡片或便签）。内容变更有 200ms 防抖，提交表单前先调用组件的 `flush()`（`ref` 取得），否则会丢掉最后的输入。
   - `Modal.vue`：通用弹窗（带进出过渡动画）。
   - `AppTitlebar.vue` / `AppSidebar.vue`：主窗口标题栏与侧边栏。
   - `SettingsModal.vue` / `WebdavModal.vue`：应用设置与云同步设置。
   - `SharedDialogs.vue`：挂在 App.vue 的共享弹窗（`TaskEditModal`、`RecurringEditModal`、详情、确认框、右键菜单），由 `useDialogs` 驱动，任何视图都可打开。
+  - `RecurringTempModal.vue`：循环提醒的临时提醒（v2.2.4，只从列表右键打开，挂在 `SharedDialogs.vue`，由 `useDialogs.openTempReminderEditor` 驱动）。
   - `RecurringFields.vue`：循环提醒各模式的规则字段，新建表单与编辑弹窗共用；`RecurringEndFields.vue`：结束条件（结束日期、次数，v2.2），同样两处共用。
   - `Pagination.vue`：表格分页条，配合 `usePagination`。
   - `WeekdayPicker.vue`：每周多天选择（位掩码 `v-model`，含工作日/周末/每天预设）。
@@ -28,7 +30,7 @@
 - `src/api.ts` 封装所有 Tauri `invoke` 命令；`src/types.ts` 为前后端共享的数据类型。
 - `src/markdown.ts` Markdown 转纯文本/预览文本工具（列表描述、提醒记录去掉前导列表标记）与勾选清单进度（`checklistProgress`，Crepe 保存为 `* [ ]`）。
 - `src/format.ts` 主窗口共用的时间与文案格式化；`src/recurring.ts` 循环规则展示、表单草稿、校验与提交载荷。
-- `src/timeline.ts`（“今天”时间线）、`src/stats.ts`（统计面板）、`src/calendar.ts`（日历网格与按天归类）、`src/tasks.ts`（标签、优先级、项目、筛选排序）、`src/stickies.ts`（便签列表状态、筛选排序）、`src/nlp.ts`（自然语言时间/标签/项目/优先级/循环规则与结束条件识别）、`src/search.ts`（全局搜索与各列表关键词搜索的统一规则：多词为“且”，`#标签` 只与标签前缀匹配，`@项目` 只与项目前缀匹配）、`src/retention.ts`（已完成待办保留期选项与说明）为纯函数，测试在同名 `*.spec.ts`。
+- `src/timeline.ts`（“今天”时间线）、`src/stats.ts`（统计面板）、`src/calendar.ts`（日历网格与按天归类）、`src/tasks.ts`（标签、优先级、项目、筛选排序）、`src/stickies.ts`（便签列表状态、筛选排序）、`src/nlp.ts`（自然语言时间/标签/项目/优先级/循环规则与结束条件识别）、`src/search.ts`（全局搜索与各列表关键词搜索的统一规则：多词为“且”，`#标签` 只与标签前缀匹配，`@项目` 只与项目前缀匹配）、`src/retention.ts`（已完成待办保留期选项与说明）、`src/todoSticky.ts`（待办清单便签的排序、时间文案与输入解析）为纯函数，测试在同名 `*.spec.ts`。
 - `src/attentionEffect.ts` 全屏提醒效果的设置选项、说明文案与横幅文字、主题（纯函数，测试在 `attentionEffect.spec.ts`）。
 - `src/syncStatus.ts` 云同步状态码到文案与色调的映射（兼容旧版中文状态）；`src/quietHours.ts` 勿扰时段说明文案。
 - `src/safeStorage.ts` 带异常保护的 `localStorage` 封装；`src/startupError.ts` 启动失败时渲染错误页。
@@ -37,7 +39,7 @@
 - `src/due.ts`（截止时间与提前提醒、`taskAnchorTime`、拖动改期时平移提醒）、`src/reorder.ts`（拖拽排序的位置计算）、`src/selection.ts`（列表多选）、`src/keyboard.ts`（主窗口快捷键映射）、`src/modalStack.ts`（Esc 关闭最上层弹窗）、`src/notificationSound.ts`（提醒弹窗提示音）为纯函数或小工具，测试在同名 `*.spec.ts`。
 - `src/weekdays.ts` 每周位掩码工具（与后端一致：周一 = bit0 … 周日 = bit6）；`src/shortcut.ts` 全局快捷键录制与展示。
 - `src-tauri/` 存放 Tauri 应用的 Rust 后端。
-  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（插件、命令注册与启动流程）、`commands/`（前端 `invoke` 的命令，按业务分为 `tasks`、`recurring`、`notification`、`trash`、`settings`、`sticky`、`system`、`data`，公共的 `ApiResult` / `into_api` 在 `commands/mod.rs`）、`windows/`（窗口事件；`windows/sticky.rs` 为便签窗口的标签编码、创建显示、层级与 UI 状态注入，以及 Windows 上的贴边吸附；`windows/placement.rs` 为便签位置的纯几何计算：越界校正、吸附）、`db/`（SQLite 读写：`mod.rs` 为连接池、初始化与凭据库，业务表按 `tasks`、`recurring`、`records`、`sticky`、`settings`、`tombstones`、`import`、`labels`（标签与项目的批量改名）、`migrations` 拆分，测试在 `db/tests.rs`）、`scheduler.rs`（提醒调度与弹窗）、`attention.rs`（全屏提醒效果窗口、弹窗所在屏幕的定位、再次提醒的判断）、`recurrence.rs`（循环规则计算）、`sync/`（WebDAV 同步：`service.rs` 调度与入口、`remote.rs` 同步主流程与加密、`merge.rs` 快照导出与按行合并、`webdav.rs` 客户端与同步锁，测试在 `sync/tests.rs`）、`sync_schema.rs`（参与同步的表与列的唯一定义、合并时保留不认识的列）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（时间的唯一入口：`now()`、数据库时间格式与各固定格式的解析与格式化）、`holidays.rs`（中国法定节假日与调休：内置数据、在线更新缓存与用户覆盖文件的合并与校验）、`holiday_update.rs`（每天从仓库拉取节假日数据）、`quick_add.rs`（快速添加窗口）、`shortcuts.rs`（全局快捷键统一注册：快速添加、显示/隐藏全部便签）、`quiet_hours.rs`（勿扰时段判断）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单与提示：下一条提醒、完成/推迟、显示/隐藏全部便签）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`kinds.rs`（状态、类型、处理结果、循环模式的强类型枚举，未知值原样保留）、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
+  - `src-tauri/src/` 为 Rust 应用代码：`main.rs`（插件、命令注册与启动流程）、`commands/`（前端 `invoke` 的命令，按业务分为 `tasks`、`recurring`、`notification`、`trash`、`settings`、`sticky`、`system`、`data`，公共的 `ApiResult` / `into_api` 在 `commands/mod.rs`）、`windows/`（窗口事件；`windows/sticky.rs` 为便签窗口的标签编码、创建显示、层级与 UI 状态注入，以及 Windows 上的贴边吸附；`windows/placement.rs` 为便签位置的纯几何计算：越界校正、吸附；`windows/todo_sticky.rs` 为待办清单便签窗口）、`db/`（SQLite 读写：`mod.rs` 为连接池、初始化与凭据库，业务表按 `tasks`、`recurring`、`records`、`sticky`、`settings`、`tombstones`、`import`、`labels`（标签与项目的批量改名）、`migrations` 拆分，测试在 `db/tests.rs`）、`scheduler.rs`（提醒调度与弹窗）、`attention.rs`（全屏提醒效果窗口、弹窗所在屏幕的定位、再次提醒的判断）、`recurrence.rs`（循环规则计算）、`sync/`（WebDAV 同步：`service.rs` 调度与入口、`remote.rs` 同步主流程与加密、`merge.rs` 快照导出与按行合并、`webdav.rs` 客户端与同步锁，测试在 `sync/tests.rs`）、`sync_schema.rs`（参与同步的表与列的唯一定义、合并时保留不认识的列）、`sync_crypto.rs`（同步端到端加密：Argon2id + AES-256-GCM）、`notification_queue.rs`（提醒弹窗队列）、`time.rs`（时间的唯一入口：`now()`、数据库时间格式与各固定格式的解析与格式化）、`holidays.rs`（中国法定节假日与调休：内置数据、在线更新缓存与用户覆盖文件的合并与校验）、`holiday_update.rs`（每天从仓库拉取节假日数据）、`quick_add.rs`（快速添加窗口）、`shortcuts.rs`（全局快捷键统一注册：快速添加、显示/隐藏全部便签）、`quiet_hours.rs`（勿扰时段判断）、`backup.rs`（JSON/Markdown/ICS 导出、JSON 导入合并、每日本地备份）、`tray.rs`（托盘菜单与提示：下一条提醒、完成/推迟、显示/隐藏全部便签）、`autostart.rs`、`single_instance.rs`、`paths.rs`（数据目录）、`models.rs`、`kinds.rs`（状态、类型、处理结果、循环模式的强类型枚举，未知值原样保留）、`state.rs`、`errors.rs`、`maintenance.rs`（定期清理与优化）。
   - `src-tauri/migrations/` 存放数据库迁移文件；新增迁移后需在 `db/migrations.rs` 的 `migration_scripts()` 中登记；新增同步列还要登记到 `sync_schema.rs` 的 `SYNC_TABLES`（测试会检查迁移结果与登记一致）。
   - `src-tauri/data/holidays-cn.json` 为内置法定节假日数据（`off` 放假日、`work` 调休上班日，支持 `[开始, 结束]` 区间），每年国务院发布次年安排后追加，并补充 `holidays.rs` 中的测试。
   - **该文件同时是在线更新的数据源**：客户端每天从 `main` 分支拉取（jsDelivr / GitHub raw），推送到 `main` 后已发布的应用即可获得新年份。客户端只采用内置数据没有的年份，且拒绝删减已下载年份的文件，因此**只能追加年份**；已发布年份的更正需随应用版本发布（内置数据优先）。CI 的 `holidays` 任务用 `scripts/check-holidays.mjs` 与基准版本比较：删除年份或日期一律失败；已有年份新增日期视为更正，需在提交信息或 PR 标题中加入 `holidays-correction`。
@@ -49,7 +51,7 @@
 - `.github/workflows/ci.yml` 为 CI（Ubuntu + Windows：`pnpm build`、`pnpm test`、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`；另有 `holidays` 任务检查节假日数据、`e2e` 任务运行 Playwright）。
 - `scripts/` 存放构建与发布脚本。
   - `scripts/build-updater.ps1` 签名构建 MSI + 生成更新清单。
-  - `scripts/write-updater-manifest.mjs` 生成 `latest.json` 更新清单。
+  - `scripts/write-updater-manifest.mjs` 生成 `latest.json` 更新清单，并把 `任务提醒_{版本}_x64_zh-CN.msi` 复制为 ASCII 的发布名称（规则在 `release-assets.mjs`，测试在 `release-assets.spec.mjs`）。
   - `scripts/check-release-version.mjs` 检查三处版本号一致且与发布 tag 相符（`release.yml` 使用）。
   - `scripts/check-holidays.mjs` 检查节假日数据格式且只追加年份（规则在 `holidays-check.mjs`，测试在 `holidays-check.spec.mjs`，`ci.yml` 使用）。
   - `scripts/tauri.mjs` Tauri CLI 包装器（处理 VS Dev Shell 环境）。
@@ -114,7 +116,7 @@
 - 发布更新时，先同步三处版本号：`package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`。
 - 普通 `pnpm tauri build` 不会生成 updater 签名产物，因此不要求设置 `TAURI_SIGNING_PRIVATE_KEY`。
 - PowerShell 推荐直接执行 `pnpm release:updater`。该脚本会读取 `~/.tauri/taskReminder-updater.key`，用 `.Trim()` 清除签名私钥尾部换行，设置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""` 避免交互等待，并通过 `cmd /c "pnpm.cmd tauri build --bundles msi --config src-tauri/tauri.updater.conf.json"` 确保子进程继承签名环境变量。
-- 构建产物位于 `src-tauri/target/release/bundle/msi/`，GitHub Release 必须上传三个文件：`TaskReminderApp_{version}_x64_zh-CN.msi`、`TaskReminderApp_{version}_x64_zh-CN.msi.sig`、`latest.json`。
+- 构建产物位于 `src-tauri/target/release/bundle/msi/`。2.2.4 起 productName 为“任务提醒”，Tauri 生成的是 `任务提醒_{version}_x64_zh-CN.msi`（及 `.sig`）；`write-updater-manifest.mjs` 会复制为 `TaskReminderApp_{version}_x64_zh-CN.msi`（GitHub 会改写非 ASCII 的附件名，`latest.json` 中的地址就对不上了）。GitHub Release 必须上传三个文件：`TaskReminderApp_{version}_x64_zh-CN.msi`、`TaskReminderApp_{version}_x64_zh-CN.msi.sig`、`latest.json`。
 - 创建 GitHub Release 时直接使用当前版本号执行：`gh release create v{version} src-tauri/target/release/bundle/msi/TaskReminderApp_{version}_x64_zh-CN.msi src-tauri/target/release/bundle/msi/TaskReminderApp_{version}_x64_zh-CN.msi.sig src-tauri/target/release/bundle/msi/latest.json --title "v{version}" --notes "{release notes}"`。
 - 在 bash 中构建时，直接 `export TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 后调用 `pnpm tauri build --bundles msi --config src-tauri/tauri.updater.conf.json`，再运行 `node scripts/write-updater-manifest.mjs` 生成 `latest.json`。
 
@@ -162,6 +164,22 @@
 - **规则**：到达结束条件时一律经 `apply_end_condition` 写入 `is_paused = 1`（旧版本不认识结束条件，靠暂停停止提醒）。凡是改了 `next_trigger` 的路径（调度器触发、区间外顺延、跳过本次、编辑、回收站恢复、节假日重算）都要调用；剩余次数只在 `advance_after_trigger`（真正触发一次）中扣减，跳过本次不扣。
 - `handle_recurring` 触发前先检查 `has_ended`：旧设备“恢复”了已结束的提醒时改回暂停，不弹出。`resume_recurring_task` 对已结束的提醒报错；`update_recurring_task` 在编辑前已结束、编辑后不再结束时自动恢复，其他情况保留原暂停状态。界面上“已结束”= 暂停且 `isRecurringEnded`（`recurringStatus`）。
 - 待办项目存于同步列 `tasks.project`（空 = 未分组），读写统一经过 `models::normalize_project`（去掉前导 `@`、控制字符，最多 32 字），前端 `normalizeProject` 与之一致。`update_task` 的 `project` 省略时保留、空字符串移出项目：只改时间的调用不要传。项目列表由已有待办汇总（`collectProjects`），没有单独的项目表（不认识的表会在旧设备上传时丢失）。
+
+### 循环提醒的临时提醒（v2.2.4）
+- 存于同步列 `recurring_tasks.temp_trigger`（临时提醒时间）与 `temp_replaces`（替代的那一次常规提醒的原定时间，空 = 不替代），只经 `DbManager::set_recurring_temp` 写入；`update_recurring_task`（编辑、调度器推进）不写这两列，所以编辑规则不会清掉临时提醒。`update_recurring_task` 命令保存后从库中重新读取再计时，不要用界面提交的旧值。
+- 替代目标由 `recurrence::temp_replace_target` 计算：从下次触发起推算，取离临时提醒最近的一次（等距取较早的），提前与推迟都会选中同一天那一次。
+- 调度：临时提醒单独计时（`ReminderScheduler::schedule_temp`，`schedule_recurring` 会先调用它；`schedule_existing` 对暂停的也调用），暂停 / 已结束时照常提醒，不认识的模式与已删除的不提醒；巡检同样补发。到点经 `handle_recurring_temp`：写提醒记录、弹窗、清掉两列；替代的那一次还没到时用 `consume_replaced_occurrence` 推进（计入剩余次数，不改 `last_triggered`）。常规触发遇到 `next_is_replaced` 的那一次同样只推进不弹出。超过补发回溯窗口（7 天）的临时提醒只清除不弹出。
+- **规则**：一条循环提醒同时只有一个临时提醒；临时提醒只在列表右键设置，不放进新建 / 编辑表单。预估（`preview_recurring_triggers`）经 `with_temp_reminder` 去掉被替代的一次、加入临时提醒（`tempTime`），“今天”与日历对暂停的提醒只显示临时提醒。
+- 弹窗推迟循环提醒：没有临时提醒时记为临时提醒（不改下次触发、不恢复暂停）；已有时按原方式把下次触发改为推迟后的时间。
+
+### 待办清单便签（v2.2.4）
+- 只有一个窗口 `sticky-todo-list`，窗口状态（打开、位置、尺寸、锚定）存本机设置 `settings.todo_sticky_state`（JSON，`TodoStickyState::parse` 容错），不参与同步；`DbManager::update_todo_sticky_state` 读改写。移动、缩放事件直接保存（隐藏或最小化时不保存）。
+- 层级与普通便签一致（`apply_sticky_item_layer`）；Windows 上同样挂贴边吸附（`sticky::install_snap`），便签类窗口用 `sticky::is_sticky_window_label` 判断，吸附时互相参照，“显示 / 隐藏全部便签”也包含它。创建窗口与普通便签一样放到后台线程再调度到主线程。
+- 数据通过 `data-updated` 事件刷新；添加走 `quick_add_task`（循环规则走 `create_recurring_task`），点击待办调用 `open_sticky_note` 并把默认位置放在清单旁边。
+
+### 应用名称（v2.2.4）
+- 显示名称（`productName`、窗口标题、托盘）为“任务提醒”；**不要改**这些内部标识：`identifier`（`ylfty.top`，WebView 数据目录、系统通知）、数据目录名 `TaskReminderApp`（`paths.rs`）、凭据库服务名（`secrets.rs`）、开机自启项名（`autostart.rs`）、Cargo 包名（exe 名）。
+- `bundle.windows.wix.upgradeCode` 固定为旧 productName 推导出的 `c07d9d18-1428-57a1-8abe-04831ec6eead`，不能修改，否则 Windows 会把新版本当作另一个应用并装出两份。
 
 ### 循环模式的兼容性
 - 每周多天存于 `schedule_weekdays` 位掩码，`schedule_weekday` 始终写入掩码中最早的一天，供旧版本读取；读取时掩码为空则回退到 `schedule_weekday`。
@@ -248,7 +266,7 @@
 ## 测试指南
 - 前端使用 Vitest：测试与被测模块同目录，命名为 `*.spec.ts`（`scripts/` 下的脚本为 `*.spec.mjs`），运行 `pnpm test`。前端改动至少执行 `pnpm build`（含 `vue-tsc` 类型检查）与 `pnpm test`。
 - 视图里的计算逻辑（如时间线、统计）优先抽成 `src/` 下的纯函数再写测试，组件只做展示。
-- Rust 测试位于 `src-tauri/src/` 各模块的 `#[cfg(test)]` 中（便签窗口标签/URL、提醒队列、墓碑清理、同步合并、时间解析、节假日、循环规则）；跨版本同步测试在 `sync/compat_tests.rs`，按各发布版本的迁移建库（`db::create_schema_up_to`，仅测试）并写入 `src-tauri/tests/fixtures/` 中的示例数据（`sync-sample-2.0.sql`；库结构 2.1.0 起再加 `sync-sample-2.1.sql`，2.2.0 起再加 `sync-sample-2.2.sql`），发布新版本时把它的库结构版本加到 `RELEASES`，通过 `cargo test` 运行；需要数据库的测试用临时目录创建 `DbManager`，会自动执行迁移。
+- Rust 测试位于 `src-tauri/src/` 各模块的 `#[cfg(test)]` 中（便签窗口标签/URL、提醒队列、墓碑清理、同步合并、时间解析、节假日、循环规则）；跨版本同步测试在 `sync/compat_tests.rs`，按各发布版本的迁移建库（`db::create_schema_up_to`，仅测试）并写入 `src-tauri/tests/fixtures/` 中的示例数据（`sync-sample-2.0.sql`；库结构 2.1.0 起再加 `sync-sample-2.1.sql`，2.2.0 起再加 `sync-sample-2.2.sql`，2.2.5 起再加 `sync-sample-2.2.5.sql`），发布新版本时把它的库结构版本加到 `RELEASES`，通过 `cargo test` 运行；需要数据库的测试用临时目录创建 `DbManager`，会自动执行迁移。
 - 提交前运行 `cargo fmt` 与 `cargo clippy --all-targets -- -D warnings`，CI 会执行 `cargo fmt --check` 并在 clippy 有告警时失败。只在 Windows 编译的代码（`#[cfg(target_os = "windows")]`）在 Linux 上检查不到，可用 `rustup target add x86_64-pc-windows-gnu`（需 `mingw-w64`）后执行 `cargo clippy --target x86_64-pc-windows-gnu --all-targets` 预检。
 - 在 Linux 上构建会改写 `src-tauri/gen/schemas/`，这些生成文件的无关变动不要提交。
 - 仅调整前端 UI 时，可用 `pnpm dev` 在浏览器中预览；浏览器中没有 Tauri 运行时，需要在页面加载前注入 `window.__TAURI_INTERNALS__`，直接复用 `e2e/tauri-mock.js`（Playwright 的 `page.addInitScript({ path })`，内存示例数据、调用记录在 `window.__TAURI_MOCK__.calls`；可先设 `window.__TAURI_MOCK_SEED__` 覆盖数据）。新增后端命令时若界面依赖它，同步在模拟中补上。
@@ -260,5 +278,5 @@
 
 ## 配置与资源
 - 在 `src-tauri/tauri.conf.json` 中更新窗口行为、打包标识符与应用元数据。
-- 保持静态 HTML 入口文件（`index.html`、`notification.html`、`attention.html`、`quick-add.html`、`sticky-note-item.html`）简洁，并与 Vue 入口保持同步；新增入口时同时更新 `vite.config.ts` 的多页面配置。
+- 保持静态 HTML 入口文件（`index.html`、`notification.html`、`attention.html`、`quick-add.html`、`sticky-note-item.html`、`sticky-todo-list.html`）简洁，并与 Vue 入口保持同步；新增入口时同时更新 `vite.config.ts` 的多页面配置。
 - 更新器配置在 `src-tauri/tauri.conf.json` 的 `plugins.updater` 节点，包含公钥和 GitHub Releases 端点。

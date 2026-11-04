@@ -26,6 +26,7 @@ const RELEASES: &[(&str, &str)] = &[
     ("2.2.1", "2.2.3"),
     ("2.2.2", "2.2.3"),
     ("2.2.3", "2.2.4"),
+    ("2.2.4", "2.2.5"),
 ];
 const SAMPLE: &str = include_str!("../../tests/fixtures/sync-sample-2.0.sql");
 /// v2.1 新增同步列的示例数据，只写入库结构 2.1.0 起的库。
@@ -34,6 +35,9 @@ const V2_1_SCHEMA: &str = "2.1.0";
 /// v2.2 新增同步列的示例数据，只写入库结构 2.2.0 起的库。
 const SAMPLE_2_2: &str = include_str!("../../tests/fixtures/sync-sample-2.2.sql");
 const V2_2_SCHEMA: &str = "2.2.0";
+/// 库结构 2.2.5（应用 2.2.4）新增同步列（临时提醒）的示例数据。
+const SAMPLE_2_2_5: &str = include_str!("../../tests/fixtures/sync-sample-2.2.5.sql");
+const V2_2_5_SCHEMA: &str = "2.2.5";
 
 fn parse_version(version: &str) -> Vec<u32> {
     version
@@ -50,6 +54,11 @@ fn has_v2_1(schema_version: &str) -> bool {
 /// 库结构版本是否已有 v2.2 的同步列。
 fn has_v2_2(schema_version: &str) -> bool {
     parse_version(schema_version) >= parse_version(V2_2_SCHEMA)
+}
+
+/// 库结构版本是否已有临时提醒的同步列。
+fn has_v2_2_5(schema_version: &str) -> bool {
+    parse_version(schema_version) >= parse_version(V2_2_5_SCHEMA)
 }
 
 struct TempDir(PathBuf);
@@ -86,6 +95,9 @@ fn release_db(path: &Path, schema_version: &str) {
     }
     if has_v2_2(schema_version) {
         conn.execute_batch(SAMPLE_2_2).unwrap();
+    }
+    if has_v2_2_5(schema_version) {
+        conn.execute_batch(SAMPLE_2_2_5).unwrap();
     }
 }
 
@@ -155,7 +167,9 @@ const V2_2_RECURRING_IDS: &[&str] = &["v22-rec-until", "v22-rec-count", "v22-rec
 fn all_rows(path: &Path, schema_version: &str) -> (Rows, Rows, Rows) {
     let v2_1 = has_v2_1(schema_version);
     let v2_2 = has_v2_2(schema_version);
-    let columns_at = if v2_2 {
+    let columns_at = if has_v2_2_5(schema_version) {
+        V2_2_5_SCHEMA
+    } else if v2_2 {
         V2_2_SCHEMA
     } else if v2_1 {
         V2_1_SCHEMA
@@ -195,6 +209,27 @@ fn all_rows(path: &Path, schema_version: &str) -> (Rows, Rows, Rows) {
             columns_at,
         ),
     )
+}
+
+/// 库结构 2.2.5 起的示例数据：临时提醒与替代的那一次读出来都对。
+fn assert_v2_2_5_sample(db: &DbManager, release: &str) {
+    let count = db.get_recurring_task("v22-rec-count").unwrap().unwrap();
+    assert_eq!(
+        count.temp_trigger.as_deref(),
+        Some("2026-10-05T08:45:00"),
+        "{}",
+        release
+    );
+    assert_eq!(
+        count.temp_replaces.as_deref(),
+        Some("2026-10-05T09:00:00"),
+        "{}",
+        release
+    );
+    assert!(crate::recurrence::next_is_replaced(&count), "{}", release);
+    let ended = db.get_recurring_task("v22-rec-ended").unwrap().unwrap();
+    assert!(ended.is_paused, "{}", release);
+    assert_eq!(ended.temp_replaces, None, "{}", release);
 }
 
 /// 2.2.0 起的示例数据：项目与结束条件读出来都对，已结束的提醒仍是暂停。
@@ -307,6 +342,9 @@ fn current_device_merges_release_snapshots_without_loss() {
         if has_v2_2(schema) {
             assert_v2_2_sample(&current, release);
         }
+        if has_v2_2_5(schema) {
+            assert_v2_2_5_sample(&current, release);
+        }
     }
 }
 
@@ -391,6 +429,9 @@ fn upgrading_release_database_keeps_data() {
         }
         if has_v2_2(schema) {
             assert_v2_2_sample(&db, release);
+        }
+        if has_v2_2_5(schema) {
+            assert_v2_2_5_sample(&db, release);
         }
         assert_eq!(all_rows(&path, schema), expected, "{}", release);
     }

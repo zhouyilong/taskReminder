@@ -252,6 +252,135 @@ pub fn skipped_trigger(task: &RecurringTask, now: NaiveDateTime) -> Result<Strin
     }
 }
 
+/// 推算替代目标时最多向后推算的次数（例如每分钟一次的区间提醒，推算一周以内足够）。
+const TEMP_TARGET_MAX_STEPS: usize = 20_000;
+
+/// 临时提醒（v2.2.4）替代的那一次常规提醒：从下次触发起逐个推算，取离临时提醒时间最近的一次
+/// （距离相同取较早的一次）。提前（9:00 → 8:45）与推迟（9:00 → 9:30）都会选中当天 9:00。
+/// 已暂停、已结束、不认识的模式，或推算不到任何一次时返回 `None`。
+pub fn temp_replace_target(
+    task: &RecurringTask,
+    temp: NaiveDateTime,
+) -> Result<Option<String>, AppError> {
+    if task.is_paused || !task.repeat_mode.is_known() || has_ended(task) {
+        return Ok(None);
+    }
+    let Some(mut current) = time::parse_datetime_any(&task.next_trigger) else {
+        return Ok(None);
+    };
+    let end = end_date(task);
+    let mut remaining = task.remaining_count;
+    let mut before: Option<NaiveDateTime> = None;
+    let mut after: Option<NaiveDateTime> = None;
+    for _ in 0..TEMP_TARGET_MAX_STEPS {
+        if end.is_some_and(|end| current.date() > end) || remaining.is_some_and(|c| c <= 0) {
+            break;
+        }
+        if current > temp {
+            after = Some(current);
+            break;
+        }
+        before = Some(current);
+        remaining = remaining.map(|count| count - 1);
+        let next = compute_next_trigger(task, Some(current))?;
+        match time::parse_datetime_any(&next) {
+            Some(value) if value > current => current = value,
+            _ => break,
+        }
+    }
+    let target = match (before, after) {
+        (Some(b), Some(a)) => Some(if temp - b <= a - temp { b } else { a }),
+        (b, a) => b.or(a),
+    };
+    Ok(target.map(|value| time::format_datetime(&value)))
+}
+
+/// 下次触发正是临时提醒要替代的那一次（且临时提醒还在）。
+pub fn next_is_replaced(task: &RecurringTask) -> bool {
+    if task.temp_trigger.is_none() {
+        return false;
+    }
+    match (
+        task.temp_replaces
+            .as_deref()
+            .and_then(time::parse_datetime_any),
+        time::parse_datetime_any(&task.next_trigger),
+    ) {
+        (Some(replaced), Some(next)) => replaced == next,
+        _ => false,
+    }
+}
+
+/// 被临时提醒替代的这一次不再提醒：推进到之后的那一次。替代算作提醒过一次，扣减剩余次数；
+/// 不改上次触发时间。临时提醒比原定时间早时（8:45 替代 9:00）从原定时间往后推算。
+/// 返回是否因此到达结束条件。
+pub fn consume_replaced_occurrence(
+    task: &mut RecurringTask,
+    now: NaiveDateTime,
+) -> Result<bool, AppError> {
+    let current = time::parse_datetime_any(&task.next_trigger).unwrap_or(now);
+    task.remaining_count = task.remaining_count.map(|count| (count - 1).max(0));
+    task.next_trigger = compute_next_trigger(task, Some(current.max(now)))?;
+    Ok(apply_end_condition(task))
+}
+
+/// 把临时提醒并入预估的触发时间：去掉被替代的那一次，加入 `until`（含）之前的临时提醒并按先后排列。
+/// 返回新的列表与其中的临时提醒时间。
+pub fn with_temp_reminder(
+    task: &RecurringTask,
+    times: Vec<String>,
+    until: NaiveDateTime,
+) -> (Vec<String>, Option<String>) {
+    if task.deleted_at.is_some() || !task.repeat_mode.is_known() {
+        return (times, None);
+    }
+    let replaced = task
+        .temp_replaces
+        .as_deref()
+        .and_then(time::parse_datetime_any)
+        .filter(|_| task.temp_trigger.is_some());
+    let mut parsed: Vec<NaiveDateTime> = times
+        .iter()
+        .filter_map(|value| time::parse_datetime_any(value))
+        .filter(|value| Some(*value) != replaced)
+        .collect();
+    let temp = task
+        .temp_trigger
+        .as_deref()
+        .and_then(time::parse_datetime_any)
+        .filter(|temp| *temp <= until);
+    if let Some(temp) = temp {
+        parsed.push(temp);
+        parsed.sort();
+        parsed.dedup();
+    }
+    (
+        parsed.iter().map(time::format_datetime).collect(),
+        temp.map(|value| time::format_datetime(&value)),
+    )
+}
+
+/// 本机接下来提醒这一条的时间（托盘“下一条提醒”用）：临时提醒与常规下次触发中较早的一个，
+/// 被临时提醒替代的那一次不算。临时提醒在暂停时也会提醒。
+pub fn next_alert_time(task: &RecurringTask) -> Option<NaiveDateTime> {
+    if task.deleted_at.is_some() || !task.repeat_mode.is_known() {
+        return None;
+    }
+    let temp = task
+        .temp_trigger
+        .as_deref()
+        .and_then(time::parse_datetime_any);
+    let regular = if task.is_paused || next_is_replaced(task) {
+        None
+    } else {
+        time::parse_datetime_any(&task.next_trigger)
+    };
+    match (temp, regular) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
+}
+
 /// 节假日数据更新后，“法定工作日”提醒的下次触发可能变化（例如新公布的调休上班日）。
 /// 返回需要改成的时间；不是运行中的法定工作日提醒、已经到点等待触发（交给巡检处理，
 /// 避免跳过一次提醒）或时间不变时返回 None。
@@ -738,6 +867,8 @@ mod tests {
             tags: Vec::new(),
             ends_on: None,
             remaining_count: None,
+            temp_trigger: None,
+            temp_replaces: None,
         }
     }
 
@@ -1284,5 +1415,146 @@ mod tests {
         assert!(!apply_end_condition(&mut t));
         t.next_trigger = skipped_trigger(&t, dt("2026-10-04T12:00")).unwrap();
         assert!(apply_end_condition(&mut t));
+    }
+
+    #[test]
+    fn temp_reminder_replaces_the_nearest_occurrence() {
+        let mut t = task(RepeatMode::Daily);
+        t.next_trigger = "2026-11-05T09:00:00".to_string();
+        // 提前与推迟都替代当天 9:00。
+        assert_eq!(
+            temp_replace_target(&t, dt("2026-11-05T08:45"))
+                .unwrap()
+                .as_deref(),
+            Some("2026-11-05T09:00:00")
+        );
+        assert_eq!(
+            temp_replace_target(&t, dt("2026-11-05T09:30"))
+                .unwrap()
+                .as_deref(),
+            Some("2026-11-05T09:00:00")
+        );
+        // 隔几天的临时提醒替代那一天的常规提醒。
+        assert_eq!(
+            temp_replace_target(&t, dt("2026-11-07T08:30"))
+                .unwrap()
+                .as_deref(),
+            Some("2026-11-07T09:00:00")
+        );
+        // 距离相同取较早的一次。
+        assert_eq!(
+            temp_replace_target(&t, dt("2026-11-05T21:00"))
+                .unwrap()
+                .as_deref(),
+            Some("2026-11-05T09:00:00")
+        );
+        // 早于下次触发很多时，替代的仍是下次触发。
+        assert_eq!(
+            temp_replace_target(&t, dt("2026-11-04T20:00"))
+                .unwrap()
+                .as_deref(),
+            Some("2026-11-05T09:00:00")
+        );
+    }
+
+    #[test]
+    fn temp_reminder_target_respects_end_conditions_and_pause() {
+        let mut t = task(RepeatMode::Daily);
+        t.next_trigger = "2026-11-05T09:00:00".to_string();
+        t.ends_on = Some("2026-11-05".to_string());
+        // 结束日期之后没有常规提醒，只能替代最后一次。
+        assert_eq!(
+            temp_replace_target(&t, dt("2026-11-08T09:00"))
+                .unwrap()
+                .as_deref(),
+            Some("2026-11-05T09:00:00")
+        );
+        t.ends_on = None;
+        t.remaining_count = Some(2);
+        assert_eq!(
+            temp_replace_target(&t, dt("2026-11-09T09:00"))
+                .unwrap()
+                .as_deref(),
+            Some("2026-11-06T09:00:00")
+        );
+        t.is_paused = true;
+        assert_eq!(
+            temp_replace_target(&t, dt("2026-11-05T08:45")).unwrap(),
+            None
+        );
+        let unknown = task(RepeatMode::parse("BIWEEKLY"));
+        assert_eq!(
+            temp_replace_target(&unknown, dt("2026-11-05T08:45")).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn consuming_the_replaced_occurrence_moves_past_it_and_counts() {
+        let mut t = task(RepeatMode::Daily);
+        t.next_trigger = "2026-11-05T09:00:00".to_string();
+        t.temp_trigger = Some("2026-11-05T08:45:00".to_string());
+        t.temp_replaces = Some("2026-11-05T09:00:00".to_string());
+        t.remaining_count = Some(3);
+        assert!(next_is_replaced(&t));
+        // 8:45 临时提醒触发时，从原定的 9:00 往后推算。
+        assert!(!consume_replaced_occurrence(&mut t, dt("2026-11-05T08:45")).unwrap());
+        assert_eq!(t.next_trigger, "2026-11-06T09:00:00");
+        assert_eq!(t.remaining_count, Some(2));
+        assert_eq!(t.last_triggered, None);
+        assert!(!next_is_replaced(&t));
+        // 替代最后一次后结束（写入暂停）。
+        t.remaining_count = Some(1);
+        assert!(consume_replaced_occurrence(&mut t, dt("2026-11-06T09:00")).unwrap());
+        assert!(t.is_paused);
+    }
+
+    #[test]
+    fn next_alert_time_prefers_the_earlier_temp_reminder() {
+        let mut t = task(RepeatMode::Daily);
+        t.next_trigger = "2026-11-05T09:00:00".to_string();
+        assert_eq!(next_alert_time(&t), Some(dt("2026-11-05T09:00")));
+        t.temp_trigger = Some("2026-11-04T18:00:00".to_string());
+        assert_eq!(next_alert_time(&t), Some(dt("2026-11-04T18:00")));
+        // 替代的那一次不算；暂停时临时提醒照常。
+        t.temp_trigger = Some("2026-11-05T09:30:00".to_string());
+        t.temp_replaces = Some("2026-11-05T09:00:00".to_string());
+        assert_eq!(next_alert_time(&t), Some(dt("2026-11-05T09:30")));
+        t.temp_replaces = None;
+        assert_eq!(next_alert_time(&t), Some(dt("2026-11-05T09:00")));
+        t.is_paused = true;
+        assert_eq!(next_alert_time(&t), Some(dt("2026-11-05T09:30")));
+    }
+
+    #[test]
+    fn preview_swaps_the_replaced_occurrence_for_the_temp_reminder() {
+        let mut t = task(RepeatMode::Daily);
+        t.next_trigger = "2026-11-05T09:00:00".to_string();
+        let times = vec![
+            "2026-11-05T09:00:00".to_string(),
+            "2026-11-06T09:00:00".to_string(),
+        ];
+        let until = dt("2026-11-06T23:59");
+        assert_eq!(
+            with_temp_reminder(&t, times.clone(), until),
+            (times.clone(), None)
+        );
+        t.temp_trigger = Some("2026-11-05T08:45:00".to_string());
+        t.temp_replaces = Some("2026-11-05T09:00:00".to_string());
+        assert_eq!(
+            with_temp_reminder(&t, times.clone(), until),
+            (
+                vec![
+                    "2026-11-05T08:45:00".to_string(),
+                    "2026-11-06T09:00:00".to_string()
+                ],
+                Some("2026-11-05T08:45:00".to_string())
+            )
+        );
+        // 不替代时多一次；超出预估范围的不加入。
+        t.temp_replaces = None;
+        assert_eq!(with_temp_reminder(&t, times.clone(), until).0.len(), 3);
+        t.temp_trigger = Some("2026-11-08T08:45:00".to_string());
+        assert_eq!(with_temp_reminder(&t, times.clone(), until), (times, None));
     }
 }

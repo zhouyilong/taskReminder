@@ -1,14 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability for main, notification, attention, quick-add and sticky-note windows",
+  "description": "Default capability for main, notification, attention, quick-add, sticky-note and todo-list sticky windows",
   "windows": [
     "main",
     "notification",
     "attention-*",
     "quick-add",
     "sticky-note",
-    "sticky-note-item-*"
+    "sticky-note-item-*",
+    "sticky-todo-list"
   ],
   "remote": {
     "urls": [

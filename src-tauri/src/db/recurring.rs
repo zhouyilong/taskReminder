@@ -9,7 +9,8 @@ impl DbManager {
             "SELECT id, description, type, status, created_at, completed_at,
                     interval_minutes, last_triggered, next_trigger, is_paused, start_time, end_time,
                     repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
-                    updated_at, deleted_at, schedule_weekdays, tags, ends_on, remaining_count
+                    updated_at, deleted_at, schedule_weekdays, tags, ends_on, remaining_count,
+                    temp_trigger, temp_replaces
              FROM recurring_tasks
              WHERE deleted_at IS NULL
              ORDER BY created_at ASC",
@@ -24,7 +25,8 @@ impl DbManager {
             "SELECT id, description, type, status, created_at, completed_at,
                     interval_minutes, last_triggered, next_trigger, is_paused, start_time, end_time,
                     repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
-                    updated_at, deleted_at, schedule_weekdays, tags, ends_on, remaining_count
+                    updated_at, deleted_at, schedule_weekdays, tags, ends_on, remaining_count,
+                    temp_trigger, temp_replaces
              FROM recurring_tasks WHERE id = ?",
         )?;
         let task = stmt.query_row([task_id], recurring_from_row).optional()?;
@@ -89,6 +91,8 @@ impl DbManager {
             tags: crate::models::normalize_tags(&task.tags),
             ends_on: task.ends_on.clone(),
             remaining_count: task.remaining_count,
+            temp_trigger: None,
+            temp_replaces: None,
         })
     }
 
@@ -126,6 +130,24 @@ impl DbManager {
         Ok(())
     }
 
+    /// 设置或清除临时提醒（`trigger` 为空即清除，同时清掉替代的那一次）。
+    pub fn set_recurring_temp(
+        &self,
+        task_id: &str,
+        trigger: Option<&str>,
+        replaces: Option<&str>,
+    ) -> Result<(), AppError> {
+        let conn = self.get_conn()?;
+        let now = now_string();
+        let replaces = trigger.and(replaces);
+        conn.execute(
+            "UPDATE recurring_tasks SET temp_trigger = ?, temp_replaces = ?, updated_at = ?
+             WHERE id = ? AND deleted_at IS NULL",
+            params![trigger, replaces, now, task_id],
+        )?;
+        Ok(())
+    }
+
     pub fn pause_recurring_task(&self, task_id: &str) -> Result<(), AppError> {
         let conn = self.get_conn()?;
         let now = now_string();
@@ -155,7 +177,8 @@ impl DbManager {
             "SELECT id, description, type, status, created_at, completed_at,
                     interval_minutes, last_triggered, next_trigger, is_paused, start_time, end_time,
                     repeat_mode, schedule_time, schedule_weekday, schedule_day, cron_expression,
-                    updated_at, deleted_at, schedule_weekdays, tags, ends_on, remaining_count
+                    updated_at, deleted_at, schedule_weekdays, tags, ends_on, remaining_count,
+                    temp_trigger, temp_replaces
              FROM recurring_tasks
              WHERE deleted_at IS NOT NULL AND deleted_at >= ?
              ORDER BY deleted_at DESC",
@@ -208,5 +231,7 @@ pub(super) fn recurring_from_row(
         tags: tags_from_db(row.get::<_, Option<String>>(20)?),
         ends_on: row.get(21)?,
         remaining_count: row.get(22)?,
+        temp_trigger: row.get(23)?,
+        temp_replaces: row.get(24)?,
     })
 }

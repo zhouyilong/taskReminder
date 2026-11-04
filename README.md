@@ -152,7 +152,7 @@ pnpm tauri dev
 - 应用数据存储
 
 开发实例会在以下位置显示 `[开发]` 标识:
-- 窗口标题栏: "任务提醒应用 **[开发]**"
+- 窗口标题栏: "任务提醒 **[开发]**"
 - 系统托盘菜单: "打开 **[开发]**"
 - 任务栏/Alt+Tab 窗口标题
 
@@ -226,6 +226,8 @@ pnpm release:updater
 - 执行 `pnpm tauri build --bundles msi --config src-tauri/tauri.updater.conf.json`
 - 生成 MSI 对应的签名文件 `.sig`
 - 在 `src-tauri/target/release/bundle/msi/` 中生成 `latest.json`
+
+2.2.4 起应用名为“任务提醒”，Tauri 生成的安装包是 `任务提醒_<version>_x64_zh-CN.msi`；生成 `latest.json` 时会复制一份 ASCII 名称的安装包与签名（GitHub 会改写含中文的附件名）。
 
 每次发布新版本时，需要把以下 3 个文件上传到对应版本号的 GitHub Release：
 - `TaskReminderApp_<version>_x64_zh-CN.msi`

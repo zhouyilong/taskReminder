@@ -17,7 +17,8 @@ import type {
   ImportSummary,
   BackupListPayload,
   AttentionEffect,
-  NotificationScreen
+  NotificationScreen,
+  TodoStickyState
 } from "./types";
 
 export const api = {
@@ -123,6 +124,14 @@ export const api = {
     return invoke("resume_recurring_task", { id });
   },
   /** 跳过本次：返回改好下次触发时间的循环提醒。 */
+  /** 设置临时提醒（v2.2.4，`at` 为空即取消）；`replaceNext` 为真时替代离它最近的那一次常规提醒。 */
+  async setRecurringTempReminder(id: string, at: string | null, replaceNext: boolean): Promise<RecurringTask> {
+    return invoke("set_recurring_temp_reminder", { id, at, replaceNext });
+  },
+  /** 临时提醒在 `at` 时会替代哪一次常规提醒；没有可替代的返回 null。 */
+  async previewRecurringTempTarget(id: string, at: string): Promise<string | null> {
+    return invoke("preview_recurring_temp_target", { id, at });
+  },
   async skipRecurringOccurrence(id: string): Promise<RecurringTask> {
     return invoke("skip_recurring_occurrence", { id });
   },
@@ -191,6 +200,19 @@ export const api = {
   },
   async getStickyNote(noteId: string): Promise<StickyNote | null> {
     return invoke("get_sticky_note", { noteId });
+  },
+  /** 待办清单便签（v2.2.4）。 */
+  async getTodoStickyState(): Promise<TodoStickyState> {
+    return invoke("get_todo_sticky_state");
+  },
+  async openTodoSticky(): Promise<TodoStickyState> {
+    return invoke("open_todo_sticky");
+  },
+  async closeTodoSticky(): Promise<TodoStickyState> {
+    return invoke("close_todo_sticky");
+  },
+  async setTodoStickyPinned(pinned: boolean): Promise<TodoStickyState> {
+    return invoke("set_todo_sticky_pinned", { pinned });
   },
   async openStickyNote(payload: {
     taskId: string;

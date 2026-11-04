@@ -193,6 +193,16 @@ html.sticky-note-mode.is-linux #sticky-note-item {
   background: var(--sticky-paper-bottom);
 }
 
+#sticky-todo-list {
+  width: 100vw;
+  height: 100vh;
+  background: transparent;
+}
+
+html.sticky-note-mode.is-linux #sticky-todo-list {
+  background: var(--sticky-paper-bottom);
+}
+
 .app {
   height: 100vh;
   display: flex;
@@ -1450,6 +1460,28 @@ label:has(> input[type="checkbox"]) {
 .status-pill.is-ended {
   background: var(--violet-soft);
   color: var(--violet-text);
+}
+
+/* 循环提醒的临时提醒（v2.2.4）。 */
+.temp-reminder-chip {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--violet-soft);
+  color: var(--violet-text);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.col-next-trigger .is-replaced {
+  color: var(--text-faint);
+  text-decoration: line-through;
 }
 
 .recurring-end-note {

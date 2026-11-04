@@ -2,7 +2,7 @@
 import { api } from "../api";
 import { markdownToPlainText } from "../markdown";
 import { errorMessage, formatAction, formatDateTime, recordDescription } from "../format";
-import { canSkipRecurring, recurringStatus } from "../recurring";
+import { canSetTempReminder, canSkipRecurring, describeTempReminder, recurringStatus } from "../recurring";
 import { priorityLabel, priorityOf } from "../tasks";
 import type { RecurringTask, ReminderRecord, Task } from "../types";
 import { useAppData } from "./useAppData";
@@ -12,7 +12,7 @@ import { useDialogs } from "./useDialogs";
 export const useItemActions = () => {
   const { refreshAll } = useAppData();
   const { showContextMenu } = useContextMenu();
-  const { confirmAction, openDetail, openTaskEditor, openRecurringEditor } = useDialogs();
+  const { confirmAction, openDetail, openTaskEditor, openRecurringEditor, openTempReminderEditor } = useDialogs();
 
   const toggleTask = async (task: Task) => {
     if (task.status === "COMPLETED") {
@@ -99,6 +99,15 @@ export const useItemActions = () => {
     await refreshAll();
   };
 
+  const clearTempReminder = async (task: RecurringTask) => {
+    try {
+      await api.setRecurringTempReminder(task.id, null, false);
+    } catch (error) {
+      alert(errorMessage(error));
+    }
+    await refreshAll();
+  };
+
   const confirmDeleteRecurring = (task: RecurringTask, afterDelete?: () => void) => {
     confirmAction({
       message: "确定要删除此循环提醒吗？删除后可在回收站中恢复。",
@@ -111,8 +120,16 @@ export const useItemActions = () => {
   };
 
   const openRecurringMenu = (event: MouseEvent, task: RecurringTask) => {
+    const temp = describeTempReminder(task);
     showContextMenu(event, [
       { label: "编辑", action: () => openRecurringEditor(task) },
+      // 临时提醒（v2.2.4）：固定时间点提醒一次，可替代离它最近的那一次常规提醒。
+      ...(canSetTempReminder(task)
+        ? [
+            { label: temp ? `修改临时提醒（${temp.label.replace(/^临时 /, "")}）` : "临时提醒…", action: () => openTempReminderEditor(task) },
+            ...(temp ? [{ label: "取消临时提醒", action: () => clearTempReminder(task) }] : []),
+          ]
+        : []),
       ...(canSkipRecurring(task)
         ? [{ label: `跳过本次（${formatDateTime(task.nextTrigger)}）`, action: () => skipRecurring(task) }]
         : []),
@@ -168,6 +185,7 @@ export const useItemActions = () => {
     openCompletedMenu,
     toggleRecurring,
     confirmDeleteRecurring,
+    clearTempReminder,
     openRecurringMenu,
     openRecordDetail,
     confirmDeleteRecords,

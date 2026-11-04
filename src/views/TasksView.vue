@@ -84,6 +84,14 @@
       >
         {{ selectionMode ? "退出多选" : "多选" }}
       </button>
+      <button
+        class="button secondary"
+        type="button"
+        title="在桌面上打开常驻的待办清单便签：可锚定、添加待办，点击待办打开它的便签"
+        @click="openTodoSticky"
+      >
+        清单便签
+      </button>
     </div>
     <div v-if="canReorder" class="reorder-hint">拖动行调整顺序；切换到其他排序方式时不影响手动顺序。</div>
     <TaskBatchBar v-if="selectionMode" :ids="selectedIds" @done="exitSelection" @cancel="exitSelection" />
@@ -219,7 +227,7 @@ import Pagination from "../components/Pagination.vue";
 import SmartParseHint from "../components/SmartParseHint.vue";
 import TaskBatchBar from "../components/TaskBatchBar.vue";
 import TaskBadges from "../components/TaskBadges.vue";
-import { formatDateTime, reminderTone, taskStickyPreview } from "../format";
+import { errorMessage, formatDateTime, reminderTone, taskStickyPreview } from "../format";
 import { separateReminder } from "../due";
 import type { Task } from "../types";
 import { VIEW_SHORTCUT_EVENT, type ShortcutAction } from "../keyboard";
@@ -272,6 +280,15 @@ const filterKey = computed(
 
 // 在“管理标签”中改名、合并或移除后，筛选跟随新名称。
 const { openLabelManager, lastChange } = useLabelManager();
+
+// 待办清单便签（v2.2.4）：桌面上常驻的全部待办列表。
+const openTodoSticky = async () => {
+  try {
+    await api.openTodoSticky();
+  } catch (error) {
+    alert(`打开待办清单便签失败：${errorMessage(error)}`);
+  }
+};
 watch(lastChange, change => {
   if (!change) return;
   if (change.kind === "tag") {

@@ -38,7 +38,7 @@ pub struct NextReminder {
     pub time: NaiveDateTime,
 }
 
-/// 未来最近的一条提醒：未完成待办的提醒时间与未暂停循环提醒的下次触发时间中最早的一个。
+/// 未来最近的一条提醒：未完成待办的提醒时间与循环提醒（未暂停的下次触发、临时提醒）中最早的一个。
 pub fn find_next_reminder(
     tasks: &[Task],
     recurring: &[RecurringTask],
@@ -57,11 +57,8 @@ pub fn find_next_reminder(
         })
     });
     let recurring_items = recurring.iter().filter_map(|task| {
-        // 不认识的循环模式本机不会触发，不作为“下一条提醒”。
-        if task.deleted_at.is_some() || task.is_paused || !task.repeat_mode.is_known() {
-            return None;
-        }
-        let time = parse_datetime_any(&task.next_trigger)?;
+        // 不认识的循环模式本机不会触发，不作为“下一条提醒”；临时提醒在暂停时也算。
+        let time = crate::recurrence::next_alert_time(task)?;
         (time > now).then(|| NextReminder {
             id: task.id.clone(),
             is_task: false,
@@ -322,9 +319,9 @@ fn show_main(app: &AppHandle) {
         let _ = window.set_focus();
     } else {
         let title = if paths::is_dev_mode() {
-            "任务提醒应用 [开发]"
+            "任务提醒 [开发]"
         } else {
-            "任务提醒应用"
+            "任务提醒"
         };
         let _ = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
             .title(title)
@@ -512,6 +509,8 @@ mod tests {
             tags: Vec::new(),
             ends_on: None,
             remaining_count: None,
+            temp_trigger: None,
+            temp_replaces: None,
         }
     }
 

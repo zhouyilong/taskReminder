@@ -140,16 +140,18 @@ export const buildTodayData = (input: TodayInput): TodayData => {
 
   for (const preview of input.previews) {
     const recurring = recurringById.get(preview.taskId);
-    if (!recurring || recurring.isPaused) {
+    if (!recurring) {
       continue;
     }
-    const upcoming = preview.times
+    // 暂停的循环提醒只有临时提醒（v2.2.4）照常提醒。
+    const times = recurring.isPaused ? (preview.tempTime ? [preview.tempTime] : []) : preview.times;
+    const upcoming = times
       .filter(time => time >= dayStart && time <= dayEnd)
       .map<TimelineEntry>(time => ({
         key: `preview-${recurring.id}-${time}`,
         time,
         kind: "recurring",
-        title: recurring.description,
+        title: time === preview.tempTime ? `${recurring.description}（临时）` : recurring.description,
         state: "upcoming",
         // 已到点但尚未触发（巡检会在 30 秒内补发）仍按“待提醒”展示，只是排在“现在”之前。
         isPast: time <= now,

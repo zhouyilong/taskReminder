@@ -120,6 +120,7 @@
     tasks: seed.tasks ?? [],
     recurringTasks: seed.recurringTasks ?? [],
     reminderRecords: seed.reminderRecords ?? [],
+    todoSticky: { open: false, x: null, y: null, width: 300, height: 420, pinned: false, ...(seed.todoSticky ?? {}) },
     settings: {
       autoStartEnabled: false,
       soundEnabled: true,
@@ -350,6 +351,18 @@
       if (item) item.isPaused = false;
     },
     skip_recurring_occurrence: ({ id }) => findRecurring(id),
+    // 临时提醒（v2.2.4）：模拟中替代的总是下次触发（后端取离临时提醒最近的一次）。
+    set_recurring_temp_reminder: ({ id, at, replaceNext }) => {
+      const item = findRecurring(id);
+      if (!item) throw "循环提醒不存在";
+      item.tempTrigger = at ?? null;
+      item.tempReplaces = at && replaceNext ? item.nextTrigger : null;
+      return item;
+    },
+    preview_recurring_temp_target: ({ id }) => {
+      const item = findRecurring(id);
+      return item && !item.isPaused ? item.nextTrigger : null;
+    },
     delete_recurring_task: ({ id }) => {
       const item = findRecurring(id);
       if (item) item.deletedAt = now();
@@ -384,6 +397,21 @@
       const item = findTask(taskId);
       if (item) item.stickyIsOpen = false;
     },
+    // 待办清单便签（v2.2.4）的窗口状态。
+    get_todo_sticky_state: () => ({ ...state.todoSticky }),
+    open_todo_sticky: () => {
+      state.todoSticky.open = true;
+      return { ...state.todoSticky };
+    },
+    close_todo_sticky: () => {
+      state.todoSticky.open = false;
+      return { ...state.todoSticky };
+    },
+    set_todo_sticky_pinned: ({ pinned }) => {
+      state.todoSticky.pinned = pinned;
+      emit("todo-sticky-changed", { ...state.todoSticky });
+      return { ...state.todoSticky };
+    },
     get_sync_status: () => ({ status: "never", error: null, time: null }),
     get_holiday_years: () => [2025, 2026],
     check_holiday_updates: () => ({ changed: false, years: [2025, 2026] }),
@@ -397,7 +425,7 @@
     create_backup_now: () => null,
     open_backup_dir: () => null,
     "plugin:app|version": () => "2.1.1",
-    "plugin:app|name": () => "TaskReminderApp",
+    "plugin:app|name": () => "任务提醒",
     "plugin:event|listen": ({ event, handler }) => {
       const list = listeners.get(event) ?? [];
       list.push(handler);
@@ -435,6 +463,7 @@
     "pause_recurring_task",
     "resume_recurring_task",
     "delete_recurring_task",
+    "set_recurring_temp_reminder",
     "save_settings"
   ]);
 

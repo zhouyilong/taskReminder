@@ -82,7 +82,10 @@
                 <span v-if="formatRecurringEnd(task)" class="recurring-end-note">· {{ formatRecurringEnd(task) }}</span>
                 <span v-if="workdayHolidayWarning(task, holidayYears)" class="chip is-warning">节假日待更新</span>
               </td>
-              <td class="col-datetime col-next-trigger cell-time" :title="formatDateTime(task.nextTrigger)">{{ formatDateTime(task.nextTrigger) }}</td>
+              <td class="col-datetime col-next-trigger cell-time" :title="nextTriggerTitle(task)">
+                <span :class="{ 'is-replaced': isReplacedNext(task) }">{{ formatDateTime(task.nextTrigger) }}</span>
+                <span v-if="describeTempReminder(task)" class="temp-reminder-chip">{{ describeTempReminder(task)?.text }}</span>
+              </td>
               <td class="col-status" :title="statusTitle(task)">
                 <span class="status-pill" :class="`is-${recurringStatus(task)}`">{{ RECURRING_STATUS_LABELS[recurringStatus(task)] }}</span>
               </td>
@@ -117,6 +120,7 @@ import {
   RECURRING_STATUS_LABELS,
   buildRecurringPayload,
   createRecurringDraft,
+  describeTempReminder,
   formatRecurringEnd,
   formatRecurringMode,
   formatRecurringRule,
@@ -162,6 +166,15 @@ const visibleRecurring = computed(() => {
 const STATUS_TITLES: Record<string, string> = {
   unsupported: "来自更新版本的循环模式，本机不会提醒；升级应用后恢复",
   ended: "已到结束条件，不再提醒；编辑结束条件后自动恢复",
+};
+// 临时提醒（v2.2.4）：下次触发正是被替代的那一次时划掉。
+const isReplacedNext = (task: RecurringTask) =>
+  Boolean(task.tempTrigger && task.tempReplaces && task.tempReplaces === task.nextTrigger);
+const nextTriggerTitle = (task: RecurringTask) => {
+  const temp = describeTempReminder(task);
+  const next = formatDateTime(task.nextTrigger);
+  if (!temp) return next;
+  return `${isReplacedNext(task) ? `${next}（已由临时提醒替代）` : next}\n${temp.text}（右键可修改或取消）`;
 };
 const statusTitle = (task: RecurringTask) =>
   STATUS_TITLES[recurringStatus(task)] ?? RECURRING_STATUS_LABELS[recurringStatus(task)];

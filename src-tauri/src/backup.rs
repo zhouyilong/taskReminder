@@ -774,6 +774,8 @@ mod tests {
             tags: Vec::new(),
             ends_on: None,
             remaining_count: None,
+            temp_trigger: None,
+            temp_replaces: None,
         }
     }
 

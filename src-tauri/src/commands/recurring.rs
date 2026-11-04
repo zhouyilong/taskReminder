@@ -1,4 +1,4 @@
-//! 循环提醒相关命令：新建、编辑、暂停/恢复、跳过本次、删除与触发预估。
+//! 循环提醒相关命令：新建、编辑、暂停/恢复、跳过本次、临时提醒、删除与触发预估。
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -38,6 +38,9 @@ pub struct CreateRecurringPayload {
 pub struct RecurringPreview {
     task_id: String,
     times: Vec<String>,
+    /// 其中的临时提醒（v2.2.4）；被它替代的那一次已从 `times` 中去掉。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temp_time: Option<String>,
 }
 
 #[tauri::command]
@@ -80,6 +83,8 @@ pub fn create_recurring_task(
         tags: crate::models::normalize_tags(&payload.tags),
         ends_on: payload.ends_on,
         remaining_count: payload.remaining_count,
+        temp_trigger: None,
+        temp_replaces: None,
     };
     into_api(recurrence::sanitize_recurring_task(&mut draft))?;
     draft.next_trigger = into_api(recurrence::compute_next_trigger(&draft, None))?;
@@ -114,11 +119,9 @@ pub fn update_recurring_task(state: State<AppState>, task: RecurringTask) -> Api
     }
     recurrence::apply_end_condition(&mut task);
     into_api(state.db.update_recurring_task(&task))?;
-    if task.is_paused {
-        state.scheduler.cancel_recurring(&task.id);
-    } else {
-        into_api(state.scheduler.schedule_recurring(task.clone()))?;
-    }
+    // 编辑不改临时提醒：按库中的版本计时（界面提交的可能是打开编辑框时的旧值）。
+    let task = into_api(state.db.get_recurring_task(&task.id))?.unwrap_or(task);
+    into_api(state.scheduler.schedule_recurring(task))?;
     into_api(state.sync.notify_local_change())?;
     Ok(())
 }
@@ -164,10 +167,74 @@ pub fn skip_recurring_occurrence(state: State<AppState>, id: String) -> ApiResul
     Ok(task)
 }
 
+/// 临时提醒（v2.2.4）：在 `at` 提醒一次（暂停时也提醒）。`replace_next` 为真时同时替代离它最近的
+/// 那一次常规提醒（例如每天 9:00 的晨会今天改到 8:45）。`at` 为空即取消临时提醒。
+#[tauri::command]
+pub fn set_recurring_temp_reminder(
+    state: State<AppState>,
+    id: String,
+    at: Option<String>,
+    replace_next: bool,
+) -> ApiResult<RecurringTask> {
+    let Some(task) = into_api(state.db.get_recurring_task(&id))? else {
+        return Err("循环提醒不存在".to_string());
+    };
+    if !task.repeat_mode.is_known() {
+        return Err("该循环提醒来自更新版本，请升级后再设置".to_string());
+    }
+    let (trigger, replaces) = match at.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        None => (None, None),
+        Some(value) => {
+            let at = time::parse_datetime_any(value)
+                .ok_or_else(|| "临时提醒时间格式无效".to_string())?;
+            if at <= time::now() {
+                return Err("临时提醒时间需晚于现在".to_string());
+            }
+            let replaces = if replace_next {
+                Some(
+                    into_api(recurrence::temp_replace_target(&task, at))?
+                        .ok_or_else(|| "没有可以替代的常规提醒".to_string())?,
+                )
+            } else {
+                None
+            };
+            (Some(time::format_datetime(&at)), replaces)
+        }
+    };
+    into_api(
+        state
+            .db
+            .set_recurring_temp(&id, trigger.as_deref(), replaces.as_deref()),
+    )?;
+    let Some(task) = into_api(state.db.get_recurring_task(&id))? else {
+        return Err("循环提醒不存在".to_string());
+    };
+    into_api(state.scheduler.schedule_temp(&task))?;
+    into_api(state.sync.notify_local_change())?;
+    Ok(task)
+}
+
+/// 临时提醒在 `at` 时会替代哪一次常规提醒（设置对话框中展示）；没有可替代的返回空。
+#[tauri::command]
+pub fn preview_recurring_temp_target(
+    state: State<AppState>,
+    id: String,
+    at: String,
+) -> ApiResult<Option<String>> {
+    let Some(task) = into_api(state.db.get_recurring_task(&id))? else {
+        return Ok(None);
+    };
+    let Some(at) = time::parse_datetime_any(&at) else {
+        return Ok(None);
+    };
+    into_api(recurrence::temp_replace_target(&task, at))
+}
+
 #[tauri::command]
 pub fn delete_recurring_task(state: State<AppState>, id: String) -> ApiResult<()> {
     into_api(state.db.delete_recurring_task(&id))?;
     state.scheduler.cancel_recurring(&id);
+    state.scheduler.cancel_temp(&id);
     into_api(
         state
             .scheduler
@@ -190,10 +257,12 @@ pub fn preview_recurring_triggers(
     for task in into_api(state.db.list_recurring_tasks())? {
         // 单个任务规则异常不影响其他任务的预览。
         let times = recurrence::upcoming_triggers(&task, until, limit).unwrap_or_default();
+        let (times, temp_time) = recurrence::with_temp_reminder(&task, times, until);
         if !times.is_empty() {
             result.push(RecurringPreview {
                 task_id: task.id,
                 times,
+                temp_time,
             });
         }
     }

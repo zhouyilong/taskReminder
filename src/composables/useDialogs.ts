@@ -1,4 +1,4 @@
-// 主窗口共享的弹窗状态（模块级单例）：确认框、详情、编辑待办、编辑循环提醒。
+// 主窗口共享的弹窗状态（模块级单例）：确认框、详情、编辑待办、编辑循环提醒、循环提醒的临时提醒。
 // 弹窗组件统一挂在 App.vue，各视图只调用这里的打开方法。
 import { reactive } from "vue";
 import { isSupportedRecurringMode } from "../recurring";
@@ -25,6 +25,11 @@ const taskEditor = reactive({
 });
 
 const recurringEditor = reactive({
+  open: false,
+  task: null as RecurringTask | null,
+});
+
+const tempReminderEditor = reactive({
   open: false,
   task: null as RecurringTask | null,
 });
@@ -72,15 +77,27 @@ const openRecurringEditor = (task: RecurringTask) => {
   recurringEditor.open = true;
 };
 
+/** 循环提醒的临时提醒（v2.2.4）只能在列表右键设置，不在新建、编辑表单中。 */
+const openTempReminderEditor = (task: RecurringTask) => {
+  if (!isSupportedRecurringMode(task.repeatMode)) {
+    alert(`这条循环提醒使用了本版本不支持的模式（${task.repeatMode}），请升级应用后再设置。`);
+    return;
+  }
+  tempReminderEditor.task = task;
+  tempReminderEditor.open = true;
+};
+
 export const useDialogs = () => ({
   confirmState,
   detailState,
   taskEditor,
   recurringEditor,
+  tempReminderEditor,
   confirmAction,
   closeConfirm,
   runConfirm,
   openDetail,
   openTaskEditor,
   openRecurringEditor,
+  openTempReminderEditor,
 });

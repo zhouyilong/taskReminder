@@ -1,4 +1,4 @@
-//! 便签命令：管理列表、打开、新建、编辑内容/标题/提醒、移动、关闭与置顶。
+//! 便签命令：管理列表、打开、新建、编辑内容/标题/提醒、移动、关闭与置顶，以及待办清单便签。
 
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, State};
@@ -6,13 +6,14 @@ use tauri::{Emitter, Manager, State};
 use crate::commands::tasks::normalize_reminder_time;
 use crate::commands::{into_api, ApiResult};
 use crate::errors::AppError;
-use crate::models::StickyNote;
+use crate::models::{StickyNote, TodoStickyState};
 use crate::scheduler;
 use crate::state::AppState;
 use crate::windows::sticky::{
     apply_sticky_item_layer, emit_sticky_note_reminder, note_id_from_item_label,
     promote_sticky_item_over_peers, show_sticky_note_item_window, sticky_note_item_label,
 };
+use crate::windows::todo_sticky;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -380,6 +381,39 @@ pub fn get_sticky_note_pinned_by_window_label(
         return Ok(false);
     };
     into_api(state.db.get_sticky_note_pinned(&note_id))
+}
+
+/// 待办清单便签（v2.2.4）的窗口状态。
+#[tauri::command]
+pub fn get_todo_sticky_state(state: State<AppState>) -> ApiResult<TodoStickyState> {
+    into_api(state.db.todo_sticky_state())
+}
+
+/// 打开待办清单便签（已打开时置前）。
+#[tauri::command]
+pub fn open_todo_sticky(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+) -> ApiResult<TodoStickyState> {
+    into_api(todo_sticky::open_todo_sticky(&app, &state.db))
+}
+
+#[tauri::command]
+pub fn close_todo_sticky(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+) -> ApiResult<TodoStickyState> {
+    into_api(todo_sticky::close_todo_sticky(&app, &state.db))
+}
+
+/// 锚定（置顶并锁定位置）或取消，返回新的状态。
+#[tauri::command]
+pub fn set_todo_sticky_pinned(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    pinned: bool,
+) -> ApiResult<TodoStickyState> {
+    into_api(todo_sticky::set_todo_sticky_pinned(&app, &state.db, pinned))
 }
 
 #[cfg(test)]

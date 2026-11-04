@@ -70,6 +70,8 @@ fn main() {
             recurring::pause_recurring_task,
             recurring::resume_recurring_task,
             recurring::skip_recurring_occurrence,
+            recurring::set_recurring_temp_reminder,
+            recurring::preview_recurring_temp_target,
             recurring::delete_recurring_task,
             notification::delete_reminder_record,
             notification::delete_reminder_records,
@@ -96,6 +98,10 @@ fn main() {
             sticky::close_sticky_note_by_window_label,
             sticky::set_sticky_note_pinned_by_window_label,
             sticky::get_sticky_note_pinned_by_window_label,
+            sticky::get_todo_sticky_state,
+            sticky::open_todo_sticky,
+            sticky::close_todo_sticky,
+            sticky::set_todo_sticky_pinned,
             settings::test_webdav,
             settings::sync_now,
             settings::change_sync_passphrase,
@@ -156,7 +162,7 @@ fn main() {
                 // 开发模式：窗口标题加 [开发] 标识
                 if dev_mode {
                     if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.set_title("任务提醒应用 [开发]");
+                        let _ = window.set_title("任务提醒 [开发]");
                     }
                 }
 
@@ -210,6 +216,7 @@ fn main() {
                     }
                 }
                 windows::sticky::restore_open_sticky_note_items(app_handle, &db_for_restore)?;
+                windows::todo_sticky::restore_todo_sticky(app_handle, &db_for_restore);
                 holiday_update::start(app_handle.clone(), data_dir.clone());
                 Ok(())
             })();
