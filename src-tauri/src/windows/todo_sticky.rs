@@ -144,6 +144,17 @@ pub fn set_todo_sticky_pinned(
     Ok(state)
 }
 
+/// 设置清单颜色（已规范化，空字符串为默认颜色）。
+pub fn set_todo_sticky_color(
+    app: &tauri::AppHandle,
+    db: &DbManager,
+    color: String,
+) -> Result<TodoStickyState, AppError> {
+    let state = db.update_todo_sticky_state(|state| state.color = color)?;
+    emit_changed(app, &state);
+    Ok(state)
+}
+
 /// 启动时恢复：上次退出时打开着的清单便签重新显示。
 pub fn restore_todo_sticky(app: &tauri::AppHandle, db: &DbManager) {
     match db.todo_sticky_state() {
@@ -251,8 +262,13 @@ mod tests {
             TodoStickyState::parse("not json"),
             TodoStickyState::default()
         );
-        let state = TodoStickyState::parse(r#"{"open":true,"x":10,"width":50,"pinned":true}"#);
+        let state = TodoStickyState::parse(
+            r#"{"open":true,"x":10,"width":50,"pinned":true,"color":"teal"}"#,
+        );
         assert!(state.open && state.pinned);
+        // 不认识的颜色按默认颜色。
+        assert_eq!(state.color, "");
+        assert_eq!(TodoStickyState::parse(r#"{"color":"Blue"}"#).color, "blue");
         // 只有一个坐标的不算保存过位置；过小的尺寸按最小尺寸。
         assert_eq!((state.x, state.y), (None, None));
         assert_eq!(state.width, TODO_STICKY_MIN_WIDTH);

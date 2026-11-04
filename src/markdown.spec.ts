@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checklistProgress, markdownToPlainText, markdownToPreviewText, stripLeadingListMarker } from "./markdown";
+import { checklistProgress, markdownToCopyText, markdownToPlainText, markdownToPreviewText, stripLeadingListMarker } from "./markdown";
 
 describe("markdown helpers", () => {
   it("flattens markdown to plain text", () => {
@@ -42,5 +42,23 @@ describe("checklistProgress", () => {
 
   it("handles Windows line endings", () => {
     expect(checklistProgress("- [x] a\r\n- [ ] b")).toEqual({ done: 1, total: 2 });
+  });
+});
+
+describe("markdownToCopyText", () => {
+  it("保留行结构，去掉转义与零宽字符", () => {
+    const source = "# 周报\r\n\r\n\u200B* [ ] 写总结\n* [x] 发邮件\n  * 子项 1\\.5\n\n<br />\n\n\n结尾 \\*重要\\*  ";
+    expect(markdownToCopyText(source)).toBe("# 周报\n\n- [ ] 写总结\n- [x] 发邮件\n  - 子项 1.5\n\n结尾 *重要*");
+  });
+
+  it("去掉相邻列表项之间的空行", () => {
+    expect(markdownToCopyText("* [ ] 第三章\n\n* [x] 第二章\n\n1. 一\n\n2. 二\n\n段落\n\n* 尾")).toBe(
+      "- [ ] 第三章\n- [x] 第二章\n1. 一\n2. 二\n\n段落\n\n- 尾"
+    );
+  });
+
+  it("空内容返回空字符串", () => {
+    expect(markdownToCopyText(null)).toBe("");
+    expect(markdownToCopyText("  \n ")).toBe("");
   });
 });

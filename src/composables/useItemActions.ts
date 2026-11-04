@@ -54,13 +54,25 @@ export const useItemActions = () => {
       { label: "优先级", value: priorityLabel(priorityOf(task)) },
       { label: "标签", value: task.tags?.length ? task.tags.map(tag => `#${tag}`).join(" ") : "-" },
       { label: "项目", value: task.project || "-" },
+      { label: "加急", value: task.urgent ? "是" : "否" },
     ]);
+  };
+
+  /** 加急 / 取消加急（v2.2.5）。 */
+  const toggleTaskUrgent = async (task: Task) => {
+    try {
+      await api.setTaskUrgent(task.id, !task.urgent);
+    } catch (error) {
+      alert(`${task.urgent ? "取消加急" : "加急"}失败：${errorMessage(error)}`);
+    }
+    await refreshAll();
   };
 
   const openTaskMenu = (event: MouseEvent, task: Task) => {
     showContextMenu(event, [
       { label: "编辑", action: () => openTaskEditor(task) },
       { label: "打开便签卡片", action: () => openTaskStickyNote(task) },
+      { label: task.urgent ? "取消加急" : "加急", action: () => toggleTaskUrgent(task) },
       {
         label: task.status === "COMPLETED" ? "取消完成" : "标记完成",
         action: () => toggleTask(task),

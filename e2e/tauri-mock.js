@@ -120,7 +120,7 @@
     tasks: seed.tasks ?? [],
     recurringTasks: seed.recurringTasks ?? [],
     reminderRecords: seed.reminderRecords ?? [],
-    todoSticky: { open: false, x: null, y: null, width: 300, height: 420, pinned: false, ...(seed.todoSticky ?? {}) },
+    todoSticky: { open: false, x: null, y: null, width: 300, height: 420, pinned: false, color: "", ...(seed.todoSticky ?? {}) },
     settings: {
       autoStartEnabled: false,
       soundEnabled: true,
@@ -327,6 +327,12 @@
       const item = findTask(taskId);
       if (item) item.stickyColor = color;
     },
+    set_task_urgent: ({ id, urgent }) => {
+      const item = findTask(id);
+      if (!item || Boolean(item.urgent) === urgent) return false;
+      item.urgent = urgent;
+      return true;
+    },
     create_recurring_task: ({ payload }) => {
       const item = recurring(newId("rec"), payload.description, { ...payload, createdAt: now(), nextTrigger: at(1, 9), tags: normalizeTags(payload.tags) });
       state.recurringTasks.push(item);
@@ -412,6 +418,11 @@
       emit("todo-sticky-changed", { ...state.todoSticky });
       return { ...state.todoSticky };
     },
+    set_todo_sticky_color: ({ color }) => {
+      state.todoSticky.color = color;
+      emit("todo-sticky-changed", { ...state.todoSticky });
+      return { ...state.todoSticky };
+    },
     get_sync_status: () => ({ status: "never", error: null, time: null }),
     get_holiday_years: () => [2025, 2026],
     check_holiday_updates: () => ({ changed: false, years: [2025, 2026] }),
@@ -457,6 +468,7 @@
     "delete_task",
     "batch_update_tasks",
     "set_task_order",
+    "set_task_urgent",
     "set_sticky_note_color",
     "create_recurring_task",
     "update_recurring_task",

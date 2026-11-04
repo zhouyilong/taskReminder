@@ -92,6 +92,10 @@ export const api = {
   async setTaskOrder(orders: Array<{ id: string; sortOrder: number }>): Promise<number> {
     return invoke("set_task_order", { orders });
   },
+  /** 设置或取消加急（v2.2.5），返回是否有改动。 */
+  async setTaskUrgent(id: string, urgent: boolean): Promise<boolean> {
+    return invoke("set_task_urgent", { id, urgent });
+  },
   async deleteTask(id: string): Promise<void> {
     return invoke("delete_task", { id });
   },
@@ -214,11 +218,17 @@ export const api = {
   async setTodoStickyPinned(pinned: boolean): Promise<TodoStickyState> {
     return invoke("set_todo_sticky_pinned", { pinned });
   },
+  /** 清单颜色（v2.2.5，空字符串为默认颜色）。 */
+  async setTodoStickyColor(color: string): Promise<TodoStickyState> {
+    return invoke("set_todo_sticky_color", { color });
+  },
   async openStickyNote(payload: {
     taskId: string;
     title?: string | null;
     defaultX?: number | null;
     defaultY?: number | null;
+    /** 打开后取得焦点并把光标放进正文（v2.2.5）。 */
+    focus?: boolean;
   }): Promise<StickyNote> {
     return invoke("open_sticky_note", { payload });
   },

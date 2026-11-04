@@ -27,6 +27,23 @@
         />
         <div class="paper-note-actions">
           <button
+            class="paper-note-action copy"
+            :class="{ 'is-copied': copyState === 'copied', 'is-failed': copyState === 'failed' }"
+            type="button"
+            :title="copyTitle"
+            :aria-label="copyTitle"
+            @mousedown.stop.prevent
+            @click.stop="copyNote"
+          >
+            <svg v-if="copyState === 'copied'" viewBox="0 0 24 24" aria-hidden="true" stroke="currentColor" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            <svg v-else viewBox="0 0 24 24" aria-hidden="true" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="11" height="11" rx="2"></rect>
+              <path d="M5 15V6a2 2 0 0 1 2-2h9"></path>
+            </svg>
+          </button>
+          <button
             class="paper-note-action pin"
             :class="{ active: isPinned }"
             type="button"
@@ -83,6 +100,7 @@
         </div>
       </header>
       <MarkdownNoteEditor
+        ref="editorRef"
         v-model="note.content"
         class="paper-note-editor paper-note-editor-host"
         variant="ghost"
@@ -199,7 +217,8 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import MarkdownNoteEditor from "./components/MarkdownNoteEditor.vue";
 import { safeStorage } from "./safeStorage";
 import { api } from "./api";
-import { checklistProgress } from "./markdown";
+import { checklistProgress, markdownToCopyText } from "./markdown";
+import { copyText } from "./clipboard";
 import type { AppSettings, StickyNote, UiStatePayload } from "./types";
 import { STICKY_COLOR_OPTIONS, stickyColorClass, stickyDotClass as dotClass } from "./stickies";
 
@@ -302,6 +321,36 @@ const chooseColor = async (color: string) => {
 
 const closeColorMenu = () => {
   colorMenuOpen.value = false;
+};
+
+// 一键复制（v2.2.5）：复制正文（保留 Markdown 的列表与勾选项），正文为空时复制标题。
+const editorRef = ref<InstanceType<typeof MarkdownNoteEditor> | null>(null);
+const copyState = ref<"idle" | "copied" | "failed">("idle");
+let copyStateTimer = 0;
+const copyTitle = computed(() =>
+  copyState.value === "copied" ? "已复制" : copyState.value === "failed" ? "复制失败" : "复制便签内容"
+);
+const copyNote = async () => {
+  if (!note.value) return;
+  editorRef.value?.flush();
+  const text = markdownToCopyText(note.value.content) || (note.value.title ?? "").trim();
+  const ok = text ? await copyText(text) : false;
+  copyState.value = ok ? "copied" : "failed";
+  window.clearTimeout(copyStateTimer);
+  copyStateTimer = window.setTimeout(() => {
+    copyState.value = "idle";
+  }, 1600);
+};
+
+// 待办清单添加待办后打开便签（v2.2.5）：光标直接放进正文，方便补充内容。
+// 新建的窗口由初始化脚本带上 __TASKREMINDER_FOCUS_EDITOR，已打开的窗口收到 focusEventName 事件。
+const focusEventName = `sticky-note-item-focus-${windowRef.label.replace(/^sticky-note-item-/, "")}`;
+let unlistenFocus: UnlistenFn | null = null;
+const focusEditor = async () => {
+  for (let i = 0; i < 40 && !editorRef.value; i += 1) {
+    await new Promise(resolve => window.setTimeout(resolve, 50));
+  }
+  await editorRef.value?.focus();
 };
 let windowUiStateHandler: ((event: Event) => void) | null = null;
 let stickyNoteHandler: ((event: Event) => void) | null = null;
@@ -937,6 +986,16 @@ onMounted(async () => {
   } catch (error) {
     console.warn("[sticky-note-item] 监听提醒时间变更失败", error);
   }
+  const focusHost = window as Window & { __TASKREMINDER_FOCUS_EDITOR?: boolean };
+  if (focusHost.__TASKREMINDER_FOCUS_EDITOR) {
+    focusHost.__TASKREMINDER_FOCUS_EDITOR = false;
+    void focusEditor();
+  }
+  try {
+    unlistenFocus = await listen(focusEventName, () => void focusEditor());
+  } catch (error) {
+    console.warn("[sticky-note-item] 监听聚焦正文失败", error);
+  }
   unlistenRefresh = await listen<StickyNote>(refreshEventName, event => {
     clearAutoSaveTrackers();
     note.value = event.payload;
@@ -1027,6 +1086,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   unlistenColorUpdated?.();
+  unlistenFocus?.();
+  window.clearTimeout(copyStateTimer);
   window.removeEventListener("mousedown", closeColorMenu);
   if (reminderClockTimer) {
     window.clearInterval(reminderClockTimer);

@@ -11,7 +11,7 @@
   - 快速添加：`quick-add.html` → `src/quickAdd.ts` → `src/QuickAddApp.vue`（窗口标签 `quick-add`，由全局快捷键或托盘菜单打开）。
   - 待办清单便签（v2.2.4）：`sticky-todo-list.html` → `src/stickyTodoList.ts` → `src/StickyTodoListApp.vue`（窗口标签 `sticky-todo-list`，只有一个；列出全部未完成待办，点击打开该待办的便签，底部输入框添加待办；从待办页“清单便签”或便签页打开）。
 - `src/components/` 存放可复用 UI 组件：
-  - `MarkdownNoteEditor.vue`：基于 Milkdown Crepe 的 Markdown 所见即所得编辑器，`variant` 支持 `card`（带边框）与 `ghost`（无边框，嵌入卡片或便签）。内容变更有 200ms 防抖，提交表单前先调用组件的 `flush()`（`ref` 取得），否则会丢掉最后的输入。
+  - `MarkdownNoteEditor.vue`：基于 Milkdown Crepe 的 Markdown 所见即所得编辑器，`variant` 支持 `card`（带边框）与 `ghost`（无边框，嵌入卡片或便签）。内容变更有 200ms 防抖，提交表单前先调用组件的 `flush()`（`ref` 取得），否则会丢掉最后的输入；`focus()`（v2.2.5）把光标放进正文末尾，编辑器还在创建时会等它就绪。
   - `Modal.vue`：通用弹窗（带进出过渡动画）。
   - `AppTitlebar.vue` / `AppSidebar.vue`：主窗口标题栏与侧边栏。
   - `SettingsModal.vue` / `WebdavModal.vue`：应用设置与云同步设置。
@@ -33,6 +33,7 @@
 - `src/timeline.ts`（“今天”时间线）、`src/stats.ts`（统计面板）、`src/calendar.ts`（日历网格与按天归类）、`src/tasks.ts`（标签、优先级、项目、筛选排序）、`src/stickies.ts`（便签列表状态、筛选排序）、`src/nlp.ts`（自然语言时间/标签/项目/优先级/循环规则与结束条件识别）、`src/search.ts`（全局搜索与各列表关键词搜索的统一规则：多词为“且”，`#标签` 只与标签前缀匹配，`@项目` 只与项目前缀匹配）、`src/retention.ts`（已完成待办保留期选项与说明）、`src/todoSticky.ts`（待办清单便签的排序、时间文案与输入解析）为纯函数，测试在同名 `*.spec.ts`。
 - `src/attentionEffect.ts` 全屏提醒效果的设置选项、说明文案与横幅文字、主题（纯函数，测试在 `attentionEffect.spec.ts`）。
 - `src/syncStatus.ts` 云同步状态码到文案与色调的映射（兼容旧版中文状态）；`src/quietHours.ts` 勿扰时段说明文案。
+- `src/clipboard.ts` 复制文本到剪贴板（便签一键复制，异步剪贴板不可用时退回 `execCommand("copy")`）；复制的文本由 `src/markdown.ts` 的 `markdownToCopyText` 生成。
 - `src/safeStorage.ts` 带异常保护的 `localStorage` 封装；`src/startupError.ts` 启动失败时渲染错误页。
 - `src/styles.css` 为三个窗口共用的全局样式表（设计令牌、主窗口、提醒弹窗、便签）；组件私有样式放在 `.vue` 文件内。
 - `src/update.ts` 自动更新逻辑模块（检查更新、安装更新、偏好管理）。
@@ -46,6 +47,7 @@
   - `src-tauri/icons/` 存放应用图标；源文件在 `src-tauri/icons/source/`（`icon.svg` 为主图标，`icon-small.svg` 为 16–32px 简化版），修改后执行 `python3 src-tauri/icons/source/render.py` 重新生成 PNG 与 `icon.ico`（需 `pip install cairosvg pillow`）。
   - `src-tauri/capabilities/default.json` 定义各窗口的权限。
   - `src-tauri/tauri.conf.json` 定义窗口、打包、更新器与应用元数据；`src-tauri/tauri.updater.conf.json` 为签名构建时的覆盖配置。
+  - `src-tauri/wix/install-dir.wxs` 为 MSI 的 WiX 片段（v2.2.5）：把默认安装目录设为英文的 `Program Files\TaskReminderApp`（经 `bundle.windows.wix.fragmentPaths` 引入，`componentGroupRefs` 引用其中的空组 `InstallDirDefaults`）。
 - `docs/ROADMAP.md` 为功能扩展与重构路线图，完成条目后同步勾选并补充变更记录。
 - `.github/workflows/release.yml` 推送 `v*` tag 时签名构建 MSI 并上传到草稿 Release（发布说明取 `docs/release-notes/v{version}.md`）。
 - `.github/workflows/ci.yml` 为 CI（Ubuntu + Windows：`pnpm build`、`pnpm test`、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`；另有 `holidays` 任务检查节假日数据、`e2e` 任务运行 Playwright）。
@@ -175,11 +177,20 @@
 ### 待办清单便签（v2.2.4）
 - 只有一个窗口 `sticky-todo-list`，窗口状态（打开、位置、尺寸、锚定）存本机设置 `settings.todo_sticky_state`（JSON，`TodoStickyState::parse` 容错），不参与同步；`DbManager::update_todo_sticky_state` 读改写。移动、缩放事件直接保存（隐藏或最小化时不保存）。
 - 层级与普通便签一致（`apply_sticky_item_layer`）；Windows 上同样挂贴边吸附（`sticky::install_snap`），便签类窗口用 `sticky::is_sticky_window_label` 判断，吸附时互相参照，“显示 / 隐藏全部便签”也包含它。创建窗口与普通便签一样放到后台线程再调度到主线程。
-- 数据通过 `data-updated` 事件刷新；添加走 `quick_add_task`（循环规则走 `create_recurring_task`），点击待办调用 `open_sticky_note` 并把默认位置放在清单旁边。
+- 数据通过 `data-updated` 事件刷新；添加走 `quick_add_task`（循环规则走 `create_recurring_task`），**双击**待办调用 `open_sticky_note` 并把默认位置放在清单旁边（v2.2.5 起单击不打开）。
+
+### 待办清单便签的颜色、排序、加急与复制（v2.2.5）
+- 清单颜色存于 `TodoStickyState.color`（本机设置 JSON 中的字段，没有迁移），经 `set_todo_sticky_color` 写入，只接受 `STICKY_COLORS`；页面与普通便签一样在 html/body 上加 `sticky-color-<颜色>`。
+- 拖动排序写 `tasks.sort_order`，与待办页“手动顺序”共用（`todoStickyItems`：有位置的按位置在前，没有位置的按默认顺序在后）。拖动用鼠标事件实现，**不要改用 HTML5 原生拖放**：Windows 上窗口默认的文件拖放处理会接管 WebView 的拖放事件。
+- 加急存于同步列 `tasks.urgent`（`0 / 1`，迁移 `V2.2.6`），只经 `set_task_urgent` 写入（不变不写、已删除不改）；`update_task` 不读写它，编辑待办不会清掉加急。颜色用设计令牌 `--urgent` / `--urgent-soft` / `--urgent-text` / `--urgent-on` / `--urgent-glow`。
+- 勾选完成有延迟（`COMPLETE_DELAY_MS`，期间可撤销），之后才调用 `complete_task`；行的淡出由 `TransitionGroup`（`todo-row-*`）播放。
+- 清单中添加待办后用 `open_sticky_note` 的 `focus: true` 打开便签：后端显示后 `set_focus`，新窗口经初始化脚本 `__TASKREMINDER_FOCUS_EDITOR`、已打开的窗口经 `sticky-note-item-focus-<编码后的 id>` 事件让编辑器聚焦正文。
+- 便签“一键复制”复制 `markdownToCopyText(正文)`（保留行结构、去掉转义符与零宽字符、紧凑列表），正文为空时复制标题。
 
 ### 应用名称（v2.2.4）
 - 显示名称（`productName`、窗口标题、托盘）为“任务提醒”；**不要改**这些内部标识：`identifier`（`ylfty.top`，WebView 数据目录、系统通知）、数据目录名 `TaskReminderApp`（`paths.rs`）、凭据库服务名（`secrets.rs`）、开机自启项名（`autostart.rs`）、Cargo 包名（exe 名）。
 - `bundle.windows.wix.upgradeCode` 固定为旧 productName 推导出的 `c07d9d18-1428-57a1-8abe-04831ec6eead`，不能修改，否则 Windows 会把新版本当作另一个应用并装出两份。
+- 默认安装目录（v2.2.5）：Tauri 的 WiX 模板用 productName 作目录名，`wix/install-dir.wxs` 在目录解析前用 `SetDirectory` 改为 `Program Files\TaskReminderApp`，条件是未安装且（模板的 `RegistrySearch` 没读到旧目录，或读到的是 2.2.4 的默认目录 `Program Files\任务提醒\`）。不要改为自定义整份 WiX 模板（升级 Tauri 时容易与内置模板脱节）；Tauri 编译片段时会传 `-arch`，片段中按 `sys.BUILDARCH` 选 Program Files 目录。
 
 ### 循环模式的兼容性
 - 每周多天存于 `schedule_weekdays` 位掩码，`schedule_weekday` 始终写入掩码中最早的一天，供旧版本读取；读取时掩码为空则回退到 `schedule_weekday`。
@@ -266,7 +277,7 @@
 ## 测试指南
 - 前端使用 Vitest：测试与被测模块同目录，命名为 `*.spec.ts`（`scripts/` 下的脚本为 `*.spec.mjs`），运行 `pnpm test`。前端改动至少执行 `pnpm build`（含 `vue-tsc` 类型检查）与 `pnpm test`。
 - 视图里的计算逻辑（如时间线、统计）优先抽成 `src/` 下的纯函数再写测试，组件只做展示。
-- Rust 测试位于 `src-tauri/src/` 各模块的 `#[cfg(test)]` 中（便签窗口标签/URL、提醒队列、墓碑清理、同步合并、时间解析、节假日、循环规则）；跨版本同步测试在 `sync/compat_tests.rs`，按各发布版本的迁移建库（`db::create_schema_up_to`，仅测试）并写入 `src-tauri/tests/fixtures/` 中的示例数据（`sync-sample-2.0.sql`；库结构 2.1.0 起再加 `sync-sample-2.1.sql`，2.2.0 起再加 `sync-sample-2.2.sql`，2.2.5 起再加 `sync-sample-2.2.5.sql`），发布新版本时把它的库结构版本加到 `RELEASES`，通过 `cargo test` 运行；需要数据库的测试用临时目录创建 `DbManager`，会自动执行迁移。
+- Rust 测试位于 `src-tauri/src/` 各模块的 `#[cfg(test)]` 中（便签窗口标签/URL、提醒队列、墓碑清理、同步合并、时间解析、节假日、循环规则）；跨版本同步测试在 `sync/compat_tests.rs`，按各发布版本的迁移建库（`db::create_schema_up_to`，仅测试）并写入 `src-tauri/tests/fixtures/` 中的示例数据（`sync-sample-2.0.sql`；库结构 2.1.0 起再加 `sync-sample-2.1.sql`，2.2.0 起再加 `sync-sample-2.2.sql`，2.2.5 起再加 `sync-sample-2.2.5.sql`，2.2.6 起再加 `sync-sample-2.2.6.sql`），发布新版本时把它的库结构版本加到 `RELEASES`，通过 `cargo test` 运行；需要数据库的测试用临时目录创建 `DbManager`，会自动执行迁移。
 - 提交前运行 `cargo fmt` 与 `cargo clippy --all-targets -- -D warnings`，CI 会执行 `cargo fmt --check` 并在 clippy 有告警时失败。只在 Windows 编译的代码（`#[cfg(target_os = "windows")]`）在 Linux 上检查不到，可用 `rustup target add x86_64-pc-windows-gnu`（需 `mingw-w64`）后执行 `cargo clippy --target x86_64-pc-windows-gnu --all-targets` 预检。
 - 在 Linux 上构建会改写 `src-tauri/gen/schemas/`，这些生成文件的无关变动不要提交。
 - 仅调整前端 UI 时，可用 `pnpm dev` 在浏览器中预览；浏览器中没有 Tauri 运行时，需要在页面加载前注入 `window.__TAURI_INTERNALS__`，直接复用 `e2e/tauri-mock.js`（Playwright 的 `page.addInitScript({ path })`，内存示例数据、调用记录在 `window.__TAURI_MOCK__.calls`；可先设 `window.__TAURI_MOCK_SEED__` 覆盖数据）。新增后端命令时若界面依赖它，同步在模拟中补上。

@@ -11,7 +11,8 @@ use crate::scheduler;
 use crate::state::AppState;
 use crate::windows::sticky::{
     apply_sticky_item_layer, emit_sticky_note_reminder, note_id_from_item_label,
-    promote_sticky_item_over_peers, show_sticky_note_item_window, sticky_note_item_label,
+    promote_sticky_item_over_peers, show_sticky_note_item_window,
+    show_sticky_note_item_window_with, sticky_note_item_label,
 };
 use crate::windows::todo_sticky;
 
@@ -22,6 +23,9 @@ pub struct OpenStickyNotePayload {
     title: Option<String>,
     default_x: Option<f64>,
     default_y: Option<f64>,
+    /// 打开后取得焦点并把光标放进正文（v2.2.5，待办清单添加待办后补充内容）。
+    #[serde(default)]
+    focus: bool,
 }
 
 #[derive(Deserialize)]
@@ -161,11 +165,14 @@ pub fn open_sticky_note(
     {
         let app_for_show = app.clone();
         let note_for_show = note.clone();
+        let focus = payload.focus;
         std::thread::spawn(move || {
             let app_in_main = app_for_show.clone();
             let note_in_main = note_for_show.clone();
             if let Err(err) = app_for_show.run_on_main_thread(move || {
-                if let Err(show_err) = show_sticky_note_item_window(&app_in_main, &note_in_main) {
+                if let Err(show_err) =
+                    show_sticky_note_item_window_with(&app_in_main, &note_in_main, focus)
+                {
                     eprintln!("[sticky-note] 打开便签项窗口失败: {}", show_err);
                 }
             }) {
@@ -414,6 +421,19 @@ pub fn set_todo_sticky_pinned(
     pinned: bool,
 ) -> ApiResult<TodoStickyState> {
     into_api(todo_sticky::set_todo_sticky_pinned(&app, &state.db, pinned))
+}
+
+/// 设置清单颜色（v2.2.5，空字符串为默认颜色），返回新的状态；不认识的颜色拒绝写入。
+#[tauri::command]
+pub fn set_todo_sticky_color(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    color: String,
+) -> ApiResult<TodoStickyState> {
+    let Some(color) = crate::models::normalize_sticky_color(&color) else {
+        return Err("不支持的清单颜色".to_string());
+    };
+    into_api(todo_sticky::set_todo_sticky_color(&app, &state.db, color))
 }
 
 #[cfg(test)]

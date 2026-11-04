@@ -212,6 +212,11 @@ pub(super) fn migration_scripts() -> Vec<MigrationScript> {
             description: "add recurring temporary reminder and todo list sticky".to_string(),
             sql: include_str!("../../migrations/V2.2.5__add_recurring_temp_and_todo_sticky.sql"),
         },
+        MigrationScript {
+            version: "2.2.6".to_string(),
+            description: "add task urgent".to_string(),
+            sql: include_str!("../../migrations/V2.2.6__add_task_urgent.sql"),
+        },
     ]
 }
 

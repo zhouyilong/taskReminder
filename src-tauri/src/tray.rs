@@ -480,6 +480,7 @@ mod tests {
             sticky_color: String::new(),
             sort_order: None,
             project: String::new(),
+            urgent: false,
         }
     }
 
