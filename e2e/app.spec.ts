@@ -537,3 +537,17 @@ test("便签锚定后仍可拖动", async ({ page }) => {
   await expect.poll(async () => (await invokeCalls(page, "set_sticky_note_pinned_by_window_label")).length).toBe(1);
   await expect(page.locator(".paper-note-window .paper-note-header")).toHaveAttribute("data-tauri-drag-region", "");
 });
+
+// v2.2.7：“+”新建的便签由后端放在当前便签旁边，来源便签锚定时新便签也锚定（都按 besideWindow 判断）。
+test("便签新增便签时带上当前窗口", async ({ page }) => {
+  await openStickyNote(page, "t-ideas");
+  await page.getByTitle("新增便签").click();
+  await expect.poll(async () => (await invokeCalls(page, "create_sticky_note")).length).toBe(1);
+  const [create] = await invokeCalls(page, "create_sticky_note");
+  const payload = create.args.payload as Record<string, unknown>;
+  // 模拟运行时的当前窗口标签为 main。
+  expect(payload.besideWindow).toBe("main");
+  expect(payload.defaultX).toBeUndefined();
+  expect(payload.defaultY).toBeUndefined();
+  expect(payload.title).toBe("读书笔记【拷贝】");
+});
