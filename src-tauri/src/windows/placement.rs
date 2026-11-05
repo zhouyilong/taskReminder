@@ -124,8 +124,7 @@ pub fn looks_snapped(width: f64, height: f64, area: &Rect) -> bool {
 // 吸附只在 Windows 上启用（见 `sticky::snap`），其他平台只在测试中使用。
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const SNAP_THRESHOLD: f64 = 16.0;
-/// 与其他便签并排或上下相接时保留的间距。
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+/// 与其他便签并排或上下相接时保留的间距（新便签放在旁边时同样使用）。
 pub const SNAP_GAP: f64 = 8.0;
 
 /// 两段区间之间的距离（重叠为 0）。
@@ -248,6 +247,125 @@ pub fn snap_position(note: Rect, areas: &[Rect], peers: &[Rect]) -> (f64, f64) {
     let x = nearest_candidate(note.x, &xs).unwrap_or(note.x);
     let y = nearest_candidate(note.y, &ys).unwrap_or(note.y);
     keep_inside(Rect::new(x, y, note.width, note.height), areas)
+}
+
+/// 新便签相对参照窗口（当前便签或待办清单）的摆放顺序：右、左、下、上。
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Side {
+    Right,
+    Left,
+    Below,
+    Above,
+}
+
+const SIDES: [Side; 4] = [Side::Right, Side::Left, Side::Below, Side::Above];
+
+/// 四周都放不下时叠在参照窗口上错开的距离。
+pub const CASCADE_OFFSET: f64 = 26.0;
+
+/// 矩形是否完整落在工作区内（容许 0.5 px 的换算误差）。
+fn contains_rect(area: &Rect, rect: &Rect) -> bool {
+    const EPS: f64 = 0.5;
+    rect.x >= area.x - EPS
+        && rect.y >= area.y - EPS
+        && rect.right() <= area.right() + EPS
+        && rect.bottom() <= area.bottom() + EPS
+}
+
+/// 在参照窗口的某一侧找一个位置：紧贴参照窗口（相隔 `SNAP_GAP`，与吸附一致），
+/// 沿这条边优先与参照窗口对齐，被工作区边缘或其他便签挡住时沿边滑动；
+/// 要求完整落在某个工作区内、与参照窗口在这条边上有重叠、不压住 `obstacles`。
+fn side_position(
+    side: Side,
+    anchor: &Rect,
+    width: f64,
+    height: f64,
+    areas: &[Rect],
+    obstacles: &[Rect],
+) -> Option<(f64, f64)> {
+    let along_y = matches!(side, Side::Right | Side::Left);
+    let fixed = match side {
+        Side::Right => anchor.right() + SNAP_GAP,
+        Side::Left => anchor.x - SNAP_GAP - width,
+        Side::Below => anchor.bottom() + SNAP_GAP,
+        Side::Above => anchor.y - SNAP_GAP - height,
+    };
+    let preferred = if along_y { anchor.y } else { anchor.x };
+    let mut candidates = vec![preferred];
+    for area in areas {
+        if along_y {
+            candidates.extend([area.y, area.bottom() - height]);
+        } else {
+            candidates.extend([area.x, area.right() - width]);
+        }
+    }
+    for other in obstacles {
+        if along_y {
+            candidates.extend([other.bottom() + SNAP_GAP, other.y - SNAP_GAP - height]);
+        } else {
+            candidates.extend([other.right() + SNAP_GAP, other.x - SNAP_GAP - width]);
+        }
+    }
+    candidates.retain(|value| value.is_finite());
+    // 离对齐位置越近越优先，距离相同时取较小（靠上 / 靠左）的一个。
+    candidates.sort_by(|a, b| {
+        (a - preferred)
+            .abs()
+            .partial_cmp(&(b - preferred).abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    candidates
+        .into_iter()
+        .map(|value| {
+            if along_y {
+                Rect::new(fixed, value, width, height)
+            } else {
+                Rect::new(value, fixed, width, height)
+            }
+        })
+        .find(|rect| {
+            let beside = if along_y {
+                rect.y < anchor.bottom() && rect.bottom() > anchor.y
+            } else {
+                rect.x < anchor.right() && rect.right() > anchor.x
+            };
+            beside
+                && areas.iter().any(|area| contains_rect(area, rect))
+                && obstacles
+                    .iter()
+                    .all(|other| overlap_area(rect, other) == 0.0)
+        })
+        .map(|rect| (rect.x, rect.y))
+}
+
+/// 在参照窗口旁边给新打开的便签找位置（v2.2.7）：按右、左、下、上的顺序取第一个放得下的一侧，
+/// 不与参照窗口重叠，也尽量不压住其他已显示的便签（`obstacles`）；
+/// 各侧都会压住其他便签时只避开参照窗口；四周都没有空间时错开 `CASCADE_OFFSET` 叠在参照窗口上。
+/// 没有显示器信息时放在右侧。
+pub fn place_beside(
+    anchor: Rect,
+    width: f64,
+    height: f64,
+    areas: &[Rect],
+    obstacles: &[Rect],
+) -> (f64, f64) {
+    let areas: Vec<Rect> = areas
+        .iter()
+        .copied()
+        .filter(|area| area.width > 0.0 && area.height > 0.0)
+        .collect();
+    if areas.is_empty() {
+        return (anchor.right() + SNAP_GAP, anchor.y);
+    }
+    for avoid in [obstacles, &[]] {
+        for side in SIDES {
+            if let Some(position) = side_position(side, &anchor, width, height, &areas, avoid) {
+                return position;
+            }
+        }
+    }
+    (anchor.x + CASCADE_OFFSET, anchor.y + CASCADE_OFFSET)
 }
 
 #[cfg(test)]
@@ -522,5 +640,96 @@ mod tests {
             let first = snap(x, y, &peers);
             assert_eq!(snap(first.0, first.1, &peers), first);
         }
+    }
+
+    fn beside(anchor: Rect, obstacles: &[Rect]) -> (f64, f64) {
+        place_beside(anchor, 420.0, 300.0, &[primary()], obstacles)
+    }
+
+    #[test]
+    fn places_new_note_to_the_right_first() {
+        let anchor = Rect::new(100.0, 100.0, 420.0, 300.0);
+        assert_eq!(beside(anchor, &[]), (528.0, 100.0));
+    }
+
+    #[test]
+    fn falls_back_to_left_below_and_above() {
+        // 右侧放不下：放左侧。
+        let anchor = Rect::new(1400.0, 100.0, 420.0, 300.0);
+        assert_eq!(beside(anchor, &[]), (1400.0 - 8.0 - 420.0, 100.0));
+        // 左右都放不下（参照窗口很宽）：放下面。
+        let wide = Rect::new(300.0, 100.0, 1300.0, 300.0);
+        assert_eq!(beside(wide, &[]), (300.0, 408.0));
+        // 下面也放不下：放上面。
+        let low = Rect::new(300.0, 700.0, 1300.0, 300.0);
+        assert_eq!(beside(low, &[]), (300.0, 392.0));
+    }
+
+    #[test]
+    fn slides_along_the_side_to_stay_on_screen() {
+        // 参照窗口靠近底部：右侧的新便签上移，底边对齐工作区。
+        let anchor = Rect::new(100.0, 900.0, 300.0, 120.0);
+        assert_eq!(beside(anchor, &[]), (408.0, 1040.0 - 300.0));
+        // 与工作区同高的参照窗口：右侧顶边对齐。
+        let tall = Rect::new(100.0, 0.0, 300.0, 1040.0);
+        assert_eq!(beside(tall, &[]), (408.0, 0.0));
+    }
+
+    #[test]
+    fn avoids_other_notes_on_the_same_side() {
+        // 待办清单（300 × 700）右侧已有一张便签：下一张放在它下面，仍在清单右侧。
+        let list = Rect::new(100.0, 100.0, 300.0, 700.0);
+        let first = Rect::new(408.0, 100.0, 420.0, 300.0);
+        assert_eq!(beside(list, &[first]), (408.0, 408.0));
+        // 右侧排满了（与清单不再相邻）：换到左侧。
+        let list = Rect::new(600.0, 100.0, 300.0, 400.0);
+        let first = Rect::new(908.0, 100.0, 420.0, 300.0);
+        let second = Rect::new(908.0, 408.0, 420.0, 300.0);
+        assert_eq!(beside(list, &[first, second]), (600.0 - 8.0 - 420.0, 100.0));
+    }
+
+    #[test]
+    fn overlaps_other_notes_rather_than_the_anchor() {
+        // 四周都有便签：只避开参照窗口，放回右侧。
+        let anchor = Rect::new(500.0, 370.0, 420.0, 300.0);
+        let blockers = [
+            Rect::new(928.0, 0.0, 992.0, 1040.0),
+            Rect::new(0.0, 0.0, 492.0, 1040.0),
+            Rect::new(492.0, 0.0, 436.0, 362.0),
+            Rect::new(492.0, 678.0, 436.0, 362.0),
+        ];
+        assert_eq!(beside(anchor, &blockers), (928.0, 370.0));
+    }
+
+    #[test]
+    fn cascades_when_no_side_has_room() {
+        let small = Rect::new(0.0, 0.0, 800.0, 600.0);
+        let anchor = Rect::new(100.0, 100.0, 420.0, 300.0);
+        assert_eq!(
+            place_beside(anchor, 420.0, 300.0, &[small], &[]),
+            (126.0, 126.0)
+        );
+        // 没有显示器信息：放右侧。
+        assert_eq!(place_beside(anchor, 420.0, 300.0, &[], &[]), (528.0, 100.0));
+    }
+
+    #[test]
+    fn uses_the_adjacent_monitor() {
+        // 主屏右边缘的参照窗口：右侧的副屏上放得下就放右侧。
+        let right = Rect::new(1920.0, 0.0, 1920.0, 1040.0);
+        let anchor = Rect::new(1500.0, 100.0, 412.0, 300.0);
+        assert_eq!(
+            place_beside(anchor, 420.0, 300.0, &[primary(), right], &[]),
+            (1920.0, 100.0)
+        );
+    }
+
+    #[test]
+    fn placed_note_is_stable_under_snapping() {
+        // 放好的位置正好是吸附的“并排”位置，拖动一下不会被吸走。
+        let anchor = Rect::new(100.0, 100.0, 420.0, 300.0);
+        let (x, y) = beside(anchor, &[]);
+        let note = Rect::new(x, y, 420.0, 300.0);
+        assert_eq!(snap_position(note, &[primary()], &[anchor]), (x, y));
     }
 }

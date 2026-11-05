@@ -286,6 +286,57 @@ pub(crate) fn monitor_work_areas(window: &tauri::WebviewWindow) -> Vec<Rect> {
         .collect()
 }
 
+/// 窗口的外框（按 `scale_factor` 换算为逻辑像素）。
+pub(crate) fn logical_rect(window: &tauri::WebviewWindow, scale_factor: f64) -> Option<Rect> {
+    let position = window
+        .outer_position()
+        .ok()?
+        .to_logical::<f64>(scale_factor);
+    let size = window.outer_size().ok()?.to_logical::<f64>(scale_factor);
+    Some(Rect::new(position.x, position.y, size.width, size.height))
+}
+
+/// 新打开的便签放在参照窗口（当前便签或待办清单，v2.2.7）旁边的位置：
+/// 按右、左、下、上取第一个有空间的一侧，并避开其他已显示的便签窗口。
+/// `target_label` 是要打开的便签自己的窗口（已打开时不把它当作障碍）。
+/// 参照窗口不是便签类窗口、不可见或取不到位置时返回 `None`。
+pub fn beside_position(
+    app: &tauri::AppHandle,
+    anchor_label: &str,
+    target_label: Option<&str>,
+    width: f64,
+    height: f64,
+) -> Option<(f64, f64)> {
+    if !is_sticky_window_label(anchor_label) {
+        return None;
+    }
+    let anchor_window = app.get_webview_window(anchor_label)?;
+    if !anchor_window.is_visible().unwrap_or(false) {
+        return None;
+    }
+    // 所有窗口统一按参照窗口的缩放换算，与工作区、`set_position` 的换算一致。
+    let scale_factor = anchor_window.scale_factor().unwrap_or(1.0);
+    let anchor = logical_rect(&anchor_window, scale_factor)?;
+    let obstacles: Vec<Rect> = app
+        .webview_windows()
+        .into_iter()
+        .filter(|(label, window)| {
+            is_sticky_window_label(label)
+                && label.as_str() != anchor_label
+                && Some(label.as_str()) != target_label
+                && window.is_visible().unwrap_or(false)
+        })
+        .filter_map(|(_, window)| logical_rect(&window, scale_factor))
+        .collect();
+    Some(placement::place_beside(
+        anchor,
+        width.max(STICKY_NOTE_ITEM_MIN_WIDTH),
+        height.max(STICKY_NOTE_ITEM_MIN_HEIGHT),
+        &monitor_work_areas(&anchor_window),
+        &obstacles,
+    ))
+}
+
 /// 便签应显示的位置：保存的位置在本机屏幕外时移回屏幕内（只移动窗口，不写库）。
 fn visible_position(
     window: &tauri::WebviewWindow,
@@ -546,7 +597,7 @@ mod snap {
         WS_MAXIMIZEBOX, WS_THICKFRAME,
     };
 
-    use super::{is_sticky_window_label, monitor_work_areas};
+    use super::{is_sticky_window_label, logical_rect, monitor_work_areas};
     use crate::state::AppState;
     use crate::windows::placement::{self, Rect};
 
@@ -630,15 +681,6 @@ mod snap {
         if let Some(window) = app.get_webview_window(&label) {
             snap_window(&app, &window);
         }
-    }
-
-    fn logical_rect(window: &tauri::WebviewWindow, scale_factor: f64) -> Option<Rect> {
-        let position = window
-            .outer_position()
-            .ok()?
-            .to_logical::<f64>(scale_factor);
-        let size = window.outer_size().ok()?.to_logical::<f64>(scale_factor);
-        Some(Rect::new(position.x, position.y, size.width, size.height))
     }
 
     /// 按当前位置计算吸附位置并移动窗口；随后的 `Moved` 事件会照常保存新位置。

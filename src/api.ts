@@ -229,6 +229,8 @@ export const api = {
     defaultY?: number | null;
     /** 打开后取得焦点并把光标放进正文（v2.2.5）。 */
     focus?: boolean;
+    /** 从哪个便签类窗口打开（v2.2.7）：放到它旁边；是待办清单且清单锚定时便签也锚定。 */
+    besideWindow?: string;
   }): Promise<StickyNote> {
     return invoke("open_sticky_note", { payload });
   },
@@ -239,6 +241,8 @@ export const api = {
     height?: number | null;
     defaultX?: number | null;
     defaultY?: number | null;
+    /** 从哪个便签窗口新建（v2.2.7）：放到它旁边，代替 defaultX / defaultY。 */
+    besideWindow?: string;
   }): Promise<StickyNote> {
     return invoke("create_sticky_note", { payload });
   },

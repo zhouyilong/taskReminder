@@ -34,12 +34,12 @@
             <div v-if="colorMenuOpen" class="paper-note-color-menu todo-sticky-color-menu" role="menu" @mousedown.stop>
               <button
                 v-for="option in STICKY_COLOR_OPTIONS"
-                :key="option.value || 'default'"
+                :key="option.value"
                 class="paper-note-color-option"
-                :class="{ active: color === option.value }"
+                :class="{ active: resolveStickyColor(color) === option.value }"
                 type="button"
                 role="menuitemradio"
-                :aria-checked="color === option.value"
+                :aria-checked="resolveStickyColor(color) === option.value"
                 :title="option.label"
                 @click.stop="chooseColor(option.value)"
               >
@@ -184,16 +184,15 @@ import { api } from "./api";
 import { errorMessage } from "./format";
 import { safeStorage } from "./safeStorage";
 import { planReorder } from "./reorder";
-import { STICKY_COLOR_OPTIONS, stickyColorClass, stickyDotClass as dotClass } from "./stickies";
+import { STICKY_COLOR_OPTIONS, resolveStickyColor, stickyColorClass, stickyDotClass as dotClass } from "./stickies";
 import { dropIndexAt, parseTodoInput, todoStickyItems, todoStickySummary, type TodoStickyItem } from "./todoSticky";
 import type { AppSettings, Task, TodoStickyState, UiStatePayload } from "./types";
 
 // @tauri-apps/api 未导出该类型，这里按 startResizeDragging 的参数定义同名联合类型。
 type ResizeDirection = "East" | "North" | "NorthEast" | "NorthWest" | "South" | "SouthEast" | "SouthWest" | "West";
 
-/** 普通便签的默认宽度（与后端 STICKY_NOTE_ITEM_WIDTH 一致），打开时放在清单旁边。 */
-const NOTE_WIDTH = 284;
-const NOTE_GAP = 12;
+/** 清单的窗口标签（与后端 TODO_STICKY_LABEL 一致）：打开便签时后端据此把便签放在清单旁边。 */
+const TODO_STICKY_LABEL = "sticky-todo-list";
 /** 勾选后先显示勾与划线，过这么久再标记完成并从清单中淡出（期间再点一次可撤销）。 */
 const COMPLETE_DELAY_MS = 900;
 /** 与样式中 .todo-row-leave-active 的时长一致。 */
@@ -276,17 +275,16 @@ const applyState = (state: TodoStickyState | null | undefined) => {
 const applyColorClass = (value: string) => {
   for (const element of [document.documentElement, document.body]) {
     for (const option of STICKY_COLOR_OPTIONS) {
-      if (option.value) element.classList.remove(`sticky-color-${option.value}`);
+      element.classList.remove(`sticky-color-${option.value}`);
     }
-    const cls = stickyColorClass(value);
-    if (cls) element.classList.add(cls);
+    element.classList.add(stickyColorClass(value));
   }
 };
 watch(color, value => applyColorClass(value), { immediate: true });
 
 const chooseColor = async (value: string) => {
   colorMenuOpen.value = false;
-  if (color.value === value) return;
+  if (resolveStickyColor(color.value) === value) return;
   const previous = color.value;
   color.value = value;
   try {
@@ -334,31 +332,16 @@ const startResize = async (edge: ResizeDirection) => {
   }
 };
 
-/** 在清单旁边（左侧放得下时放左侧，否则右侧）打开这条待办的便签。已摆放过的便签仍在原位置打开。 */
-const notePosition = async () => {
-  try {
-    const [scale, position, size] = await Promise.all([
-      windowRef.scaleFactor(),
-      windowRef.outerPosition(),
-      windowRef.outerSize(),
-    ]);
-    const x = position.x / scale;
-    const y = position.y / scale;
-    const width = size.width / scale;
-    const left = x - NOTE_WIDTH - NOTE_GAP;
-    return { defaultX: left >= 0 ? left : x + width + NOTE_GAP, defaultY: y };
-  } catch {
-    return {};
-  }
-};
-
-/** 打开待办的便签；focus 为真时取得焦点并把光标放进正文（添加后补充内容）。 */
+/**
+ * 打开待办的便签；focus 为真时取得焦点并把光标放进正文（添加后补充内容）。
+ * 便签总是放在清单旁边（v2.2.7，后端按右、左、下、上找有空间的一侧），清单锚定时便签也锚定。
+ */
 const openTask = async (task: Task, focus = false) => {
   try {
     await api.openStickyNote({
       taskId: task.id,
       title: task.description,
-      ...(await notePosition()),
+      besideWindow: TODO_STICKY_LABEL,
       ...(focus ? { focus: true } : {}),
     });
   } catch (error) {

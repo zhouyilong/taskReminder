@@ -407,8 +407,10 @@ test("待办清单便签：列表、添加、完成、打开便签与锚定", as
   expect(await invokeCalls(page, "open_sticky_note")).toHaveLength(0);
   await groceries.dblclick();
   const [open] = await invokeCalls(page, "open_sticky_note");
-  expect(open.args.payload).toMatchObject({ taskId: "t-groceries", title: "买菜" });
+  // 便签放在清单旁边（v2.2.7，位置由后端计算），不再由前端传坐标。
+  expect(open.args.payload).toMatchObject({ taskId: "t-groceries", title: "买菜", besideWindow: "sticky-todo-list" });
   expect(open.args.payload.focus).toBeUndefined();
+  expect(open.args.payload.defaultX).toBeUndefined();
 
   // 输入框按自然语言新建待办，添加后打开它的便签并聚焦正文。
   const input = page.locator(".todo-sticky-input");
@@ -421,7 +423,7 @@ test("待办清单便签：列表、添加、完成、打开便签与锚定", as
   expect(add.args.payload).toMatchObject({ description: "交周报", tags: ["工作"], reminderTime: `${tomorrow()}T15:00:00` });
   await expect.poll(async () => (await invokeCalls(page, "open_sticky_note")).length).toBe(2);
   const opened = (await invokeCalls(page, "open_sticky_note"))[1];
-  expect(opened.args.payload).toMatchObject({ title: "交周报", focus: true });
+  expect(opened.args.payload).toMatchObject({ title: "交周报", focus: true, besideWindow: "sticky-todo-list" });
 
   // 勾选后先显示勾与划线，可以撤销；再勾选则延迟后完成并从清单中移除。
   const ideas = page.locator(".todo-sticky-row", { hasText: "读书笔记" });
@@ -469,12 +471,19 @@ test("待办清单便签：列表、添加、完成、打开便签与锚定", as
   // 拖动不会打开便签。
   expect(await invokeCalls(page, "open_sticky_note")).toHaveLength(2);
 
-  // 清单颜色。
-  await page.getByTitle("清单颜色").click();
-  await page.locator(".todo-sticky-color-menu").getByTitle("绿色").click();
+  // 清单颜色：默认即绿色（v2.2.7），选绿色不写库；换成其他颜色。
   await expect(page.locator("html")).toHaveClass(/sticky-color-green/);
+  await page.getByTitle("清单颜色").click();
+  const greenOption = page.locator(".todo-sticky-color-menu").getByTitle("绿色");
+  await expect(greenOption).toHaveAttribute("aria-checked", "true");
+  await greenOption.click();
+  expect(await invokeCalls(page, "set_todo_sticky_color")).toHaveLength(0);
+  await page.getByTitle("清单颜色").click();
+  await page.locator(".todo-sticky-color-menu").getByTitle("蓝色").click();
+  await expect(page.locator("html")).toHaveClass(/sticky-color-blue/);
+  await expect(page.locator("html")).not.toHaveClass(/sticky-color-green/);
   const [color] = await invokeCalls(page, "set_todo_sticky_color");
-  expect(color.args).toEqual({ color: "green" });
+  expect(color.args).toEqual({ color: "blue" });
 
   // 锚定：只置顶，不锁定位置（v2.2.6 起标题栏仍可拖动）。
   await page.getByTitle("锚定清单（置顶，仍可拖动）").click();
