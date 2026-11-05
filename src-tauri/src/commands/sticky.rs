@@ -5,6 +5,7 @@ use tauri::{Emitter, Manager, State};
 
 use crate::commands::tasks::normalize_reminder_time;
 use crate::commands::{into_api, ApiResult};
+use crate::db::DbManager;
 use crate::errors::AppError;
 use crate::models::{StickyNote, TodoStickyState};
 use crate::scheduler;
@@ -171,13 +172,8 @@ pub fn open_sticky_note(
     ))?;
     if let Some(anchor) = payload.beside_window.as_deref() {
         into_api(place_beside_anchor(&app, state.inner(), &mut note, anchor))?;
-        if anchor == todo_sticky::TODO_STICKY_LABEL && !note.is_pinned {
-            // 清单锚定时，从清单打开（含添加后打开）的便签也锚定（v2.2.7）。
-            if into_api(state.db.todo_sticky_state())?.pinned {
-                into_api(state.db.set_sticky_note_pinned(&note.task_id, true))?;
-                note.is_pinned = true;
-            }
-        }
+        // 清单锚定时，从清单打开（含添加后打开）的便签也锚定（v2.2.7）。
+        into_api(inherit_anchor_pin(&state.db, &mut note, anchor))?;
     }
     {
         let app_for_show = app.clone();
@@ -222,6 +218,27 @@ fn place_beside_anchor(
     Ok(())
 }
 
+/// 参照窗口是否锚定（v2.2.7）：待办清单看清单的状态，便签看这张便签自己的锚定；其他窗口不算。
+fn is_anchor_pinned(db: &DbManager, anchor: &str) -> Result<bool, AppError> {
+    if anchor == todo_sticky::TODO_STICKY_LABEL {
+        return Ok(db.todo_sticky_state()?.pinned);
+    }
+    match note_id_from_item_label(anchor) {
+        Some(note_id) => db.get_sticky_note_pinned(&note_id),
+        None => Ok(false),
+    }
+}
+
+/// 参照窗口锚定时把便签也锚定（v2.2.7）；参照窗口没锚定时不取消便签原有的锚定。
+fn inherit_anchor_pin(db: &DbManager, note: &mut StickyNote, anchor: &str) -> Result<(), AppError> {
+    if note.is_pinned || !is_anchor_pinned(db, anchor)? {
+        return Ok(());
+    }
+    db.set_sticky_note_pinned(&note.task_id, true)?;
+    note.is_pinned = true;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn create_sticky_note(
     app: tauri::AppHandle,
@@ -250,6 +267,8 @@ pub(crate) fn create_custom_sticky_note_via_app(
     )?;
     if let Some(anchor) = payload.beside_window.as_deref() {
         place_beside_anchor(app, state, &mut note, anchor)?;
+        // 从锚定的便签新建的便签也锚定（v2.2.7）。
+        inherit_anchor_pin(&state.db, &mut note, anchor)?;
     }
     {
         let app_for_show = app.clone();
@@ -494,6 +513,61 @@ mod tests {
             reminder_time: None,
             color: String::new(),
         }
+    }
+
+    fn temp_db() -> DbManager {
+        let dir = std::env::temp_dir().join(format!("taskreminder-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        DbManager::new(dir.join("test.db")).unwrap()
+    }
+
+    fn new_note(db: &DbManager) -> StickyNote {
+        db.create_custom_sticky_note("便签", None, None, None, None, None)
+            .unwrap()
+    }
+
+    #[test]
+    fn new_note_from_pinned_note_is_pinned() {
+        let db = temp_db();
+        let source = new_note(&db);
+        let label = sticky_note_item_label(&source.task_id);
+        // 来源便签没锚定：新便签保持不锚定。
+        let mut plain = new_note(&db);
+        inherit_anchor_pin(&db, &mut plain, &label).unwrap();
+        assert!(!plain.is_pinned);
+        assert!(!db.get_sticky_note_pinned(&plain.task_id).unwrap());
+        // 来源便签锚定：新便签也锚定，并写入库中。
+        db.set_sticky_note_pinned(&source.task_id, true).unwrap();
+        let mut copied = new_note(&db);
+        inherit_anchor_pin(&db, &mut copied, &label).unwrap();
+        assert!(copied.is_pinned);
+        assert!(db.get_sticky_note_pinned(&copied.task_id).unwrap());
+    }
+
+    #[test]
+    fn note_opened_from_pinned_list_is_pinned() {
+        let db = temp_db();
+        let mut note = new_note(&db);
+        inherit_anchor_pin(&db, &mut note, todo_sticky::TODO_STICKY_LABEL).unwrap();
+        assert!(!note.is_pinned);
+        db.update_todo_sticky_state(|state| state.pinned = true)
+            .unwrap();
+        inherit_anchor_pin(&db, &mut note, todo_sticky::TODO_STICKY_LABEL).unwrap();
+        assert!(note.is_pinned);
+        assert!(db.get_sticky_note_pinned(&note.task_id).unwrap());
+    }
+
+    #[test]
+    fn unpinned_anchor_keeps_existing_pin() {
+        let db = temp_db();
+        let mut note = new_note(&db);
+        db.set_sticky_note_pinned(&note.task_id, true).unwrap();
+        note.is_pinned = true;
+        inherit_anchor_pin(&db, &mut note, todo_sticky::TODO_STICKY_LABEL).unwrap();
+        assert!(note.is_pinned);
+        assert!(db.get_sticky_note_pinned(&note.task_id).unwrap());
+        // 不认识的窗口不算锚定。
+        assert!(!is_anchor_pinned(&db, "main").unwrap());
     }
 
     #[test]

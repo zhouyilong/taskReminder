@@ -193,9 +193,10 @@
 - 关闭、完成前经 `saveBeforeClose`：先让焦点离开（输入法上屏）、`flush()` 编辑器，再立即保存，成功才关闭；窗口失焦 / 隐藏时 `savePendingNow` 立即保存倒计时中的修改。新增关闭便签的入口时同样先保存。
 - `save_sticky_note_content` / `update_sticky_note_title` 不改 `sticky_is_open`（晚于关闭到达的保存不能让便签重新记为打开）；移动、缩放仍会记为打开。
 
-### 便签摆放、清单锚定继承与默认颜色（v2.2.7）
+### 便签摆放、锚定继承与默认颜色（v2.2.7）
 - 新便签的位置由后端算：`open_sticky_note` / `create_sticky_note` 的 `besideWindow`（参照窗口标签，只接受便签类窗口）经 `sticky::beside_position` → `placement::place_beside`，按右、左、下、上取第一个放得下的一侧（间距 `SNAP_GAP`，与吸附一致），避开其他已显示的便签窗口，算出后经 `move_sticky_note` 保存。前端不要再自己算 `defaultX` / `defaultY`。
-- 从待办清单打开（`besideWindow = "sticky-todo-list"`）的便签总是放在清单旁边，不沿用记住的位置；清单锚定时同时经 `set_sticky_note_pinned` 锚定便签，清单没锚定时不取消便签原有的锚定。
+- 从待办清单打开（`besideWindow = "sticky-todo-list"`）的便签总是放在清单旁边，不沿用记住的位置。
+- 锚定继承：`inherit_anchor_pin` 在参照窗口锚定时（清单看 `TodoStickyState.pinned`，便签看它自己的 `sticky_is_pinned`）经 `set_sticky_note_pinned` 锚定新打开 / 新建的便签；参照窗口没锚定时不取消便签原有的锚定。
 - 默认颜色为绿色只是前端的显示规则：`src/stickies.ts` 的 `resolveStickyColor` 把空字符串与不认识的颜色显示为 `DEFAULT_STICKY_COLOR`；库里仍存空字符串（后端 `normalize_sticky_color` 照旧接受），颜色选择中没有“默认”。
 
 ### 应用名称（v2.2.4）
