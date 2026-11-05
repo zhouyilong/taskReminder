@@ -1044,6 +1044,8 @@ onMounted(async () => {
   unlistenRefresh = await listen<StickyNote>(refreshEventName, event => {
     clearAutoSaveTrackers();
     note.value = event.payload;
+    // 已打开的便签再次被打开时可能刚被锚定（v2.2.7，清单锚定时从清单打开），图钉跟着更新。
+    isPinned.value = Boolean(event.payload.isPinned);
     lastSavedTitle = normalizeTitle(event.payload.title);
     lastSavedContent = event.payload.content;
     saveHint.value = "";
