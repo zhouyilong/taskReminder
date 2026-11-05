@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { buildStickyList, countStickyStates, stickyState, stickyColorClass } from "./stickies";
+import {
+  DEFAULT_STICKY_COLOR,
+  STICKY_COLOR_OPTIONS,
+  buildStickyList,
+  countStickyStates,
+  resolveStickyColor,
+  stickyColorClass,
+  stickyDotClass,
+  stickyState,
+} from "./stickies";
 import type { StickyNoteSummary } from "./types";
 
 const note = (overrides: Partial<StickyNoteSummary>): StickyNoteSummary => ({
@@ -78,23 +87,34 @@ describe("countStickyStates", () => {
 });
 
 describe("sticky colors", () => {
-  it("maps known colors to classes and falls back for unknown ones", () => {
+  it("maps known colors to classes and falls back to green for default or unknown ones", () => {
     expect(stickyColorClass("blue")).toBe("sticky-color-blue");
-    expect(stickyColorClass("")).toBe("");
-    expect(stickyColorClass("teal")).toBe("");
-    expect(stickyColorClass(undefined)).toBe("");
+    expect(stickyColorClass("")).toBe("sticky-color-green");
+    expect(stickyColorClass("teal")).toBe("sticky-color-green");
+    expect(stickyColorClass(undefined)).toBe("sticky-color-green");
+    expect(stickyDotClass("")).toBe("is-green");
+    expect(stickyDotClass("pink")).toBe("is-pink");
+    expect(resolveStickyColor(null)).toBe(DEFAULT_STICKY_COLOR);
+    expect(DEFAULT_STICKY_COLOR).toBe("green");
+    // 选择中不再有单独的“默认”。
+    expect(STICKY_COLOR_OPTIONS.map(option => option.value)).not.toContain("");
   });
 });
 
 describe("color filter", () => {
-  it("filters by color, treating unknown colors as default", () => {
+  it("filters by color, treating default and unknown colors as green", () => {
     const notes = [
       note({ taskId: "blue", color: "blue", isOpen: true, visible: true }),
       note({ taskId: "plain", color: "", isOpen: true, visible: true }),
       note({ taskId: "future", color: "teal", isOpen: true, visible: true }),
+      note({ taskId: "green", color: "green", isOpen: true, visible: true }),
     ];
     expect(buildStickyList(notes, "", "all", "blue").map(item => item.note.taskId)).toEqual(["blue"]);
-    expect(buildStickyList(notes, "", "all", "").map(item => item.note.taskId).sort()).toEqual(["future", "plain"]);
-    expect(buildStickyList(notes, "", "all", "all")).toHaveLength(3);
+    expect(buildStickyList(notes, "", "all", "green").map(item => item.note.taskId).sort()).toEqual([
+      "future",
+      "green",
+      "plain",
+    ]);
+    expect(buildStickyList(notes, "", "all", "all")).toHaveLength(4);
   });
 });

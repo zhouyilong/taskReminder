@@ -10,7 +10,7 @@ use crate::models::{StickyNote, TodoStickyState};
 use crate::scheduler;
 use crate::state::AppState;
 use crate::windows::sticky::{
-    apply_sticky_item_layer, emit_sticky_note_reminder, note_id_from_item_label,
+    apply_sticky_item_layer, beside_position, emit_sticky_note_reminder, note_id_from_item_label,
     promote_sticky_item_over_peers, show_sticky_note_item_window,
     show_sticky_note_item_window_with, sticky_note_item_label,
 };
@@ -26,6 +26,10 @@ pub struct OpenStickyNotePayload {
     /// 打开后取得焦点并把光标放进正文（v2.2.5，待办清单添加待办后补充内容）。
     #[serde(default)]
     focus: bool,
+    /// 从哪个便签类窗口打开（v2.2.7，目前是待办清单）：便签放到它旁边（不沿用记住的位置），
+    /// 清单锚定时便签也锚定。
+    #[serde(default)]
+    beside_window: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -66,6 +70,9 @@ pub struct CreateStickyNotePayload {
     pub height: Option<f64>,
     pub default_x: Option<f64>,
     pub default_y: Option<f64>,
+    /// 从哪个便签类窗口新建（v2.2.7）：新便签放到它旁边（右、左、下、上），代替 `default_x` / `default_y`。
+    #[serde(default)]
+    pub beside_window: Option<String>,
 }
 
 /// 便签管理列表的一行：便签本身加上窗口此刻是否可见。
@@ -156,12 +163,22 @@ pub fn open_sticky_note(
     state: State<AppState>,
     payload: OpenStickyNotePayload,
 ) -> ApiResult<StickyNote> {
-    let note = into_api(state.db.open_sticky_note(
+    let mut note = into_api(state.db.open_sticky_note(
         &payload.task_id,
         payload.title,
         payload.default_x,
         payload.default_y,
     ))?;
+    if let Some(anchor) = payload.beside_window.as_deref() {
+        into_api(place_beside_anchor(&app, state.inner(), &mut note, anchor))?;
+        if anchor == todo_sticky::TODO_STICKY_LABEL && !note.is_pinned {
+            // 清单锚定时，从清单打开（含添加后打开）的便签也锚定（v2.2.7）。
+            if into_api(state.db.todo_sticky_state())?.pinned {
+                into_api(state.db.set_sticky_note_pinned(&note.task_id, true))?;
+                note.is_pinned = true;
+            }
+        }
+    }
     {
         let app_for_show = app.clone();
         let note_for_show = note.clone();
@@ -188,6 +205,23 @@ pub fn open_sticky_note(
     Ok(note)
 }
 
+/// 把便签放到参照窗口旁边并保存位置（v2.2.7）；参照窗口不可用时保持原位置。
+fn place_beside_anchor(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    note: &mut StickyNote,
+    anchor: &str,
+) -> Result<(), AppError> {
+    let target = sticky_note_item_label(&note.task_id);
+    let Some((x, y)) = beside_position(app, anchor, Some(&target), note.width, note.height) else {
+        return Ok(());
+    };
+    state.db.move_sticky_note(&note.task_id, x, y)?;
+    note.pos_x = x;
+    note.pos_y = y;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn create_sticky_note(
     app: tauri::AppHandle,
@@ -206,7 +240,7 @@ pub(crate) fn create_custom_sticky_note_via_app(
     state: &AppState,
     payload: &CreateStickyNotePayload,
 ) -> Result<StickyNote, AppError> {
-    let note = state.db.create_custom_sticky_note(
+    let mut note = state.db.create_custom_sticky_note(
         payload.title.as_deref().unwrap_or(""),
         payload.content.as_deref(),
         payload.default_x,
@@ -214,6 +248,9 @@ pub(crate) fn create_custom_sticky_note_via_app(
         payload.width,
         payload.height,
     )?;
+    if let Some(anchor) = payload.beside_window.as_deref() {
+        place_beside_anchor(app, state, &mut note, anchor)?;
+    }
     {
         let app_for_show = app.clone();
         let note_for_show = note.clone();

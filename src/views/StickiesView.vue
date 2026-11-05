@@ -33,8 +33,8 @@
       </div>
       <select class="select sticky-color-filter" v-model="colorFilter" title="按颜色筛选">
         <option value="all">全部颜色</option>
-        <option v-for="option in STICKY_COLOR_OPTIONS" :key="option.value || 'default'" :value="option.value">
-          {{ option.value ? option.label : "默认颜色" }}
+        <option v-for="option in STICKY_COLOR_OPTIONS" :key="option.value" :value="option.value">
+          {{ option.label }}
         </option>
       </select>
       <button class="button secondary" type="button" title="桌面上常驻的全部待办列表" @click="openTodoSticky">待办清单便签</button>
@@ -139,6 +139,7 @@ import {
   STICKY_STATE_LABELS,
   STICKY_COLOR_OPTIONS,
   buildStickyList,
+  resolveStickyColor,
   stickyDotClass,
   type StickyColorFilter,
   countStickyStates,
@@ -165,7 +166,7 @@ const colorFilter = ref<StickyColorFilter>("all");
 const list = computed(() => buildStickyList(notes.value, keyword.value, filter.value, colorFilter.value));
 const listKey = computed(() => `${keyword.value}|${filter.value}|${colorFilter.value}`);
 const stickyColorLabel = (color?: string | null) =>
-  STICKY_COLOR_OPTIONS.find(option => option.value && option.value === color)?.label ?? "默认颜色";
+  STICKY_COLOR_OPTIONS.find(option => option.value === resolveStickyColor(color))?.label ?? "";
 const { pageIndex, pageSize, totalPages, page: stickyPage } = usePagination(list, listKey);
 
 const emptyTitle = computed(() => {

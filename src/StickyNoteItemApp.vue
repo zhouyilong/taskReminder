@@ -125,9 +125,9 @@
           <div v-if="colorMenuOpen" class="paper-note-color-menu" role="menu" @mousedown.stop>
             <button
               v-for="option in STICKY_COLOR_OPTIONS"
-              :key="option.value || 'default'"
+              :key="option.value"
               class="paper-note-color-option"
-              :class="{ active: (note.color || '') === option.value }"
+              :class="{ active: resolveStickyColor(note.color) === option.value }"
               type="button"
               :title="option.label"
               @click.stop="chooseColor(option.value)"
@@ -220,7 +220,7 @@ import { api } from "./api";
 import { checklistProgress, markdownToCopyText } from "./markdown";
 import { copyText } from "./clipboard";
 import type { AppSettings, StickyNote, UiStatePayload } from "./types";
-import { STICKY_COLOR_OPTIONS, stickyColorClass, stickyDotClass as dotClass } from "./stickies";
+import { STICKY_COLOR_OPTIONS, resolveStickyColor, stickyColorClass, stickyDotClass as dotClass } from "./stickies";
 
 // @tauri-apps/api 未导出该类型，这里按 startResizeDragging 的参数定义同名联合类型。
 type ResizeDirection =
@@ -296,17 +296,16 @@ const colorMenuOpen = ref(false);
 const applyColorClass = (color?: string | null) => {
   for (const element of [document.documentElement, document.body]) {
     for (const option of STICKY_COLOR_OPTIONS) {
-      if (option.value) element.classList.remove(`sticky-color-${option.value}`);
+      element.classList.remove(`sticky-color-${option.value}`);
     }
-    const cls = stickyColorClass(color);
-    if (cls) element.classList.add(cls);
+    element.classList.add(stickyColorClass(color));
   }
 };
 watch(() => note.value?.color, color => applyColorClass(color), { immediate: true });
 
 const chooseColor = async (color: string) => {
   colorMenuOpen.value = false;
-  if (!note.value || (note.value.color || "") === color) {
+  if (!note.value || resolveStickyColor(note.value.color) === color) {
     return;
   }
   const previous = note.value.color ?? "";
@@ -824,22 +823,6 @@ const handleTogglePin = async () => {
   await syncPinnedState();
 };
 
-const resolveCurrentLogicalPosition = async () => {
-  try {
-    const [scaleFactor, position] = await Promise.all([
-      windowRef.scaleFactor(),
-      windowRef.outerPosition()
-    ]);
-    return {
-      x: position.x / scaleFactor,
-      y: position.y / scaleFactor
-    };
-  } catch (error) {
-    console.warn("[sticky-note-item] 读取当前窗口位置失败", error);
-    return null;
-  }
-};
-
 const resolveCurrentLogicalSize = async () => {
   try {
     const [scaleFactor, size] = await Promise.all([
@@ -885,23 +868,16 @@ const buildCopiedTitle = (title: string) => {
   return `${sourceDate.getUTCFullYear()}-${formatDatePart(sourceDate.getUTCMonth() + 1)}-${formatDatePart(sourceDate.getUTCDate())}${restTitle}`;
 };
 
+/** 复制出一张新便签，放在当前便签旁边（v2.2.7，后端按右、左、下、上找有空间的一侧，不重叠）。 */
 const createSiblingNote = async () => {
-  const [position, size] = await Promise.all([
-    resolveCurrentLogicalPosition(),
-    resolveCurrentLogicalSize()
-  ]);
+  const size = await resolveCurrentLogicalSize();
   const payload: {
     title?: string;
     content?: string;
     width?: number;
     height?: number;
-    defaultX?: number;
-    defaultY?: number;
-  } = {};
-  if (position) {
-    payload.defaultX = Math.max(0, position.x + 26);
-    payload.defaultY = Math.max(0, position.y + 26);
-  }
+    besideWindow?: string;
+  } = { besideWindow: windowRef.label };
   if (size) {
     payload.width = size.width;
     payload.height = size.height;
@@ -1068,6 +1044,8 @@ onMounted(async () => {
   unlistenRefresh = await listen<StickyNote>(refreshEventName, event => {
     clearAutoSaveTrackers();
     note.value = event.payload;
+    // 已打开的便签再次被打开时可能刚被锚定（v2.2.7，清单锚定时从清单打开），图钉跟着更新。
+    isPinned.value = Boolean(event.payload.isPinned);
     lastSavedTitle = normalizeTitle(event.payload.title);
     lastSavedContent = event.payload.content;
     saveHint.value = "";

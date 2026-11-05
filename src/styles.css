@@ -5227,7 +5227,7 @@ button.task-tag:disabled {
   --sticky-accent: var(--sticky-gray-accent);
 }
 
-/* 颜色选择与列表中的色点；默认颜色沿用当前主题的便签顶边色。 */
+/* 颜色选择与列表中的色点（v2.2.7 起默认颜色即绿色，每个色点都带 is-<颜色>）。 */
 .sticky-color-dot {
   display: inline-block;
   width: 10px;
@@ -5236,12 +5236,6 @@ button.task-tag:disabled {
   background: var(--sticky-default-accent);
   border: 1px solid var(--border);
   flex-shrink: 0;
-}
-
-/* 默认颜色画成空心圆，与黄色区分。 */
-.sticky-color-dot.is-default {
-  background: transparent;
-  border: 2px solid var(--sticky-default-accent);
 }
 
 .sticky-color-dot.is-yellow {
