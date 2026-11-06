@@ -304,6 +304,64 @@ fn task_tags_and_priority_roundtrip() {
 }
 
 #[test]
+fn delete_reminder_records_before_tombstones_only_older_live_rows() {
+    let (db, dir) = temp_db();
+    let old = db
+        .create_reminder_record("task-1", "old", ReminderKind::Task)
+        .unwrap();
+    let older_deleted = db
+        .create_reminder_record("task-2", "older", ReminderKind::Task)
+        .unwrap();
+    let recent = db
+        .create_reminder_record("task-3", "recent", ReminderKind::Recurring)
+        .unwrap();
+    {
+        let conn = db.get_conn().unwrap();
+        for (id, trigger) in [
+            (&old.id, "2026-05-05T23:59:59"),
+            (&older_deleted.id, "2026-01-01T08:00:00"),
+            (&recent.id, "2026-05-06T00:00:00"),
+        ] {
+            conn.execute(
+                "UPDATE reminder_records SET trigger_time = ? WHERE id = ?",
+                params![trigger, id],
+            )
+            .unwrap();
+        }
+    }
+    db.delete_reminder_record(&older_deleted.id).unwrap();
+    let deleted_at = db
+        .get_reminder_record(&older_deleted.id)
+        .unwrap()
+        .unwrap()
+        .deleted_at;
+
+    let cutoff = parse_datetime_any("2026-05-06T00:00").unwrap();
+    assert_eq!(db.delete_reminder_records_before(&cutoff).unwrap(), 1);
+
+    let old = db.get_reminder_record(&old.id).unwrap().unwrap();
+    assert!(old.deleted_at.is_some());
+    assert_eq!(old.updated_at, old.deleted_at);
+    // 已删除的不重写墓碑时间，边界上（等于截止时间）的保留。
+    assert_eq!(
+        db.get_reminder_record(&older_deleted.id)
+            .unwrap()
+            .unwrap()
+            .deleted_at,
+        deleted_at
+    );
+    let remaining: Vec<String> = db
+        .list_reminder_records()
+        .unwrap()
+        .into_iter()
+        .map(|record| record.id)
+        .collect();
+    assert_eq!(remaining, vec![recent.id]);
+    assert_eq!(db.delete_reminder_records_before(&cutoff).unwrap(), 0);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn has_reminder_record_since_compares_trigger_time() {
     let (db, dir) = temp_db();
     let record = db

@@ -1,5 +1,6 @@
 // 待办、循环提醒、提醒记录的通用操作与右键菜单，供多个视图复用。
 import { api } from "../api";
+import { copyText } from "../clipboard";
 import { markdownToPlainText } from "../markdown";
 import { errorMessage, formatAction, formatDateTime, recordDescription } from "../format";
 import { canSetTempReminder, canSkipRecurring, describeTempReminder, recurringStatus } from "../recurring";
@@ -68,9 +69,17 @@ export const useItemActions = () => {
     await refreshAll();
   };
 
+  /** 复制待办标题（v2.2.8）。 */
+  const copyTaskTitle = async (task: Task) => {
+    if (!(await copyText(task.description))) {
+      alert("复制失败");
+    }
+  };
+
   const openTaskMenu = (event: MouseEvent, task: Task) => {
     showContextMenu(event, [
       { label: "编辑", action: () => openTaskEditor(task) },
+      { label: "复制标题", action: () => copyTaskTitle(task) },
       { label: "打开便签卡片", action: () => openTaskStickyNote(task) },
       { label: task.urgent ? "取消加急" : "加急", action: () => toggleTaskUrgent(task) },
       {
@@ -84,6 +93,7 @@ export const useItemActions = () => {
   const openCompletedMenu = (event: MouseEvent, task: Task) => {
     showContextMenu(event, [
       { label: "查看详情", action: () => openTaskDetail(task) },
+      { label: "复制标题", action: () => copyTaskTitle(task) },
       { label: "取消完成", action: () => toggleTask(task) },
       { label: "删除", action: () => confirmDeleteTask(task), danger: true },
     ]);

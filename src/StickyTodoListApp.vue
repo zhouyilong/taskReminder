@@ -117,6 +117,7 @@
           :title="`${item.task.description}\n双击打开便签，拖动调整顺序`"
           @mousedown="startDrag($event, item)"
           @dblclick="openItem(item)"
+          @contextmenu.prevent.stop="openRowMenu($event, item)"
         >
           <button
             class="todo-sticky-check"
@@ -171,16 +172,29 @@
           @keydown.esc.prevent="draft = ''"
         />
       </footer>
+      <div
+        v-if="rowMenu.item"
+        ref="rowMenuRef"
+        class="todo-sticky-menu"
+        role="menu"
+        :style="{ left: `${rowMenu.x}px`, top: `${rowMenu.y}px` }"
+        @mousedown.stop
+        @contextmenu.prevent.stop
+      >
+        <button class="todo-sticky-menu-item" type="button" role="menuitem" @click="copyRowTitle">复制标题</button>
+        <button class="todo-sticky-menu-item" type="button" role="menuitem" @click="openRowNote">打开便签</button>
+      </div>
       <div v-if="message" class="todo-sticky-toast" :class="{ 'is-error': messageIsError }" role="status">{{ message }}</div>
     </article>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "./api";
+import { copyText } from "./clipboard";
 import { errorMessage } from "./format";
 import { safeStorage } from "./safeStorage";
 import { planReorder } from "./reorder";
@@ -353,6 +367,50 @@ const openTask = async (task: Task, focus = false) => {
 const openItem = (item: TodoStickyItem) => {
   if (drag.active) return;
   void openTask(item.task);
+};
+
+// 右键菜单（v2.2.8）：复制标题、打开便签。点击别处、Esc、滚动或窗口失焦时关闭。
+const rowMenu = reactive({ x: 0, y: 0, item: null as TodoStickyItem | null });
+const rowMenuRef = ref<HTMLElement | null>(null);
+
+const closeRowMenu = () => {
+  rowMenu.item = null;
+};
+
+const openRowMenu = async (event: MouseEvent, item: TodoStickyItem) => {
+  colorMenuOpen.value = false;
+  rowMenu.item = item;
+  rowMenu.x = event.clientX;
+  rowMenu.y = event.clientY;
+  // 靠近窗口右边、下边时向左、向上展开，不超出窗口。
+  await nextTick();
+  const menu = rowMenuRef.value;
+  if (!menu) return;
+  const margin = 4;
+  rowMenu.x = Math.max(margin, Math.min(event.clientX, window.innerWidth - menu.offsetWidth - margin));
+  rowMenu.y = Math.max(margin, Math.min(event.clientY, window.innerHeight - menu.offsetHeight - margin));
+};
+
+const copyRowTitle = async () => {
+  const item = rowMenu.item;
+  closeRowMenu();
+  if (!item) return;
+  const text = item.task.description.trim() || item.title;
+  if (await copyText(text)) showMessage("已复制标题");
+  else showMessage("复制失败", true);
+};
+
+const openRowNote = () => {
+  const item = rowMenu.item;
+  closeRowMenu();
+  if (item) void openTask(item.task);
+};
+
+const handleMenuKeydown = (event: KeyboardEvent) => {
+  if (event.key === "Escape" && rowMenu.item) {
+    event.preventDefault();
+    closeRowMenu();
+  }
 };
 
 const setChecked = (id: string, value: boolean) => {
@@ -536,6 +594,10 @@ const listenSafely = async <T,>(event: string, handler: (payload: T) => void) =>
 
 onMounted(async () => {
   window.addEventListener("mousedown", closeColorMenu);
+  window.addEventListener("mousedown", closeRowMenu);
+  window.addEventListener("keydown", handleMenuKeydown);
+  window.addEventListener("blur", closeRowMenu);
+  listElement()?.addEventListener("scroll", closeRowMenu, { passive: true });
   applyTheme(safeStorage.getItem("appTheme") === "light");
   applyUiState({
     uiScale: Number(safeStorage.getItem("uiScale") ?? 1),
@@ -573,6 +635,10 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   unlisteners.forEach(unlisten => unlisten());
   window.removeEventListener("mousedown", closeColorMenu);
+  window.removeEventListener("mousedown", closeRowMenu);
+  window.removeEventListener("keydown", handleMenuKeydown);
+  window.removeEventListener("blur", closeRowMenu);
+  listElement()?.removeEventListener("scroll", closeRowMenu);
   stopDragListeners();
   completeTimers.forEach(timer => window.clearTimeout(timer));
   window.clearTimeout(messageTimer);
@@ -995,5 +1061,36 @@ onBeforeUnmount(() => {
 .todo-sticky-toast.is-error {
   background: var(--danger-soft);
   color: var(--danger-text);
+}
+
+.todo-sticky-menu {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: calc(112px * var(--sticky-ui-scale));
+  padding: 4px;
+  border: 1px solid var(--sticky-border);
+  border-radius: 8px;
+  background: var(--sticky-paper-top);
+  box-shadow: var(--shadow-float);
+}
+
+.todo-sticky-menu-item {
+  padding: calc(6px * var(--sticky-ui-scale)) calc(10px * var(--sticky-ui-scale));
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--sticky-text);
+  font: inherit;
+  font-size: calc(13px * var(--sticky-ui-scale));
+  text-align: left;
+  cursor: pointer;
+}
+
+.todo-sticky-menu-item:hover,
+.todo-sticky-menu-item:focus-visible {
+  background: var(--sticky-control-hover);
+  outline: none;
 }
 </style>
