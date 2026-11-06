@@ -108,6 +108,21 @@ impl DbManager {
         tx.commit()?;
         Ok(())
     }
+
+    /// 删除触发时间早于 `before` 的提醒记录（写墓碑，v2.2.8 一键清理），返回删除的条数。
+    pub fn delete_reminder_records_before(
+        &self,
+        before: &NaiveDateTime,
+    ) -> Result<usize, AppError> {
+        let conn = self.get_conn()?;
+        let now = now_string();
+        let changed = conn.execute(
+            "UPDATE reminder_records SET deleted_at = ?1, updated_at = ?1
+             WHERE deleted_at IS NULL AND trigger_time < ?2",
+            params![now, format_datetime(before)],
+        )?;
+        Ok(changed)
+    }
 }
 
 pub(super) fn record_from_row(row: &rusqlite::Row<'_>) -> Result<ReminderRecord, rusqlite::Error> {

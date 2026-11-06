@@ -154,24 +154,6 @@ const confirmDelete = () => {
 </script>
 
 <style scoped>
-.batch-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  margin-bottom: 10px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--primary-soft);
-}
-
-.batch-count {
-  font-weight: 600;
-  color: var(--primary-text);
-  margin-right: 4px;
-}
-
 .batch-input {
   flex: 1 1 220px;
   min-width: 180px;
@@ -190,9 +172,5 @@ const confirmDelete = () => {
 
 .batch-hint.is-error {
   color: var(--danger-text);
-}
-
-.batch-spacer {
-  flex: 1 1 auto;
 }
 </style>

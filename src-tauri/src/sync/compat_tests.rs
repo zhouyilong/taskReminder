@@ -30,6 +30,7 @@ const RELEASES: &[(&str, &str)] = &[
     ("2.2.5", "2.2.6"),
     ("2.2.6", "2.2.6"),
     ("2.2.7", "2.2.6"),
+    ("2.2.8", "2.2.6"),
 ];
 const SAMPLE: &str = include_str!("../../tests/fixtures/sync-sample-2.0.sql");
 /// v2.1 新增同步列的示例数据，只写入库结构 2.1.0 起的库。

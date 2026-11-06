@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emptySelection, pruneSelection, selectRange, toggleAll, toggleSelected } from "./selection";
+import { emptySelection, pruneSelection, selectAll, selectRange, toggleAll, toggleSelected } from "./selection";
 
 const ordered = ["a", "b", "c", "d", "e"];
 const ids = (state: { ids: Set<string> }) => [...state.ids].sort();
@@ -32,6 +32,13 @@ describe("selection", () => {
     state = toggleAll(state, ["a", "b"]);
     expect(ids(state)).toEqual(["z"]);
     expect(ids(toggleAll(emptySelection(), []))).toEqual([]);
+  });
+
+  it("selects every row without toggling off and keeps the anchor", () => {
+    const state = selectAll(toggleSelected(emptySelection(), "a"), ordered);
+    expect(ids(state)).toEqual(ordered);
+    expect(state.anchor).toBe("a");
+    expect(ids(selectAll(state, ordered))).toEqual(ordered);
   });
 
   it("prunes rows that are no longer visible", () => {

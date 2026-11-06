@@ -21,7 +21,7 @@ export const SHORTCUT_HELP: Array<{ keys: string; label: string }> = [
   { keys: "Ctrl + F", label: "搜索（聚焦当前页的搜索框）" },
   { keys: "Alt + 1 … 9", label: "切换到侧边栏中的第 1 … 9 页" },
   { keys: "Esc", label: "关闭弹窗 / 退出多选" },
-  { keys: "Delete", label: "删除多选中的待办（需确认）" }
+  { keys: "Delete", label: "删除多选中的待办、已办或提醒记录（需确认）" }
 ];
 
 /** 焦点在输入框、下拉框或编辑器中时，单键快捷键（Esc 以外）不生效。 */

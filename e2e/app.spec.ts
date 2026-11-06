@@ -551,3 +551,125 @@ test("便签新增便签时带上当前窗口", async ({ page }) => {
   expect(payload.defaultY).toBeUndefined();
   expect(payload.title).toBe("读书笔记【拷贝】");
 });
+
+/** 切换到侧边栏中的页面，等新视图载入（视图按需加载，切换是异步的）。 */
+const openTab = async (app: import("@playwright/test").Page, label: string) => {
+  await app.locator(".sidebar").getByText(label, { exact: true }).click();
+  await expect(app.locator(".section-title")).toHaveText(label);
+};
+
+test("分页：首页、末页与跳转到指定页", async ({ app }) => {
+  await openTab(app, "提醒记录");
+  const pagination = app.locator(".pagination");
+  const pageLabel = pagination.locator(".pagination-page");
+  await expect(pageLabel).toHaveText(/第 1 \/ \d+ 页/);
+  const last = Number((await pageLabel.textContent())!.match(/\/ (\d+)/)![1]);
+  expect(last).toBeGreaterThan(3);
+
+  const jump = pagination.getByRole("textbox", { name: "跳转到第几页" });
+  await jump.fill("3");
+  await jump.press("Enter");
+  await expect(pageLabel).toHaveText(`第 3 / ${last} 页`);
+  // 超出范围跳到末页；点“跳转”按钮同样生效。
+  await jump.fill("999");
+  await pagination.getByRole("button", { name: "跳转" }).click();
+  await expect(pageLabel).toHaveText(`第 ${last} / ${last} 页`);
+  await pagination.getByRole("button", { name: "首页" }).click();
+  await expect(pageLabel).toHaveText(`第 1 / ${last} 页`);
+  await pagination.getByRole("button", { name: "末页" }).click();
+  await expect(pageLabel).toHaveText(`第 ${last} / ${last} 页`);
+});
+
+test("提醒记录：全选本页、Shift 连选与全选筛选结果后批量删除", async ({ app }) => {
+  await openTab(app, "提醒记录");
+  const rows = app.locator(".records-table tbody .table-row");
+  await expect(rows).toHaveCount(20);
+
+  await app.locator(".records-table thead input[type=checkbox]").check();
+  const bar = app.locator(".batch-bar");
+  await expect(bar.locator(".batch-count")).toHaveText("已选 20 条");
+  await app.locator(".records-table thead input[type=checkbox]").uncheck();
+  await expect(bar).toHaveCount(0);
+
+  // 勾选第 2 行后 Shift 点击第 6 行：选中 2 … 6 共 5 行；已有选中时点击行也会切换。
+  await rows.nth(1).locator("input[type=checkbox]").click();
+  await rows.nth(5).locator("input[type=checkbox]").click({ modifiers: ["Shift"] });
+  await expect(bar.locator(".batch-count")).toHaveText("已选 5 条");
+  await rows.nth(8).locator(".col-desc").click();
+  await expect(bar.locator(".batch-count")).toHaveText("已选 6 条");
+
+  // 按关键词筛选后全选筛选结果并删除。
+  await bar.getByRole("button", { name: "取消选择" }).click();
+  await app.getByPlaceholder("搜索提醒描述").fill("站会");
+  const total = await app.evaluate(() =>
+    (window as unknown as { __TAURI_MOCK__: { state: { reminderRecords: Array<{ description: string; deletedAt?: string | null }> } } })
+      .__TAURI_MOCK__.state.reminderRecords.filter(item => item.description === "站会" && !item.deletedAt).length
+  );
+  await rows.first().locator("input[type=checkbox]").click();
+  await bar.getByRole("button", { name: `全选筛选结果（${total} 条）` }).click();
+  await expect(bar.locator(".batch-count")).toHaveText(`已选 ${total} 条`);
+  await bar.getByRole("button", { name: "删除所选" }).click();
+  await app.locator(".modal", { has: app.locator(".modal-text") }).getByRole("button", { name: "确认" }).click();
+
+  await expect(app.locator(".records-table .table-empty-title")).toHaveText("暂无提醒记录");
+  const [call] = await invokeCalls(app, "delete_reminder_records");
+  expect((call.args.ids as string[]).length).toBe(total);
+});
+
+test("提醒记录：一键清理半年前的记录", async ({ app }) => {
+  await openTab(app, "提醒记录");
+  await app.getByRole("button", { name: "清理半年前" }).click();
+  const confirm = app.locator(".modal", { has: app.locator(".modal-text") });
+  await expect(confirm).toContainText("之前的 2 条提醒记录吗？");
+  await confirm.getByRole("button", { name: "确认" }).click();
+
+  const [call] = await invokeCalls(app, "delete_reminder_records_before");
+  expect(call.args.before).toMatch(/^\d{4}-\d{2}-\d{2}T00:00:00$/);
+  await expect(app.getByRole("button", { name: "清理半年前" })).toBeDisabled();
+  await app.getByPlaceholder("搜索提醒描述").fill("去年体检");
+  await expect(app.locator(".records-table .table-empty-title")).toBeVisible();
+});
+
+test("已办事项多选后批量删除", async ({ app }) => {
+  await openTab(app, "已办事项");
+  await app.locator(".task-toolbar").getByRole("button", { name: "多选" }).click();
+  await taskRow(app, "交电费").click();
+  await taskRow(app, "修自行车").click();
+  const bar = app.locator(".batch-bar");
+  await expect(bar.locator(".batch-count")).toHaveText("已选 2 项");
+  await bar.getByRole("button", { name: "删除", exact: true }).click();
+  await app.locator(".modal", { has: app.locator(".modal-text") }).getByRole("button", { name: "确认" }).click();
+
+  await expect(taskRow(app, "交电费")).toHaveCount(0);
+  await expect(taskRow(app, "修自行车")).toHaveCount(0);
+  await expect(taskRow(app, "提交报销单")).toBeVisible();
+  await expect(bar).toHaveCount(0);
+  const [call] = await invokeCalls(app, "batch_update_tasks");
+  expect(call.args).toEqual({ ids: ["t-done-1", "t-done-3"], payload: { action: "delete" } });
+});
+
+test("待办右键复制标题", async ({ app, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await app.locator(".tasks-table .table-row", { hasText: "写季度报告" }).click({ button: "right" });
+  await app.locator(".context-menu-item", { hasText: "复制标题" }).click();
+  await expect.poll(() => app.evaluate(() => navigator.clipboard.readText())).toBe("写季度报告");
+});
+
+test("待办清单便签右键复制标题与打开便签", async ({ todoSticky: page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const row = page.locator(".todo-sticky-row", { hasText: "买菜" });
+  await row.click({ button: "right" });
+  const menu = page.locator(".todo-sticky-menu");
+  await menu.getByRole("menuitem", { name: "复制标题" }).click();
+  await expect(page.locator(".todo-sticky-toast")).toHaveText("已复制标题");
+  await expect(menu).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("买菜");
+
+  await row.click({ button: "right" });
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await row.click({ button: "right" });
+  await menu.getByRole("menuitem", { name: "打开便签" }).click();
+  const [call] = await invokeCalls(page, "open_sticky_note");
+  expect(call.args.payload).toMatchObject({ title: "买菜", besideWindow: "sticky-todo-list" });
+});

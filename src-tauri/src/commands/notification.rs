@@ -56,6 +56,28 @@ pub fn delete_reminder_records(state: State<AppState>, ids: Vec<String>) -> ApiR
     Ok(())
 }
 
+/// 一键清理（v2.2.8）：删除触发时间早于 `before`（界面算好的截止时间，如半年前的当天零点）的提醒记录，
+/// 返回删除的条数。截止时间不能晚于当前时间，避免误删全部记录。
+#[tauri::command]
+pub fn delete_reminder_records_before(state: State<AppState>, before: String) -> ApiResult<usize> {
+    let cutoff = into_api(parse_cleanup_cutoff(&before))?;
+    let changed = into_api(state.db.delete_reminder_records_before(&cutoff))?;
+    if changed > 0 {
+        into_api(state.sync.notify_local_change())?;
+    }
+    Ok(changed)
+}
+
+fn parse_cleanup_cutoff(value: &str) -> Result<chrono::NaiveDateTime, crate::errors::AppError> {
+    use crate::errors::AppError;
+    let cutoff = time::parse_datetime_any(value)
+        .ok_or_else(|| AppError::Invalid(format!("无效的截止时间：{value}")))?;
+    if cutoff > time::now() {
+        return Err(AppError::Invalid("截止时间不能晚于当前时间".to_string()));
+    }
+    Ok(cutoff)
+}
+
 /// 处理完弹窗中的一条提醒后，从队列移除并广播剩余队列；返回剩余队列供弹窗直接使用。
 fn finish_notification(
     app: &tauri::AppHandle,
@@ -262,5 +284,16 @@ mod tests {
         );
         assert_eq!(snooze_target(Some("明早"), 15), "2026-09-30T22:05:00");
         assert_eq!(snooze_target(None, 0), "2026-09-30T21:51:00");
+    }
+
+    #[test]
+    fn cleanup_cutoff_rejects_invalid_and_future_values() {
+        let _now = time::fix_now("2026-11-06T10:00");
+        assert_eq!(
+            parse_cleanup_cutoff("2026-05-06T00:00:00").unwrap(),
+            time::parse_datetime_any("2026-05-06T00:00").unwrap()
+        );
+        assert!(parse_cleanup_cutoff("半年前").is_err());
+        assert!(parse_cleanup_cutoff("2026-11-07T00:00:00").is_err());
     }
 }

@@ -76,6 +76,7 @@ fn main() {
             recurring::delete_recurring_task,
             notification::delete_reminder_record,
             notification::delete_reminder_records,
+            notification::delete_reminder_records_before,
             trash::list_trash,
             trash::restore_task,
             trash::restore_recurring_task,

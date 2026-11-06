@@ -112,6 +112,9 @@
     }
     reminderRecords.push(record("rec-dentist", "t-dentist", "预约牙医", "TASK", at(-1, 10), "SNOOZED"));
     reminderRecords.push(record("rec-power", "t-done-1", "交电费", "TASK", at(-1, 19), "COMPLETED"));
+    // 半年以前的记录（v2.2.8 一键清理）。
+    reminderRecords.push(record("rec-old-1", "t-old", "去年体检", "TASK", at(-200, 9), "COMPLETED"));
+    reminderRecords.push(record("rec-old-2", "r-water", "喝水", "RECURRING", at(-300, 10, 30), "DISMISSED"));
     return { tasks, recurringTasks, reminderRecords };
   };
 
@@ -378,6 +381,11 @@
       if (item) item.deletedAt = now();
     },
     delete_reminder_records: ({ ids }) => ids.forEach(id => commands.delete_reminder_record({ id })),
+    delete_reminder_records_before: ({ before }) => {
+      const old = state.reminderRecords.filter(entry => !entry.deletedAt && entry.triggerTime < before);
+      old.forEach(entry => (entry.deletedAt = now()));
+      return old.length;
+    },
     list_trash: () => ({
       tasks: state.tasks.filter(item => item.deletedAt),
       recurringTasks: state.recurringTasks.filter(item => item.deletedAt),

@@ -36,6 +36,12 @@ export const toggleAll = (state: SelectionState, ordered: readonly string[]): Se
   return { ids, anchor: state.anchor };
 };
 
+/** 选中 `ordered` 中的全部行（如“全选筛选结果”，v2.2.8），保留锚点。 */
+export const selectAll = (state: SelectionState, ordered: readonly string[]): SelectionState => ({
+  ids: new Set([...state.ids, ...ordered]),
+  anchor: state.anchor
+});
+
 /** 只保留仍然可见的行（筛选、完成、删除后调用）。 */
 export const pruneSelection = (state: SelectionState, visible: readonly string[]): SelectionState => {
   const keep = new Set(visible);

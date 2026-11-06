@@ -4,7 +4,7 @@
 - `src/` 存放 Vue 3 + TypeScript 前端，窗口入口如下：
   - 主窗口：`index.html` → `src/main.ts` → `src/App.vue`（只负责外壳：标题栏、侧边栏、按 Tab 切换视图、挂载共享弹窗与全局事件监听）。
     - `src/views/`：每个 Tab 一个视图——`TodayView`（今天时间线）、`CalendarView`（日历月视图 / 周视图，可拖动待办改期到某天或某个时段）、`TasksView`（含搜索、标签/优先级筛选与排序）、`CompletedView`、`RecurringView`、`StickiesView`（便签管理列表：显示中 / 已隐藏 / 已关闭，打开、置前、关闭）、`RecordsView`、`StatsView`（统计）、`TrashView`（回收站）。Tab 键定义在 `src/navigation.ts`，上次打开的 Tab 记在 `localStorage.activeTab`。
-    - `src/composables/`：模块级单例的共享状态——`useAppData`（四个列表、`refreshAll`、`dataVersion`）、`useSettings`（设置草稿、同步状态、设置/云同步弹窗开关）、`useUpdater`、`useUiPrefs`（主题、缩放、透明度、侧边栏）、`useDialogs`（确认框、详情、编辑待办/循环提醒）、`useItemActions`（完成、删除、右键菜单等通用操作）、`useSmartAdd`（带自然语言识别的新建待办/循环提醒）、`useContextMenu`、`usePagination`、`useNow`、`useSearchPalette`（全局搜索面板开关）、`useLabelManager`（标签与项目管理弹窗开关与最近一次改名，待办视图据此让筛选跟随）。
+    - `src/composables/`：模块级单例的共享状态——`useAppData`（四个列表、`refreshAll`、`dataVersion`）、`useSettings`（设置草稿、同步状态、设置/云同步弹窗开关）、`useUpdater`、`useUiPrefs`（主题、缩放、透明度、侧边栏）、`useDialogs`（确认框、详情、编辑待办/循环提醒）、`useItemActions`（完成、删除、右键菜单等通用操作）、`useSmartAdd`（带自然语言识别的新建待办/循环提醒）、`useContextMenu`、`usePagination`、`useNow`、`useSearchPalette`（全局搜索面板开关）、`useLabelManager`（标签与项目管理弹窗开关与最近一次改名，待办视图据此让筛选跟随）、`useListSelection`（v2.2.8，提醒记录与已办事项的多选：Shift 连选、全选本页、全选筛选结果）。
   - 提醒弹窗：`notification.html` → `src/notification.ts` → `src/NotificationApp.vue`。
   - 全屏提醒效果：`attention.html` → `src/attention.ts` → `src/AttentionApp.vue`（每块屏幕一个透明、鼠标穿透、不可聚焦的置顶窗口，标签为 `attention-<批次>-<序号>`，内容由后端注入到 `window.__ATTENTION__`）。
   - 桌面便签：`sticky-note-item.html` → `src/stickyNoteItem.ts` → `src/StickyNoteItemApp.vue`（每张便签一个独立窗口，窗口标签为 `sticky-note-item-<编码后的 id>`）。
@@ -18,11 +18,12 @@
   - `SharedDialogs.vue`：挂在 App.vue 的共享弹窗（`TaskEditModal`、`RecurringEditModal`、详情、确认框、右键菜单），由 `useDialogs` 驱动，任何视图都可打开。
   - `RecurringTempModal.vue`：循环提醒的临时提醒（v2.2.4，只从列表右键打开，挂在 `SharedDialogs.vue`，由 `useDialogs.openTempReminderEditor` 驱动）。
   - `RecurringFields.vue`：循环提醒各模式的规则字段，新建表单与编辑弹窗共用；`RecurringEndFields.vue`：结束条件（结束日期、次数，v2.2），同样两处共用。
-  - `Pagination.vue`：表格分页条，配合 `usePagination`。
+  - `Pagination.vue`：表格分页条，配合 `usePagination`；首页、末页与输入页码跳转（v2.2.8，页码经 `src/pagination.ts` 的 `clampPage` 规范）。
   - `WeekdayPicker.vue`：每周多天选择（位掩码 `v-model`，含工作日/周末/每天预设）。
   - `TaskBadges.vue`（项目、优先级与标签徽标）、`TagInput.vue`（标签输入）、`PriorityPicker.vue`（优先级分段选择）、`SmartParseHint.vue`（自然语言识别结果提示）。
   - `DataModal.vue`：导入导出与本地备份（从设置打开）。
   - `TaskBatchBar.vue`：待办多选后的批量操作栏（完成、删除、加标签、移到项目、优先级、改提醒时间）。
+  - `ListBatchBar.vue`：提醒记录、已办事项的批量操作栏（v2.2.8，已选数量、全选筛选结果、取消，操作按钮放在插槽中）；`.batch-bar` 样式在 `styles.css` 中三处共用。
   - `SearchPalette.vue`：全局搜索面板（`Ctrl+K` / 标题栏按钮），挂在 App.vue，回车跳到对应页面并打开编辑或详情。
   - `StatsBarChart.vue`：统计面板的堆叠柱状图（提醒与完成趋势共用）。
   - `ChecklistProgress.vue`：正文中勾选清单的进度徽标（如 2/5）。
@@ -30,7 +31,7 @@
 - `src/api.ts` 封装所有 Tauri `invoke` 命令；`src/types.ts` 为前后端共享的数据类型。
 - `src/markdown.ts` Markdown 转纯文本/预览文本工具（列表描述、提醒记录去掉前导列表标记）与勾选清单进度（`checklistProgress`，Crepe 保存为 `* [ ]`）。
 - `src/format.ts` 主窗口共用的时间与文案格式化；`src/recurring.ts` 循环规则展示、表单草稿、校验与提交载荷。
-- `src/timeline.ts`（“今天”时间线）、`src/stats.ts`（统计面板）、`src/calendar.ts`（日历网格与按天归类）、`src/tasks.ts`（标签、优先级、项目、筛选排序）、`src/stickies.ts`（便签列表状态、筛选排序）、`src/nlp.ts`（自然语言时间/标签/项目/优先级/循环规则与结束条件识别）、`src/search.ts`（全局搜索与各列表关键词搜索的统一规则：多词为“且”，`#标签` 只与标签前缀匹配，`@项目` 只与项目前缀匹配）、`src/retention.ts`（已完成待办保留期选项与说明）、`src/todoSticky.ts`（待办清单便签的排序、时间文案与输入解析）为纯函数，测试在同名 `*.spec.ts`。
+- `src/timeline.ts`（“今天”时间线）、`src/stats.ts`（统计面板）、`src/calendar.ts`（日历网格与按天归类）、`src/tasks.ts`（标签、优先级、项目、筛选排序）、`src/stickies.ts`（便签列表状态、筛选排序）、`src/nlp.ts`（自然语言时间/标签/项目/优先级/循环规则与结束条件识别）、`src/search.ts`（全局搜索与各列表关键词搜索的统一规则：多词为“且”，`#标签` 只与标签前缀匹配，`@项目` 只与项目前缀匹配）、`src/retention.ts`（已完成待办保留期选项与说明）、`src/todoSticky.ts`（待办清单便签的排序、时间文案与输入解析）、`src/records.ts`（提醒记录一键清理的截止时间与条数，v2.2.8）、`src/pagination.ts`（分页跳转的页码规范）为纯函数，测试在同名 `*.spec.ts`。
 - `src/attentionEffect.ts` 全屏提醒效果的设置选项、说明文案与横幅文字、主题（纯函数，测试在 `attentionEffect.spec.ts`）。
 - `src/syncStatus.ts` 云同步状态码到文案与色调的映射（兼容旧版中文状态）；`src/quietHours.ts` 勿扰时段说明文案。
 - `src/clipboard.ts` 复制文本到剪贴板（便签一键复制，异步剪贴板不可用时退回 `execCommand("copy")`）；复制的文本由 `src/markdown.ts` 的 `markdownToCopyText` 生成。
@@ -198,6 +199,13 @@
 - 从待办清单打开（`besideWindow = "sticky-todo-list"`）的便签总是放在清单旁边，不沿用记住的位置。
 - 锚定继承：`inherit_anchor_pin` 在参照窗口锚定时（清单看 `TodoStickyState.pinned`，便签看它自己的 `sticky_is_pinned`）经 `set_sticky_note_pinned` 锚定新打开 / 新建的便签；参照窗口没锚定时不取消便签原有的锚定。
 - 默认颜色为绿色只是前端的显示规则：`src/stickies.ts` 的 `resolveStickyColor` 把空字符串与不认识的颜色显示为 `DEFAULT_STICKY_COLOR`；库里仍存空字符串（后端 `normalize_sticky_color` 照旧接受），颜色选择中没有“默认”。
+
+### 列表批量与清理（v2.2.8）
+- 提醒记录与已办事项的多选经 `useListSelection`：勾选框（与已有选中时的行点击）切换、Shift 按筛选后的顺序连选（可跨页）、表头全选本页、批量栏“全选筛选结果”；列表变化后只保留仍然可见的行，所以批量操作只作用于当前筛选结果。待办页仍用自己的多选（`TaskBatchBar`）。
+- 已办批量删除复用 `batch_update_tasks`（`delete`），不要另加命令。视图里处理 `VIEW_SHORTCUT_EVENT` 的 Esc / Delete 时，只在有选中项时响应。
+- 一键清理提醒记录：截止时间由前端 `monthsAgoCutoff` 算好（半年前当天零点）后传给 `delete_reminder_records_before`，确认框里的条数与实际删除用同一个截止时间与同样的字符串比较（`trigger_time < 截止时间`）；后端拒绝无效或晚于当前时间的截止时间，只写墓碑，不要改成物理删除。
+- 视图按需加载，切换 Tab 是异步的：端到端测试切换页面后先等 `.section-title` 变成新页面的标题再操作（`openTab`）。
+- 待办清单便签的右键菜单（复制标题、打开便签）是窗口内自绘的 `.todo-sticky-menu`，点击别处、Esc、滚动、失焦时关闭；主窗口的右键菜单仍走 `useContextMenu`。
 
 ### 应用名称（v2.2.4）
 - 显示名称（`productName`、窗口标题、托盘）为“任务提醒”；**不要改**这些内部标识：`identifier`（`ylfty.top`，WebView 数据目录、系统通知）、数据目录名 `TaskReminderApp`（`paths.rs`）、凭据库服务名（`secrets.rs`）、开机自启项名（`autostart.rs`）、Cargo 包名（exe 名）。

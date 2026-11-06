@@ -148,6 +148,10 @@ export const api = {
   async deleteReminderRecords(ids: string[]): Promise<void> {
     return invoke("delete_reminder_records", { ids });
   },
+  /** 删除触发时间早于 `before` 的提醒记录（v2.2.8 一键清理），返回删除的条数。 */
+  async deleteReminderRecordsBefore(before: string): Promise<number> {
+    return invoke("delete_reminder_records_before", { before });
+  },
   async listTrash(): Promise<TrashPayload> {
     return invoke("list_trash");
   },

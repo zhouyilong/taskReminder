@@ -29,14 +29,40 @@
       </select>
       <button class="button secondary" @click="applyRecordFilter">应用过滤</button>
       <button class="button secondary" @click="clearRecordFilter">清除过滤</button>
-      <button class="button danger" @click="deleteSelectedRecords">批量删除</button>
+      <button
+        class="button secondary"
+        :disabled="!oldRecords.length"
+        :title="oldRecords.length ? `删除 ${cleanupDateLabel} 之前的 ${oldRecords.length} 条提醒记录` : `没有 ${cleanupDateLabel} 之前的提醒记录`"
+        @click="cleanupOldRecords"
+      >
+        清理半年前
+      </button>
     </div>
+    <ListBatchBar
+      v-if="selectedCount"
+      :count="selectedCount"
+      :total="filteredRecords.length"
+      @select-all="selectAllVisible"
+      @cancel="clearSelection"
+    >
+      <button class="button danger" type="button" @click="deleteSelectedRecords">删除所选</button>
+    </ListBatchBar>
     <div class="table-card">
       <div class="table-scroll">
-        <table class="table records-table">
+        <table class="table records-table" :class="{ 'is-selecting': selectedCount > 0 }">
           <thead>
             <tr>
-              <th class="col-select">选择</th>
+              <th class="col-select">
+                <input
+                  type="checkbox"
+                  title="全选本页"
+                  aria-label="全选本页"
+                  :checked="pageAllSelected"
+                  :indeterminate.prop="pageSomeSelected && !pageAllSelected"
+                  :disabled="!recordPage.length"
+                  @change="togglePage"
+                />
+              </th>
               <th class="col-desc">描述</th>
               <th class="col-type">类型</th>
               <th class="col-datetime">触发时间</th>
@@ -49,11 +75,18 @@
               v-for="record in recordPage"
               :key="record.id"
               class="table-row"
+              :class="{ 'is-selected': isSelected(record.id) }"
+              @click="handleRowClick($event, record.id)"
               @dblclick="openRecordDetail(record)"
               @contextmenu.prevent.stop="openRecordMenu($event, record)"
             >
               <td class="col-select">
-                <input type="checkbox" v-model="selectedRecords" :value="record.id" />
+                <input
+                  type="checkbox"
+                  title="选择（Shift 连选）"
+                  :checked="isSelected(record.id)"
+                  @click.stop="toggleSelection($event, record.id)"
+                />
               </td>
               <td class="col-desc cell-title" :title="recordDescription(record.description)">{{ recordDescription(record.description) }}</td>
               <td class="col-type" :title="record.type === 'TASK' ? '任务' : '循环'">
@@ -85,21 +118,28 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { api } from "../api";
+import ListBatchBar from "../components/ListBatchBar.vue";
 import Pagination from "../components/Pagination.vue";
 import { formatAction, formatDateTime, isLinuxPlatform, recordDescription } from "../format";
+import { VIEW_SHORTCUT_EVENT, type ShortcutAction } from "../keyboard";
+import { monthsAgoCutoff, recordsBefore } from "../records";
 import { matchesKeyword, parseQuery } from "../search";
 import { useAppData } from "../composables/useAppData";
+import { useDialogs } from "../composables/useDialogs";
 import { useItemActions } from "../composables/useItemActions";
+import { useListSelection } from "../composables/useListSelection";
+import { useNow } from "../composables/useNow";
 import { usePagination } from "../composables/usePagination";
 
-const { reminderRecords } = useAppData();
+const { reminderRecords, refreshAll } = useAppData();
 const { openRecordDetail, openRecordMenu, confirmDeleteRecords } = useItemActions();
+const { confirmAction } = useDialogs();
 
 const recordFilterStart = ref("");
 const recordFilterEnd = ref("");
 const recordFilterType = ref("all");
-const selectedRecords = ref<string[]>([]);
 
 const recordKeyword = ref("");
 const filteredRecords = computed(() => {
@@ -128,6 +168,29 @@ const {
   page: recordPage
 } = usePagination(filteredRecords, recordKeyword);
 
+// 多选（v2.2.8）：勾选框切换、Shift 连选、表头全选本页、批量栏中全选筛选结果；
+// 已有选中的行时点击行也会切换选择。
+const {
+  selectedIds,
+  count: selectedCount,
+  pageAllSelected,
+  pageSomeSelected,
+  isSelected,
+  toggle: toggleSelection,
+  togglePage,
+  selectAllVisible,
+  clear: clearSelection
+} = useListSelection(
+  computed(() => filteredRecords.value.map(record => record.id)),
+  computed(() => recordPage.value.map(record => record.id))
+);
+
+const handleRowClick = (event: MouseEvent, id: string) => {
+  if (!selectedCount.value) return;
+  if ((event.target as HTMLElement | null)?.closest("a, button, input")) return;
+  toggleSelection(event, id);
+};
+
 const handleRecordDatePicked = (event: Event) => {
   if (!isLinuxPlatform) {
     return;
@@ -154,8 +217,38 @@ const clearRecordFilter = () => {
 };
 
 const deleteSelectedRecords = () => {
-  confirmDeleteRecords([...selectedRecords.value], () => {
-    selectedRecords.value = [];
+  confirmDeleteRecords([...selectedIds.value], clearSelection);
+};
+
+// 一键清理半年前的记录（v2.2.8）：截止时间为半年前当天零点，不受当前筛选影响。
+const now = useNow();
+const cleanupCutoff = computed(() => monthsAgoCutoff(now.value));
+const cleanupDateLabel = computed(() => cleanupCutoff.value.slice(0, 10));
+const oldRecords = computed(() => recordsBefore(reminderRecords.value, cleanupCutoff.value));
+
+const cleanupOldRecords = () => {
+  const cutoff = cleanupCutoff.value;
+  const count = recordsBefore(reminderRecords.value, cutoff).length;
+  if (!count) return;
+  confirmAction({
+    title: "清理半年前的提醒记录",
+    message: `确定要删除 ${cutoff.slice(0, 10)} 之前的 ${count} 条提醒记录吗？`,
+    action: async () => {
+      await api.deleteReminderRecordsBefore(cutoff);
+      await refreshAll();
+    }
   });
 };
+
+// 快捷键：Esc 取消选择；Delete 删除选中的记录（需确认）。
+const handleViewShortcut = (event: Event) => {
+  const action = (event as CustomEvent<ShortcutAction>).detail;
+  if (action.type === "escape" && selectedCount.value) {
+    clearSelection();
+  } else if (action.type === "delete" && selectedCount.value) {
+    deleteSelectedRecords();
+  }
+};
+onMounted(() => window.addEventListener(VIEW_SHORTCUT_EVENT, handleViewShortcut));
+onBeforeUnmount(() => window.removeEventListener(VIEW_SHORTCUT_EVENT, handleViewShortcut));
 </script>
