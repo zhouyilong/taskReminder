@@ -650,28 +650,30 @@ onBeforeUnmount(() => {
 /* 标题栏（含颜色菜单）盖在列表行之上：行带 position: relative（插入线）。 */
 .todo-sticky-header {
   z-index: 3;
+  border-bottom: 1px solid var(--sticky-divider);
 }
 
 .todo-sticky-heading {
   flex: 1;
   min-width: 0;
   display: flex;
-  align-items: baseline;
-  gap: calc(8px * var(--sticky-ui-scale));
+  align-items: center;
+  gap: calc(7px * var(--sticky-ui-scale));
   overflow: hidden;
 }
 
 .todo-sticky-title {
   color: var(--sticky-title);
-  font-size: calc(15px * var(--sticky-ui-scale));
-  font-weight: 650;
-  letter-spacing: 0.2px;
+  font-size: calc(14.5px * var(--sticky-ui-scale));
+  font-weight: 700;
+  letter-spacing: -0.01em;
   white-space: nowrap;
 }
 
 .todo-sticky-count {
-  color: var(--sticky-text-faint);
+  color: var(--sticky-text-muted);
   font-size: calc(11px * var(--sticky-ui-scale));
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
@@ -682,9 +684,12 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   margin: 0;
-  padding: calc(2px * var(--sticky-ui-scale)) calc(8px * var(--sticky-ui-scale)) calc(6px * var(--sticky-ui-scale));
+  padding: calc(6px * var(--sticky-ui-scale)) calc(8px * var(--sticky-ui-scale));
   list-style: none;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: calc(2px * var(--sticky-ui-scale));
 }
 
 .todo-sticky-list::-webkit-scrollbar {
@@ -693,7 +698,7 @@ onBeforeUnmount(() => {
 
 .todo-sticky-list::-webkit-scrollbar-thumb {
   background: var(--sticky-scrollbar);
-  border-radius: 3px;
+  border-radius: 999px;
 }
 
 .todo-sticky-row {
@@ -701,11 +706,13 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: calc(8px * var(--sticky-ui-scale));
-  min-height: calc(32px * var(--sticky-ui-scale));
-  padding: 0 calc(6px * var(--sticky-ui-scale)) 0 calc(8px * var(--sticky-ui-scale));
-  border-radius: calc(8px * var(--sticky-ui-scale));
+  min-height: calc(34px * var(--sticky-ui-scale));
+  padding: calc(2px * var(--sticky-ui-scale)) calc(7px * var(--sticky-ui-scale)) calc(2px * var(--sticky-ui-scale))
+    calc(9px * var(--sticky-ui-scale));
+  border-radius: calc(9px * var(--sticky-ui-scale));
   color: var(--sticky-text);
   font-size: calc(13px * var(--sticky-ui-scale));
+  font-weight: 500;
   cursor: default;
   user-select: none;
   transition: background-color 0.15s ease, opacity 0.25s ease, box-shadow 0.15s ease;
@@ -737,17 +744,17 @@ onBeforeUnmount(() => {
   left: calc(6px * var(--sticky-ui-scale));
   right: calc(6px * var(--sticky-ui-scale));
   height: 2px;
-  border-radius: 1px;
+  border-radius: 999px;
   background: var(--primary);
   pointer-events: none;
 }
 
 .todo-sticky-row.is-drop-before::before {
-  top: -1px;
+  top: -2px;
 }
 
 .todo-sticky-row.is-drop-after::after {
-  bottom: -1px;
+  bottom: -2px;
 }
 
 /* 方形勾选框（v2.2.5）：勾选后先显示勾与划线，再淡出。 */
@@ -760,7 +767,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   border: 1.5px solid var(--sticky-text-faint);
-  border-radius: calc(4px * var(--sticky-ui-scale));
+  border-radius: calc(5px * var(--sticky-ui-scale));
   background: transparent;
   color: transparent;
   cursor: pointer;
@@ -778,13 +785,14 @@ onBeforeUnmount(() => {
 .todo-sticky-check:hover,
 .todo-sticky-check:focus-visible {
   border-color: var(--success);
+  background: var(--success-soft);
   outline: none;
 }
 
 .todo-sticky-check:hover svg {
   color: var(--success-text);
   stroke-dashoffset: 12;
-  opacity: 0.5;
+  opacity: 0.65;
 }
 
 .todo-sticky-row.is-checked .todo-sticky-check {
@@ -831,37 +839,42 @@ onBeforeUnmount(() => {
 
 .todo-sticky-when {
   flex-shrink: 0;
-  color: var(--sticky-text-faint);
+  padding: calc(1px * var(--sticky-ui-scale)) calc(6px * var(--sticky-ui-scale));
+  border-radius: 999px;
+  color: var(--sticky-text-muted);
   font-size: calc(11px * var(--sticky-ui-scale));
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
 .todo-sticky-row.is-today .todo-sticky-when {
+  background: var(--primary-soft);
   color: var(--primary-text);
 }
 
 .todo-sticky-row.is-overdue .todo-sticky-when {
+  background: var(--danger-soft);
   color: var(--danger-text);
 }
 
 /* 加急（v2.2.5）：红色底、左侧色条、“急”字徽标与加粗标题。 */
 .todo-sticky-row.is-urgent {
   background: var(--urgent-soft);
-  box-shadow: inset calc(3px * var(--sticky-ui-scale)) 0 0 var(--urgent);
+  box-shadow:
+    inset calc(3px * var(--sticky-ui-scale)) 0 0 var(--urgent),
+    inset 0 0 0 1px var(--urgent-border);
 }
 
 .todo-sticky-row.is-urgent:hover {
   background: var(--urgent-soft);
-  box-shadow: inset calc(3px * var(--sticky-ui-scale)) 0 0 var(--urgent), inset 0 0 0 1px var(--urgent-glow);
-}
-
-.todo-sticky-row.is-urgent + .todo-sticky-row.is-urgent {
-  margin-top: 2px;
+  box-shadow:
+    inset calc(3px * var(--sticky-ui-scale)) 0 0 var(--urgent),
+    inset 0 0 0 1px var(--urgent);
 }
 
 .todo-sticky-row.is-urgent:not(.is-checked) .todo-sticky-text {
   color: var(--urgent-text);
-  font-weight: 650;
+  font-weight: 700;
 }
 
 .todo-sticky-urgent-badge {
@@ -873,7 +886,7 @@ onBeforeUnmount(() => {
   height: calc(18px * var(--sticky-ui-scale));
   padding: 0 calc(4px * var(--sticky-ui-scale));
   border-radius: calc(5px * var(--sticky-ui-scale));
-  background: var(--urgent);
+  background: linear-gradient(180deg, #f56368 0%, var(--urgent) 100%);
   color: var(--urgent-on);
   font-size: calc(11px * var(--sticky-ui-scale));
   font-weight: 700;
@@ -885,7 +898,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   width: calc(22px * var(--sticky-ui-scale));
   height: calc(22px * var(--sticky-ui-scale));
-  margin-left: calc(-4px * var(--sticky-ui-scale));
+  margin-left: calc(-2px * var(--sticky-ui-scale));
   padding: 0;
   display: flex;
   align-items: center;
@@ -1000,7 +1013,7 @@ onBeforeUnmount(() => {
 }
 
 .todo-sticky-color-menu {
-  top: calc(100% + 6px);
+  top: calc(100% + 7px);
   bottom: auto;
   left: auto;
   right: 0;
@@ -1010,31 +1023,43 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: calc(28px * var(--sticky-ui-scale)) 0;
+  gap: 5px;
+  padding: calc(34px * var(--sticky-ui-scale)) 0;
   color: var(--sticky-text-muted);
   font-size: calc(13px * var(--sticky-ui-scale));
+  font-weight: 600;
 }
 
 .todo-sticky-empty-hint {
   color: var(--sticky-text-faint);
   font-size: calc(11px * var(--sticky-ui-scale));
+  font-weight: 500;
 }
 
 .todo-sticky-footer {
-  height: calc(40px * var(--sticky-ui-scale));
+  height: calc(42px * var(--sticky-ui-scale));
   padding: 0 calc(10px * var(--sticky-ui-scale));
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .todo-sticky-input {
   width: 100%;
   min-width: 0;
-  border: none;
+  height: calc(28px * var(--sticky-ui-scale));
+  padding: 0 calc(8px * var(--sticky-ui-scale));
+  border: 1px solid transparent;
+  border-radius: calc(7px * var(--sticky-ui-scale));
   background: transparent;
   color: var(--sticky-text);
   font-family: var(--font-sans);
-  font-size: calc(13px * var(--sticky-ui-scale));
+  font-size: calc(12.5px * var(--sticky-ui-scale));
   outline: none;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.todo-sticky-input:focus {
+  background: var(--sticky-control-hover);
+  border-color: var(--sticky-border);
 }
 
 .todo-sticky-input::placeholder {
@@ -1044,14 +1069,17 @@ onBeforeUnmount(() => {
 .todo-sticky-toast {
   position: absolute;
   left: 50%;
-  bottom: calc(48px * var(--sticky-ui-scale));
+  bottom: calc(50px * var(--sticky-ui-scale));
   transform: translateX(-50%);
-  max-width: calc(100% - 32px);
-  padding: 4px 10px;
+  max-width: calc(100% - 28px);
+  padding: 5px 11px;
+  border: 1px solid var(--success-border);
   border-radius: 999px;
-  background: var(--success-soft);
+  background: var(--sticky-paper-top);
   color: var(--success-text);
-  font-size: calc(12px * var(--sticky-ui-scale));
+  font-size: calc(11.5px * var(--sticky-ui-scale));
+  font-weight: 600;
+  box-shadow: var(--shadow-float);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1059,7 +1087,7 @@ onBeforeUnmount(() => {
 }
 
 .todo-sticky-toast.is-error {
-  background: var(--danger-soft);
+  border-color: var(--danger-border);
   color: var(--danger-text);
 }
 
@@ -1068,12 +1096,13 @@ onBeforeUnmount(() => {
   z-index: 30;
   display: flex;
   flex-direction: column;
-  min-width: calc(112px * var(--sticky-ui-scale));
+  min-width: calc(116px * var(--sticky-ui-scale));
   padding: 4px;
   border: 1px solid var(--sticky-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--sticky-paper-top);
   box-shadow: var(--shadow-float);
+  animation: menu-in 0.13s cubic-bezier(0.2, 0.9, 0.3, 1.1);
 }
 
 .todo-sticky-menu-item {
@@ -1083,14 +1112,17 @@ onBeforeUnmount(() => {
   background: transparent;
   color: var(--sticky-text);
   font: inherit;
-  font-size: calc(13px * var(--sticky-ui-scale));
+  font-size: calc(12.5px * var(--sticky-ui-scale));
+  font-weight: 500;
   text-align: left;
   cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 
 .todo-sticky-menu-item:hover,
 .todo-sticky-menu-item:focus-visible {
   background: var(--sticky-control-hover);
+  color: var(--sticky-title);
   outline: none;
 }
 </style>

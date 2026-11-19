@@ -163,22 +163,23 @@ onBeforeUnmount(() => {
 }
 
 .attention-banner {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 14px;
   max-width: 100%;
-  padding: 14px 20px 14px 14px;
-  border-radius: 18px;
+  padding: 13px 20px 13px 14px;
+  border-radius: 20px;
   border: 1px solid var(--attention-banner-border);
   background: var(--attention-banner-bg);
   box-shadow: var(--attention-banner-shadow);
-  backdrop-filter: blur(14px);
+  backdrop-filter: blur(18px) saturate(1.2);
   animation: attention-drop 0.6s cubic-bezier(0.2, 1.3, 0.35, 1) both;
   transition: padding 0.4s ease;
 }
 
 .is-persist .attention-banner {
-  padding: 10px 16px 10px 10px;
+  padding: 10px 16px 10px 11px;
 }
 
 .is-leave .attention-banner {
@@ -191,10 +192,13 @@ onBeforeUnmount(() => {
   place-items: center;
   width: 42px;
   height: 42px;
-  border-radius: 50%;
+  border-radius: 14px;
   color: var(--primary-text);
   background: var(--primary-soft);
-  box-shadow: 0 0 0 1px var(--attention-banner-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 0 0 1px var(--attention-banner-border),
+    0 4px 14px var(--attention-glow-soft);
 }
 
 .attention-bell svg {
@@ -209,6 +213,10 @@ onBeforeUnmount(() => {
 .is-missed .attention-bell {
   color: var(--warning-text);
   background: var(--warning-soft);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 0 0 1px var(--warning-border),
+    0 4px 14px var(--attention-missed-glow-soft);
 }
 
 .attention-banner-body {
@@ -217,8 +225,9 @@ onBeforeUnmount(() => {
 }
 
 .attention-eyebrow {
-  font-size: var(--font-meta);
+  font-size: 11.5px;
   font-weight: var(--weight-semibold);
+  letter-spacing: 0.02em;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -231,8 +240,9 @@ onBeforeUnmount(() => {
 
 .attention-title {
   margin-top: 2px;
-  font-size: 17px;
+  font-size: 16.5px;
   line-height: 1.35;
+  letter-spacing: -0.01em;
   font-weight: var(--weight-bold);
   color: var(--text-title);
   display: -webkit-box;
@@ -251,7 +261,8 @@ onBeforeUnmount(() => {
   max-width: 220px;
   padding-left: 14px;
   border-left: 1px solid var(--border-strong);
-  font-size: var(--font-meta);
+  font-size: 12px;
+  font-weight: 500;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;

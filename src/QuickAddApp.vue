@@ -308,10 +308,13 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px 16px 14px;
+  gap: 11px;
+  padding: 14px 16px 14px;
   border: 1px solid var(--border-strong);
-  background: var(--bg-surface);
+  background:
+    radial-gradient(120% 90% at 0% 0%, var(--primary-soft), transparent 56%),
+    var(--bg-surface);
+  box-shadow: inset 0 2.5px 0 var(--primary);
   font-family: var(--font-sans);
   color: var(--text-base);
 }
@@ -322,7 +325,7 @@ onBeforeUnmount(() => {
 
 .quick-add-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   cursor: default;
@@ -330,46 +333,65 @@ onBeforeUnmount(() => {
 }
 
 .quick-add-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   color: var(--text-title);
-  font-size: var(--font-title);
+  font-size: 14.5px;
   font-weight: var(--weight-bold);
+  letter-spacing: -0.01em;
+}
+
+.quick-add-title::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
 .quick-add-hint {
   color: var(--text-faint);
-  font-size: var(--font-meta);
+  font-size: 11.5px;
+  font-weight: 500;
 }
 
 .quick-add-input {
   width: 100%;
   box-sizing: border-box;
-  height: 38px;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
   font-size: 14px;
+  font-weight: 500;
 }
 
 .quick-add-reminders {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 
 .quick-add-chip {
   height: 26px;
-  padding: 0 10px;
+  padding: 0 8.5px;
   border-radius: 999px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   background: var(--bg-muted);
   color: var(--text-muted);
   font: inherit;
-  font-size: var(--font-meta);
+  font-size: 11.5px;
+  font-weight: 600;
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.12s ease;
 }
 
 .quick-add-chip:hover {
-  border-color: var(--primary);
-  color: var(--text-base);
+  border-color: var(--primary-border);
+  background: var(--bg-hover);
+  color: var(--text-title);
 }
 
 .quick-add-chip.is-active {
@@ -386,6 +408,8 @@ onBeforeUnmount(() => {
 
 .quick-add-footer {
   margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -399,6 +423,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   color: var(--text-muted);
   font-size: var(--font-meta);
+  font-weight: 500;
 }
 
 .quick-add-message.is-error {
