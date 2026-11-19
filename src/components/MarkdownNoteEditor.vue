@@ -228,18 +228,18 @@ watch(() => props.placeholder, () => {
 
 .markdown-note-editor.theme-light :deep(.milkdown) {
   --crepe-color-background: #ffffff;
-  --crepe-color-on-background: #18181b;
+  --crepe-color-on-background: #182030;
   --crepe-color-surface: #ffffff;
-  --crepe-color-surface-low: #f8fafc;
-  --crepe-color-on-surface: #18181b;
-  --crepe-color-on-surface-variant: #52525b;
-  --crepe-color-outline: #cbd5e1;
-  --crepe-color-primary: #2563eb;
+  --crepe-color-surface-low: #f7f9fc;
+  --crepe-color-on-surface: #182030;
+  --crepe-color-on-surface-variant: #556278;
+  --crepe-color-outline: #94a3b8;
+  --crepe-color-primary: #3b6cf6;
   --crepe-color-secondary: #dbeafe;
   --crepe-color-on-secondary: #1e3a8a;
-  --crepe-color-inverse: #18181b;
+  --crepe-color-inverse: #182030;
   --crepe-color-on-inverse: #fafafa;
-  --crepe-color-inline-code: #b91c1c;
+  --crepe-color-inline-code: #be253c;
   --crepe-color-error: #dc2626;
   --crepe-color-hover: #eff6ff;
   --crepe-color-selected: #dbeafe;
@@ -249,25 +249,25 @@ watch(() => props.placeholder, () => {
 }
 
 .markdown-note-editor.theme-dark :deep(.milkdown) {
-  --crepe-color-background: #121826;
-  --crepe-color-on-background: #e8eefc;
-  --crepe-color-surface: #161f32;
-  --crepe-color-surface-low: #111827;
-  --crepe-color-on-surface: #eef2ff;
-  --crepe-color-on-surface-variant: #b9c3de;
-  --crepe-color-outline: rgba(173, 190, 230, 0.45);
-  --crepe-color-primary: #8ab4ff;
-  --crepe-color-secondary: rgba(59, 92, 163, 0.42);
-  --crepe-color-on-secondary: #e8eefc;
-  --crepe-color-inverse: #eef2ff;
-  --crepe-color-on-inverse: #111827;
+  --crepe-color-background: #101727;
+  --crepe-color-on-background: #e2eaf8;
+  --crepe-color-surface: #151e30;
+  --crepe-color-surface-low: #101726;
+  --crepe-color-on-surface: #f0f4ff;
+  --crepe-color-on-surface-variant: #9fb0cc;
+  --crepe-color-outline: rgba(154, 178, 224, 0.48);
+  --crepe-color-primary: #7ca4ff;
+  --crepe-color-secondary: rgba(66, 106, 196, 0.42);
+  --crepe-color-on-secondary: #eaf0ff;
+  --crepe-color-inverse: #f0f4ff;
+  --crepe-color-on-inverse: #101726;
   --crepe-color-inline-code: #ffb4ab;
   --crepe-color-error: #ff8f8f;
-  --crepe-color-hover: rgba(60, 89, 146, 0.18);
-  --crepe-color-selected: rgba(86, 126, 205, 0.24);
-  --crepe-color-inline-area: rgba(18, 24, 38, 0.72);
-  --crepe-shadow-1: 0 12px 28px rgba(2, 6, 23, 0.4);
-  --crepe-shadow-2: 0 18px 40px rgba(2, 6, 23, 0.5);
+  --crepe-color-hover: rgba(74, 110, 186, 0.18);
+  --crepe-color-selected: rgba(82, 130, 255, 0.24);
+  --crepe-color-inline-area: rgba(16, 23, 39, 0.72);
+  --crepe-shadow-1: 0 12px 28px rgba(2, 6, 23, 0.42);
+  --crepe-shadow-2: 0 18px 40px rgba(2, 6, 23, 0.54);
 }
 
 .markdown-note-editor :deep(.milkdown .crepe-placeholder) {

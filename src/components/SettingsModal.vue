@@ -582,7 +582,7 @@ const saveSettings = async () => {
 .shortcut-help {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 6px 12px;
+  gap: 7px 14px;
   margin: 0;
   font-size: 12px;
   color: var(--text-muted);
@@ -590,15 +590,19 @@ const saveSettings = async () => {
 
 .shortcut-help dd {
   margin: 0;
+  line-height: 20px;
 }
 
 .shortcut-help kbd {
+  display: inline-block;
   font-family: var(--font-sans);
   font-size: 11px;
-  padding: 1px 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-base);
+  font-weight: 600;
+  padding: 1px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  box-shadow: 0 1.5px 0 var(--border-strong);
+  color: var(--text-title);
   background: var(--bg-surface);
 }
 </style>
