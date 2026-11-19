@@ -205,7 +205,7 @@ const confirmRemove = (kind: LabelKind, name: string, count: number) => {
 .label-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   max-height: 220px;
   margin: 0;
   padding: 0;
@@ -218,10 +218,16 @@ const confirmRemove = (kind: LabelKind, name: string, count: number) => {
   align-items: center;
   gap: 8px;
   min-height: 36px;
-  padding: 2px 4px 2px 10px;
-  border-radius: var(--radius-xs);
-  background: var(--bg-muted);
+  padding: 3px 6px 3px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-surface);
   font-size: var(--font-meta);
+  transition: border-color 0.14s ease;
+}
+
+.label-item:hover {
+  border-color: var(--border-strong);
 }
 
 .label-name {

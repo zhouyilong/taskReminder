@@ -62,19 +62,19 @@ const toggle = (weekday: number) => {
 .weekday-preset {
   height: 30px;
   border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg-muted);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
   color: var(--text-muted);
   font: inherit;
   font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .weekday-chip {
   width: 30px;
   padding: 0;
-  font-weight: 600;
 }
 
 .weekday-preset {
@@ -83,18 +83,20 @@ const toggle = (weekday: number) => {
 
 .weekday-chip:hover,
 .weekday-preset:hover {
-  border-color: var(--primary);
-  color: var(--text-base);
+  border-color: var(--primary-border);
+  background: var(--bg-hover);
+  color: var(--text-title);
 }
 
 .weekday-chip.is-active {
-  border-color: var(--primary);
-  background: var(--primary);
+  border-color: transparent;
+  background: var(--primary-gradient);
   color: #fff;
+  box-shadow: 0 2px 6px rgba(79, 124, 255, 0.32);
 }
 
 .weekday-preset.is-active {
-  border-color: var(--primary);
+  border-color: var(--primary-border);
   background: var(--primary-soft);
   color: var(--primary-text);
 }

@@ -172,7 +172,7 @@ const confirmRestore = (item: BackupInfo) => {
 .data-backup-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   max-height: 180px;
   overflow-y: auto;
 }
@@ -181,10 +181,16 @@ const confirmRestore = (item: BackupInfo) => {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 4px 8px;
-  border-radius: var(--radius-xs);
-  background: var(--bg-muted);
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-surface);
   font-size: var(--font-meta);
+  transition: border-color 0.14s ease;
+}
+
+.data-backup-item:hover {
+  border-color: var(--border-strong);
 }
 
 .data-backup-time {
