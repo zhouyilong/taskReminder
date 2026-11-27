@@ -136,18 +136,10 @@
       stickyNoteY: null,
       stickyNoteOpacity: 0.95,
       windowOpacity: 1,
-      webdavEnabled: false,
-      webdavUrl: "",
-      webdavUsername: "",
-      webdavPassword: "",
-      webdavRootPath: "",
-      webdavSyncIntervalMinutes: 60,
-      webdavDeviceId: "mock-device",
+      deviceId: "mock-device",
       notificationTheme: "app",
       quickAddEnabled: true,
       quickAddShortcut: "CommandOrControl+Alt+N",
-      syncEncryptionEnabled: false,
-      syncPassphrase: "",
       quietHoursEnabled: false,
       quietHoursStart: "22:00",
       quietHoursEnd: "08:00",
@@ -164,7 +156,61 @@
       attentionRepeatMinutes: 0,
       notificationScreen: "cursor",
       secretStorage: "db",
+      appMode: "local",
+      cloudServerUrl: "",
+      cloudUserId: "",
+      cloudUsername: "",
+      cloudNickname: "",
+      cloudUserRole: "",
+      cloudMustChangePassword: false,
+      lastMergedAccountId: "",
+      lastMergedUsername: "",
       ...(seed.settings ?? {})
+    },
+    cloud: {
+      mode: "local",
+      state: "local",
+      loggedIn: false,
+      userId: "",
+      username: "",
+      nickname: "",
+      role: "",
+      mustChangePassword: false,
+      serverUrl: "http://104.168.101.151:8080",
+      defaultServerUrl: "http://104.168.101.151:8080",
+      pendingCount: 0,
+      lastSyncTime: null,
+      error: null,
+      isOnline: true,
+      users: [
+        {
+          id: "u-admin",
+          username: "admin",
+          nickname: "管理员",
+          role: "admin",
+          enabled: true,
+          mustChangePassword: false,
+          lastLoginAt: now(),
+          createdAt: at(-30, 9),
+          taskCount: 3,
+          recurringCount: 2,
+          recordCount: 10
+        },
+        {
+          id: "u-alice",
+          username: "alice",
+          nickname: "爱丽丝",
+          role: "user",
+          enabled: true,
+          mustChangePassword: false,
+          lastLoginAt: at(-1, 10),
+          createdAt: at(-10, 9),
+          taskCount: 5,
+          recurringCount: 1,
+          recordCount: 4
+        }
+      ],
+      ...(seed.cloud ?? {})
     }
   };
 
@@ -441,7 +487,184 @@
       emit("todo-sticky-changed", { ...state.todoSticky });
       return { ...state.todoSticky };
     },
-    get_sync_status: () => ({ status: "never", error: null, time: null }),
+    get_cloud_status: () => ({
+      mode: state.cloud.mode,
+      state: state.cloud.state,
+      loggedIn: state.cloud.loggedIn,
+      userId: state.cloud.userId,
+      username: state.cloud.username,
+      nickname: state.cloud.nickname,
+      role: state.cloud.role,
+      mustChangePassword: state.cloud.mustChangePassword,
+      serverUrl: state.cloud.serverUrl,
+      defaultServerUrl: state.cloud.defaultServerUrl,
+      pendingCount: state.cloud.pendingCount,
+      lastSyncTime: state.cloud.lastSyncTime,
+      error: state.cloud.error
+    }),
+    cloud_test_connection: () => ({ status: "ok", version: "3.0.0", schemaVersion: "3.0.0" }),
+    cloud_set_server_url: ({ serverUrl }) => {
+      state.settings.cloudServerUrl = serverUrl || "";
+      state.cloud.serverUrl = (serverUrl || "").trim() || state.cloud.defaultServerUrl;
+      return commands.get_cloud_status();
+    },
+    cloud_login: ({ payload }) => {
+      const target =
+        state.cloud.users.find(u => u.username === payload.username) || state.cloud.users[0];
+      state.cloud.loggedIn = true;
+      state.cloud.userId = target.id;
+      state.cloud.username = target.username;
+      state.cloud.nickname = target.nickname;
+      state.cloud.role = target.role;
+      state.cloud.mustChangePassword = target.mustChangePassword;
+      if (state.cloud.mode === "cloud") state.cloud.state = "connected";
+      state.settings.cloudUserId = target.id;
+      state.settings.cloudUsername = target.username;
+      state.settings.cloudNickname = target.nickname;
+      state.settings.cloudUserRole = target.role;
+      emit("cloud-status", commands.get_cloud_status());
+      return commands.get_cloud_status();
+    },
+    cloud_logout: () => {
+      state.cloud.loggedIn = false;
+      state.cloud.mode = "local";
+      state.cloud.state = "local";
+      state.cloud.userId = "";
+      state.cloud.username = "";
+      state.cloud.nickname = "";
+      state.cloud.role = "";
+      state.settings.appMode = "local";
+      emit("cloud-status", commands.get_cloud_status());
+      return commands.get_cloud_status();
+    },
+    cloud_sync_now: () => {
+      state.cloud.lastSyncTime = now();
+      state.cloud.state = "connected";
+      state.cloud.pendingCount = 0;
+      emit("cloud-status", commands.get_cloud_status());
+      return commands.get_cloud_status();
+    },
+    cloud_update_profile: ({ nickname }) => {
+      state.cloud.nickname = nickname;
+      emit("cloud-status", commands.get_cloud_status());
+      return {
+        id: state.cloud.userId,
+        username: state.cloud.username,
+        nickname,
+        role: state.cloud.role || "user",
+        enabled: true,
+        mustChangePassword: false,
+        createdAt: now()
+      };
+    },
+    cloud_change_password: () => {
+      state.cloud.mustChangePassword = false;
+      emit("cloud-status", commands.get_cloud_status());
+      return {
+        id: state.cloud.userId,
+        username: state.cloud.username,
+        nickname: state.cloud.nickname,
+        role: state.cloud.role || "user",
+        enabled: true,
+        mustChangePassword: false,
+        createdAt: now()
+      };
+    },
+    preview_switch_to_cloud: () => {
+      const localCounts = {
+        activeTasks: state.tasks.filter(t => !t.deletedAt && t.status === "PENDING").length,
+        completedTasks: state.tasks.filter(t => !t.deletedAt && t.status === "COMPLETED").length,
+        recurringTasks: state.recurringTasks.filter(t => !t.deletedAt).length,
+        reminderRecords: state.reminderRecords.filter(t => !t.deletedAt).length
+      };
+      const crossAccountWarning =
+        Boolean(state.cloud.loggedIn) &&
+        Boolean(state.settings.lastMergedAccountId) &&
+        state.settings.lastMergedAccountId !== state.cloud.userId;
+      return {
+        loggedIn: state.cloud.loggedIn,
+        userId: state.cloud.userId,
+        username: state.cloud.username,
+        nickname: state.cloud.nickname,
+        localCounts,
+        lastMergedAccountId: state.settings.lastMergedAccountId,
+        lastMergedUsername: state.settings.lastMergedUsername,
+        crossAccountWarning
+      };
+    },
+    switch_to_cloud: ({ mergeLocal }) => {
+      state.cloud.mode = "cloud";
+      state.cloud.state = "connected";
+      state.settings.appMode = "cloud";
+      if (mergeLocal) {
+        state.settings.lastMergedAccountId = state.cloud.userId;
+        state.settings.lastMergedUsername = state.cloud.username;
+      }
+      const status = commands.get_cloud_status();
+      emit("cloud-status", status);
+      return {
+        status,
+        mergeSummary: mergeLocal ? { uploaded: 2, updatedOnServer: 0, serverWins: 0, serverOnly: 0 } : null
+      };
+    },
+    preview_switch_to_local: () => {
+      const counts = {
+        activeTasks: state.tasks.filter(t => !t.deletedAt && t.status === "PENDING").length,
+        completedTasks: state.tasks.filter(t => !t.deletedAt && t.status === "COMPLETED").length,
+        recurringTasks: state.recurringTasks.filter(t => !t.deletedAt).length,
+        reminderRecords: state.reminderRecords.filter(t => !t.deletedAt).length
+      };
+      return {
+        isOnline: state.cloud.isOnline,
+        pendingCount: state.cloud.pendingCount,
+        cloudCounts: counts,
+        localCounts: counts
+      };
+    },
+    switch_to_local: ({ mergeCloud }) => {
+      state.cloud.mode = "local";
+      state.cloud.state = "local";
+      state.settings.appMode = "local";
+      const status = commands.get_cloud_status();
+      emit("cloud-status", status);
+      return { status, merged: Boolean(mergeCloud) };
+    },
+    admin_list_users: () => state.cloud.users,
+    admin_create_user: ({ payload }) => {
+      const created = {
+        id: newId("u"),
+        username: payload.username,
+        nickname: payload.nickname || "",
+        role: payload.role || "user",
+        enabled: true,
+        mustChangePassword: Boolean(payload.mustChangePassword),
+        lastLoginAt: null,
+        createdAt: now(),
+        taskCount: 0,
+        recurringCount: 0,
+        recordCount: 0
+      };
+      state.cloud.users.push(created);
+      return created;
+    },
+    admin_update_user: ({ payload }) => {
+      const u = state.cloud.users.find(item => item.id === payload.userId);
+      if (!u) throw "目标账号不存在";
+      if (payload.enabled !== undefined) u.enabled = payload.enabled;
+      if (payload.nickname !== undefined) u.nickname = payload.nickname;
+      if (payload.role !== undefined) u.role = payload.role;
+      return u;
+    },
+    admin_reset_password: ({ payload }) => {
+      const u = state.cloud.users.find(item => item.id === payload.userId);
+      if (!u) throw "目标账号不存在";
+      u.mustChangePassword = true;
+      return u;
+    },
+    admin_delete_user: ({ userId }) => {
+      state.cloud.users = state.cloud.users.filter(item => item.id !== userId);
+      return null;
+    },
     get_holiday_years: () => [2025, 2026],
     check_holiday_updates: () => ({ changed: false, years: [2025, 2026] }),
     get_notification_queue: () => [],
@@ -453,7 +676,7 @@
     list_backups: () => ({ backups: [], dir: "" }),
     create_backup_now: () => null,
     open_backup_dir: () => null,
-    "plugin:app|version": () => "2.1.1",
+    "plugin:app|version": () => "3.0.0",
     "plugin:app|name": () => "任务提醒",
     "plugin:event|listen": ({ event, handler }) => {
       const list = listeners.get(event) ?? [];

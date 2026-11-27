@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "server",
+]
+exclude = [
+    "src-tauri",
+]
+
+[workspace.package]
+version = "3.0.0"
+edition = "2021"
+
+# 密码哈希的 Argon2 在未优化的开发构建中很慢，单独开启优化。
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3

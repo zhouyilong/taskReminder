@@ -16,13 +16,16 @@ export const normalizeCompletedRetention = (value: number | null | undefined) =>
 export const completedRetentionLabel = (value: number | null | undefined) =>
   COMPLETED_RETENTION_OPTIONS.find(item => item.value === normalizeCompletedRetention(value))!.label;
 
-/** 设置中的说明：默认档位的数量上限，以及同步时以最短的设备为准。 */
-export const completedRetentionHint = (value: number | null | undefined, syncEnabled: boolean) => {
+/** 设置中的说明：默认档位的数量上限，以及云端模式多设备同步时以最短的设备为准。 */
+export const completedRetentionHint = (value: number | null | undefined, cloudMode: boolean) => {
   const days = normalizeCompletedRetention(value);
   const base = days === DEFAULT_COMPLETED_RETENTION_DAYS ? "并只保留最近 100 条，" : "";
-  const local = days === 0 ? "已完成的待办不会自动清理" : `完成超过 ${completedRetentionLabel(days)}的待办${base}自动移入回收站`;
-  return syncEnabled
-    ? `${local}；开启云同步时以所有设备中最短的为准（2.1.0 及更早的版本固定 30 天）`
+  const local =
+    days === 0
+      ? "已完成的待办不会自动清理"
+      : `完成超过 ${completedRetentionLabel(days)}的待办${base}自动移入回收站`;
+  return cloudMode
+    ? `${local}；云端模式下清理会同步到云端，多设备登录同一账号时以最短的为准`
     : local;
 };
 

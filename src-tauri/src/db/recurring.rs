@@ -66,6 +66,7 @@ impl DbManager {
                 task.remaining_count
             ],
         )?;
+        self.mark_pending(&conn, "recurring_tasks", &id)?;
         Ok(RecurringTask {
             id,
             description: task.description.clone(),
@@ -127,6 +128,7 @@ impl DbManager {
                 task.id.as_str()
             ],
         )?;
+        self.mark_pending(&conn, "recurring_tasks", &task.id)?;
         Ok(())
     }
 
@@ -145,6 +147,7 @@ impl DbManager {
              WHERE id = ? AND deleted_at IS NULL",
             params![trigger, replaces, now, task_id],
         )?;
+        self.mark_pending(&conn, "recurring_tasks", task_id)?;
         Ok(())
     }
 
@@ -155,6 +158,7 @@ impl DbManager {
             "UPDATE recurring_tasks SET is_paused = 1, updated_at = ? WHERE id = ?",
             params![now, task_id],
         )?;
+        self.mark_pending(&conn, "recurring_tasks", task_id)?;
         Ok(())
     }
 
@@ -165,6 +169,7 @@ impl DbManager {
             "UPDATE recurring_tasks SET deleted_at = ?, updated_at = ? WHERE id = ?",
             params![now, now, task_id],
         )?;
+        self.mark_pending(&conn, "recurring_tasks", task_id)?;
         Ok(())
     }
 
@@ -196,6 +201,7 @@ impl DbManager {
             "UPDATE recurring_tasks SET deleted_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL",
             params![now, task_id],
         )?;
+        self.mark_pending(&conn, "recurring_tasks", task_id)?;
         Ok(())
     }
 }
@@ -206,8 +212,8 @@ pub(super) fn recurring_from_row(
     Ok(RecurringTask {
         id: row.get(0)?,
         description: row.get(1)?,
-        task_type: row.get(2)?,
-        status: row.get(3)?,
+        task_type: TaskType::parse(&row.get::<_, Option<String>>(2)?.unwrap_or_default()),
+        status: TaskStatus::parse(&row.get::<_, Option<String>>(3)?.unwrap_or_default()),
         created_at: row.get(4)?,
         completed_at: row.get(5)?,
         reminder_time: None,
@@ -219,7 +225,9 @@ pub(super) fn recurring_from_row(
         end_time: row.get(11)?,
         // 空值按区间间隔（V1.4.1 迁移的默认值），不认识的模式原样保留。
         repeat_mode: row
-            .get::<_, Option<RepeatMode>>(12)?
+            .get::<_, Option<String>>(12)?
+            .as_deref()
+            .map(RepeatMode::parse)
             .unwrap_or(RepeatMode::IntervalRange),
         schedule_time: row.get(13)?,
         schedule_weekday: row.get(14)?,

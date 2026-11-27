@@ -1,9 +1,8 @@
-// 应用设置草稿、同步状态与快速添加快捷键（模块级单例）。
-import { computed, reactive, ref } from "vue";
+// 应用设置草稿与快速添加快捷键（模块级单例）。
+import { reactive, ref } from "vue";
 import { api } from "../api";
-import { errorMessage, formatDateTime } from "../format";
-import { syncStateLabel, syncStateTone } from "../syncStatus";
-import type { AppSettings, SyncStatus } from "../types";
+import { errorMessage } from "../format";
+import type { AppSettings } from "../types";
 import { useUiPrefs } from "./useUiPrefs";
 import { useUpdater } from "./useUpdater";
 
@@ -19,18 +18,10 @@ const settingsDraft = reactive<AppSettings>({
   stickyNoteY: null,
   stickyNoteOpacity: 0.95,
   windowOpacity: 1.0,
-  webdavEnabled: false,
-  webdavUrl: "",
-  webdavUsername: "",
-  webdavPassword: "",
-  webdavRootPath: "",
-  webdavSyncIntervalMinutes: 60,
-  webdavDeviceId: "",
+  deviceId: "",
   notificationTheme: "app",
   quickAddEnabled: true,
   quickAddShortcut: "CommandOrControl+Alt+N",
-  syncEncryptionEnabled: false,
-  syncPassphrase: "",
   quietHoursEnabled: false,
   quietHoursStart: "22:00",
   quietHoursEnd: "08:00",
@@ -45,39 +36,25 @@ const settingsDraft = reactive<AppSettings>({
   attentionIntensity: 2,
   attentionColor: "",
   attentionRepeatMinutes: 0,
-  notificationScreen: "cursor"
+  notificationScreen: "cursor",
+  appMode: "local",
+  cloudServerUrl: "",
+  cloudUserId: "",
+  cloudUsername: "",
+  cloudNickname: "",
+  cloudUserRole: "",
+  cloudMustChangePassword: false,
+  lastMergedAccountId: "",
+  lastMergedUsername: ""
 });
-const syncStatus = ref<SyncStatus | null>(null);
 const quickAddShortcutError = ref("");
 const settingsOpen = ref(false);
-const webdavOpen = ref(false);
 const dataOpen = ref(false);
-
-const syncStatusLabel = computed(() => syncStateLabel(syncStatus.value?.status));
-
-const syncStatusTone = computed(() =>
-  syncStateTone(syncStatus.value?.status, syncStatus.value?.error)
-);
-
-const syncStatusTitle = computed(() => {
-  const parts = [`云同步：${syncStatusLabel.value}`];
-  if (syncStatus.value?.time) {
-    parts.push(`时间：${formatDateTime(syncStatus.value.time)}`);
-  }
-  if (syncStatus.value?.error) {
-    parts.push(`错误：${syncStatus.value.error}`);
-  }
-  return parts.join("\n");
-});
 
 const loadSettings = async () => {
   const data = await api.getSettings();
   Object.assign(settingsDraft, data);
   useUiPrefs().windowOpacity.value = data.windowOpacity;
-};
-
-const refreshSyncStatus = async () => {
-  syncStatus.value = await api.getSyncStatus();
 };
 
 // 按已保存的设置重新注册快速添加快捷键，并记录失败原因（如被其他程序占用）。
@@ -98,11 +75,6 @@ const openSettings = async () => {
   settingsOpen.value = true;
 };
 
-const openWebdav = async () => {
-  await loadSettings();
-  webdavOpen.value = true;
-};
-
 const openData = () => {
   settingsOpen.value = false;
   dataOpen.value = true;
@@ -110,18 +82,11 @@ const openData = () => {
 
 export const useSettings = () => ({
   settingsOpen,
-  webdavOpen,
   dataOpen,
   openData,
   openSettings,
-  openWebdav,
   settingsDraft,
-  syncStatus,
-  syncStatusLabel,
-  syncStatusTone,
-  syncStatusTitle,
   quickAddShortcutError,
   loadSettings,
-  refreshSyncStatus,
-  applyQuickAddShortcut,
+  applyQuickAddShortcut
 });

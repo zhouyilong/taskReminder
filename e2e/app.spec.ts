@@ -673,3 +673,34 @@ test("待办清单便签右键复制标题与打开便签", async ({ todoSticky:
   const [call] = await invokeCalls(page, "open_sticky_note");
   expect(call.args.payload).toMatchObject({ title: "买菜", besideWindow: "sticky-todo-list" });
 });
+
+test("v3.0.0：本地模式切换云端模式（登录 + 合并确认）与管理员账号管理", async ({ app }) => {
+  // 默认标题栏显示“本地”徽标
+  await expect(app.locator(".mode-badge")).toHaveText("本地");
+
+  // 打开设置并选择“云端模式”，未登录时弹出登录框
+  await app.locator('.titlebar button[title="设置"]').click();
+  await app.locator(".mode-card", { hasText: "云端模式" }).click();
+  await expect(app.locator(".cloud-auth-card")).toBeVisible();
+
+  // 以管理员身份登录，自动进入“切换至云端模式”合并确认弹窗
+  await app.locator('.cloud-auth-card input[placeholder="请输入用户名"]').fill("admin");
+  await app.locator('.cloud-auth-card input[placeholder="请输入密码"]').fill("AdminPass123!");
+  await app.locator('.cloud-auth-card button[type="submit"]').click();
+
+  await expect(app.locator(".modal-header", { hasText: "切换至云端模式" })).toBeVisible();
+  await app.locator("button", { hasText: "确认切换至云端模式" }).click();
+
+  // 标题栏切换为“云端 · 管理员”
+  await expect(app.locator(".mode-badge")).toHaveText("云端 · 管理员");
+
+  // 管理员可在设置中打开“账号管理”并新建用户
+  await app.locator('.titlebar button[title="设置"]').click();
+  await app.locator("button", { hasText: "账号管理" }).click();
+  await expect(app.locator(".modal-header", { hasText: "账号管理（管理员）" })).toBeVisible();
+  await app.locator("button", { hasText: "+ 新建账号" }).click();
+  await app.locator('.admin-subcard input[placeholder*="2-64"]').fill("charlie");
+  await app.locator('.admin-subcard input[placeholder*="可选"]').fill("查理");
+  await app.locator('.admin-subcard button[type="submit"]').click();
+  await expect(app.locator(".admin-table")).toContainText("charlie");
+});

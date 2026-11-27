@@ -105,7 +105,7 @@ pub async fn import_data(
 
 #[tauri::command]
 pub fn list_backups(state: State<AppState>) -> ApiResult<BackupListPayload> {
-    let dir = backup::backup_dir(&state.db.db_path());
+    let dir = backup::backup_dir(&state.db.local_db_path());
     Ok(BackupListPayload {
         dir: dir.to_string_lossy().to_string(),
         backups: backup::list_backups(&dir),
@@ -125,7 +125,7 @@ pub fn create_backup_now(state: State<AppState>) -> ApiResult<()> {
 /// 在系统文件管理器中打开备份目录（只打开固定的数据目录 `backups/`，不接受前端传入的路径）。
 #[tauri::command]
 pub fn open_backup_dir(state: State<AppState>) -> ApiResult<()> {
-    let dir = backup::backup_dir(&state.db.db_path());
+    let dir = backup::backup_dir(&state.db.local_db_path());
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建备份目录失败：{}", e))?;
     let program = if cfg!(target_os = "windows") {
         "explorer.exe"
@@ -145,8 +145,9 @@ pub fn open_backup_dir(state: State<AppState>) -> ApiResult<()> {
 /// 把本地备份按“较新的版本胜出”合并回当前数据库：找回丢失或被误删清理的数据，不会覆盖之后的修改。
 #[tauri::command]
 pub fn restore_backup(state: State<AppState>, name: String) -> ApiResult<()> {
+    let local_path = state.db.local_db_path();
     let db_path = state.db.db_path();
-    let source = into_api(backup::resolve_backup(&db_path, &name))?;
+    let source = into_api(backup::resolve_backup(&local_path, &name))?;
     // 先复制一份再合并，避免合并时改动备份文件（补列等）。
     let temp =
         std::env::temp_dir().join(format!("taskreminder-restore-{}.db", uuid::Uuid::new_v4()));

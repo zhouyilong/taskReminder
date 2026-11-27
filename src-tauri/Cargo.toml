@@ -1,12 +1,13 @@
 [package]
 name = "task_reminder_app"
-version = "2.2.9"
+version = "3.0.0"
 edition = "2021"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+task_reminder_core = { path = "../crates/core" }
 tauri = { version = "2", features = [ "tray-icon" ] }
 tauri-plugin-process = "2"
 # 只发布 MSI（更新包即安装包本身），不需要解压 .zip / .tar.gz 的 `zip` 特性；
@@ -22,24 +23,22 @@ rusqlite = { version = "0.40", features = ["bundled", "chrono"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.35"
 # 与 tauri-plugin-updater 共用 reqwest 0.13 + rustls（ring），见 src/http.rs。
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls-no-provider", "charset", "http2", "system-proxy"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "stream", "rustls-no-provider", "charset", "http2", "system-proxy"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-base64 = "0.21"
+futures-util = "0.3"
 fs2 = "0.4"
 thiserror = "1.0"
 uuid = { version = "1", features = ["v4"] }
 dirs-next = "2.0"
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "sync"] }
 cron = "0.17"
-aes-gcm = "0.10"
-argon2 = "0.5"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.10"
-# WebDAV 密码与同步密码存 Windows 凭据管理器（其他平台仍存本地数据库）。
+# 云端登录 Refresh Token 存 Windows 凭据管理器（其他平台仍存本地数据库）。
 keyring = { version = "3", features = ["windows-native"] }
 windows = { version = "0.52", features = ["UI_ViewManagement", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
@@ -48,10 +47,3 @@ windows = { version = "0.52", features = ["UI_ViewManagement", "Win32_Foundation
 # 生产构建保留 custom-protocol，从打包后的前端资源加载。
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
-
-# 同步加密的 Argon2 在未优化的开发构建中很慢（每次同步数秒），单独开启优化。
-[profile.dev.package.argon2]
-opt-level = 3
-
-[profile.dev.package.blake2]
-opt-level = 3

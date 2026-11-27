@@ -536,6 +536,24 @@ pub fn toggle_all_sticky_windows(app: &tauri::AppHandle) {
     }
 }
 
+/// 模式切换或远端同步后安全隐藏旧便签窗口，并按当前活动库重新恢复打开状态的便签与待办清单便签。
+pub fn reset_sticky_windows_for_active_db(app: &tauri::AppHandle, db: &DbManager) {
+    let handle = app.clone();
+    let db = db.clone();
+    let _ = app.run_on_main_thread(move || {
+        for (label, window) in handle.webview_windows() {
+            if label.starts_with(STICKY_NOTE_ITEM_PREFIX) {
+                let _ = window.hide();
+            }
+        }
+        if let Err(err) = restore_open_sticky_note_items(&handle, &db) {
+            eprintln!("[sticky-note] 重置便签窗口失败: {}", err);
+        }
+        super::todo_sticky::restore_todo_sticky(&handle, &db);
+        let _ = handle.emit("sticky-note-changed", "");
+    });
+}
+
 /// 便签窗口事件：关闭时隐藏并记为已关闭，移动与缩放时保存位置和尺寸
 /// （越界校正造成的移动不保存）。
 pub fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {

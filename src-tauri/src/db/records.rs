@@ -56,8 +56,9 @@ impl DbManager {
         conn.execute(
             "INSERT INTO reminder_records (id, reminder_id, description, type, trigger_time, close_time, action, updated_at, deleted_at)
              VALUES (?, ?, ?, ?, ?, NULL, 'PENDING', ?, NULL)",
-            params![id, reminder_id, description, &reminder_type, now, now],
+            params![id, reminder_id, description, reminder_type.as_str(), now, now],
         )?;
+        self.mark_pending(&conn, "reminder_records", &id)?;
         Ok(ReminderRecord {
             id,
             reminder_id: reminder_id.to_string(),
@@ -80,8 +81,9 @@ impl DbManager {
         let now = now_string();
         conn.execute(
             "UPDATE reminder_records SET action = ?, close_time = ?, updated_at = ? WHERE id = ?",
-            params![&action, now, now, record_id],
+            params![action.as_str(), now, now, record_id],
         )?;
+        self.mark_pending(&conn, "reminder_records", record_id)?;
         Ok(())
     }
 
@@ -92,6 +94,7 @@ impl DbManager {
             "UPDATE reminder_records SET deleted_at = ?, updated_at = ? WHERE id = ?",
             params![now, now, record_id],
         )?;
+        self.mark_pending(&conn, "reminder_records", record_id)?;
         Ok(())
     }
 
@@ -104,6 +107,7 @@ impl DbManager {
                 "UPDATE reminder_records SET deleted_at = ?, updated_at = ? WHERE id = ?",
                 params![now, now, id],
             )?;
+            self.mark_pending(&tx, "reminder_records", id)?;
         }
         tx.commit()?;
         Ok(())
@@ -114,13 +118,26 @@ impl DbManager {
         &self,
         before: &NaiveDateTime,
     ) -> Result<usize, AppError> {
-        let conn = self.get_conn()?;
+        let mut conn = self.get_conn()?;
         let now = now_string();
-        let changed = conn.execute(
+        let cutoff = format_datetime(before);
+        let tx = conn.transaction()?;
+        let ids: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT id FROM reminder_records WHERE deleted_at IS NULL AND trigger_time < ?1",
+            )?;
+            let rows = stmt.query_map([cutoff.as_str()], |row| row.get::<_, String>(0))?;
+            rows.filter_map(Result::ok).collect()
+        };
+        let changed = tx.execute(
             "UPDATE reminder_records SET deleted_at = ?1, updated_at = ?1
              WHERE deleted_at IS NULL AND trigger_time < ?2",
-            params![now, format_datetime(before)],
+            params![now, cutoff],
         )?;
+        for id in &ids {
+            self.mark_pending(&tx, "reminder_records", id)?;
+        }
+        tx.commit()?;
         Ok(changed)
     }
 }
@@ -130,10 +147,10 @@ pub(super) fn record_from_row(row: &rusqlite::Row<'_>) -> Result<ReminderRecord,
         id: row.get(0)?,
         reminder_id: row.get(1)?,
         description: row.get(2)?,
-        reminder_type: row.get(3)?,
+        reminder_type: ReminderKind::parse(&row.get::<_, Option<String>>(3)?.unwrap_or_default()),
         trigger_time: row.get(4)?,
         close_time: row.get(5)?,
-        action: row.get(6)?,
+        action: ReminderAction::parse(&row.get::<_, Option<String>>(6)?.unwrap_or_default()),
         updated_at: row.get(7)?,
         deleted_at: row.get(8)?,
     })

@@ -18,7 +18,7 @@
         <div class="modal-body">
           <slot />
         </div>
-        <div class="modal-actions">
+        <div v-if="!hideFooter" class="modal-actions">
           <button class="button secondary" type="button" @click="onClose">取消</button>
           <button class="button" type="button" @click="onConfirm">确认</button>
         </div>
@@ -34,6 +34,7 @@ const props = defineProps<{
   open: boolean;
   title: string;
   showDelete?: boolean;
+  hideFooter?: boolean;
 }>();
 
 const emit = defineEmits(["close", "confirm", "delete"]);

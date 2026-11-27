@@ -60,6 +60,31 @@ pub fn db_path(data_dir: &Path) -> PathBuf {
     data_dir.join("taskreminder.db")
 }
 
+/// 云端模式按账号隔离的本地镜像库路径：`accounts/<user_id>.db`。
+pub fn account_db_path(local_db_path: &Path, user_id: &str) -> PathBuf {
+    let safe_id: String = user_id
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let filename = if safe_id.is_empty() {
+        "default.db".to_string()
+    } else {
+        format!("{}.db", safe_id)
+    };
+    local_db_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("accounts")
+        .join(filename)
+}
+
 pub fn lock_path(data_dir: &Path) -> PathBuf {
     data_dir.join(".taskreminder.lock")
 }

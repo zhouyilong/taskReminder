@@ -12,6 +12,10 @@ export type RecurringMode =
   | "MONTHLY_LAST_WORKDAY"
   | "CRON";
 
+export type AppMode = "local" | "cloud";
+export type UserRole = "admin" | "user";
+export type CloudSyncState = "local" | "connected" | "syncing" | "offline" | "auth_required";
+
 export interface Task {
   id: string;
   description: string;
@@ -121,25 +125,11 @@ export interface AppSettings {
   stickyNoteY?: number | null;
   stickyNoteOpacity: number;
   windowOpacity: number;
-  webdavEnabled: boolean;
-  webdavUrl: string;
-  webdavUsername: string;
-  webdavPassword: string;
-  webdavRootPath: string;
-  webdavSyncIntervalMinutes: number;
-  webdavLastSyncTime?: string | null;
-  webdavLastLocalChangeTime?: string | null;
-  webdavLastSyncStatus?: string | null;
-  webdavLastSyncError?: string | null;
-  webdavDeviceId: string;
+  deviceId: string;
   notificationTheme: "system" | "app" | "light" | "dark";
   quickAddEnabled: boolean;
   /** Tauri 加速键格式，如 CommandOrControl+Alt+N。 */
   quickAddShortcut: string;
-  /** 云同步端到端加密。 */
-  syncEncryptionEnabled: boolean;
-  /** 同步密码，只保存在本机。 */
-  syncPassphrase: string;
   /** 勿扰时段（HH:mm，支持跨午夜）：期间提醒只记录不弹窗，结束后一次性弹出。 */
   quietHoursEnabled: boolean;
   quietHoursStart: string;
@@ -160,16 +150,27 @@ export interface AppSettings {
   attentionEffect: AttentionEffect;
   /** 全屏效果持续到提醒处理完；否则约 6 秒后淡出。 */
   attentionUntilHandled: boolean;
-  /** 光晕强度：1 柔和 / 2 标准（默认）/ 3 较强 / 4 强烈 / 5 最强，越强越向屏幕中间延伸。 */
+  /** 光晕强度：1 柔和 / 2 标准（默认）/ 3 较强 / 4 强烈 / 5 最强。 */
   attentionIntensity: number;
-  /** 光晕颜色 `#rrggbb`，空字符串为默认（跟随主题的蓝色）；错过的提醒仍用警示色。 */
+  /** 光晕颜色 `#rrggbb`，空字符串为默认。 */
   attentionColor: string;
   /** 提醒未处理时每隔几分钟再次提醒：0（不重复）/ 2 / 5 / 10。 */
   attentionRepeatMinutes: number;
   /** 提醒弹窗出现的屏幕：鼠标所在屏幕 / 主屏幕。 */
   notificationScreen: NotificationScreen;
-  /** 密码存放位置（只读）：keyring 为 Windows 凭据管理器，db 为本机数据库。 */
+  /** 凭据存放位置（只读）：keyring 为 Windows 凭据管理器，db 为本机数据库。 */
   secretStorage?: "db" | "keyring" | string;
+  /** 当前运行模式：本地模式 / 云端模式。 */
+  appMode: AppMode;
+  /** 自定义服务端地址（空字符串为内置官方服务地址）。 */
+  cloudServerUrl: string;
+  cloudUserId: string;
+  cloudUsername: string;
+  cloudNickname: string;
+  cloudUserRole: string;
+  cloudMustChangePassword: boolean;
+  lastMergedAccountId: string;
+  lastMergedUsername: string;
 }
 
 export type AttentionEffect = "off" | "edge" | "banner";
@@ -181,11 +182,85 @@ export interface UiStatePayload {
   windowOpacity: number;
 }
 
-export interface SyncStatus {
-  /** 状态码（`SyncStateCode`），文案用 `syncStateLabel` 映射。 */
-  status: string;
+export interface CloudStatus {
+  mode: AppMode;
+  state: CloudSyncState | string;
+  loggedIn: boolean;
+  userId: string;
+  username: string;
+  nickname: string;
+  role: UserRole | string;
+  mustChangePassword: boolean;
+  serverUrl: string;
+  defaultServerUrl: string;
+  pendingCount: number;
+  lastSyncTime?: string | null;
   error?: string | null;
-  time?: string | null;
+}
+
+export interface CloudHealthResponse {
+  status: string;
+  version: string;
+  schemaVersion: string;
+}
+
+export interface CloudUserInfo {
+  id: string;
+  username: string;
+  nickname: string;
+  role: UserRole;
+  enabled: boolean;
+  mustChangePassword: boolean;
+  lastLoginAt?: string | null;
+  createdAt: string;
+}
+
+export interface AdminUserSummary extends CloudUserInfo {
+  taskCount: number;
+  recurringCount: number;
+  recordCount: number;
+}
+
+export interface BusinessDataCounts {
+  activeTasks: number;
+  completedTasks: number;
+  recurringTasks: number;
+  reminderRecords: number;
+}
+
+export interface SyncMergeSummary {
+  uploaded: number;
+  updatedOnServer: number;
+  serverWins: number;
+  serverOnly: number;
+}
+
+export interface SwitchToCloudPreview {
+  loggedIn: boolean;
+  userId: string;
+  username: string;
+  nickname: string;
+  localCounts: BusinessDataCounts;
+  lastMergedAccountId: string;
+  lastMergedUsername: string;
+  crossAccountWarning: boolean;
+}
+
+export interface SwitchToCloudResult {
+  status: CloudStatus;
+  mergeSummary?: SyncMergeSummary | null;
+}
+
+export interface SwitchToLocalPreview {
+  isOnline: boolean;
+  pendingCount: number;
+  cloudCounts: BusinessDataCounts;
+  localCounts: BusinessDataCounts;
+}
+
+export interface SwitchToLocalResult {
+  status: CloudStatus;
+  merged: boolean;
 }
 
 export interface NotificationPayload {

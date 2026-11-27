@@ -3,7 +3,7 @@
 use super::*;
 
 impl DbManager {
-    pub(super) fn ensure_version_table(&self, conn: &Connection) -> Result<(), AppError> {
+    pub(super) fn ensure_version_table_on(conn: &Connection) -> Result<(), AppError> {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS schema_version (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -26,8 +26,8 @@ impl DbManager {
         Ok(())
     }
 
-    pub(super) fn apply_migrations(&self, conn: &mut Connection) -> Result<(), AppError> {
-        let current = self.get_current_version(conn)?;
+    pub(super) fn apply_migrations_on(conn: &mut Connection) -> Result<(), AppError> {
+        let current = Self::get_current_version_on(conn)?;
         let scripts = migration_scripts();
 
         for script in scripts {
@@ -44,7 +44,7 @@ impl DbManager {
         Ok(())
     }
 
-    pub(super) fn get_current_version(&self, conn: &Connection) -> Result<String, AppError> {
+    pub(super) fn get_current_version_on(conn: &Connection) -> Result<String, AppError> {
         let version: Option<String> = conn
             .query_row(
                 "SELECT version FROM schema_version WHERE id = 1",
@@ -216,6 +216,11 @@ pub(super) fn migration_scripts() -> Vec<MigrationScript> {
             version: "2.2.6".to_string(),
             description: "add task urgent".to_string(),
             sql: include_str!("../../migrations/V2.2.6__add_task_urgent.sql"),
+        },
+        MigrationScript {
+            version: "3.0.0".to_string(),
+            description: "cloud mode and remove webdav".to_string(),
+            sql: include_str!("../../migrations/V3.0.0__cloud_mode_and_remove_webdav.sql"),
         },
     ]
 }

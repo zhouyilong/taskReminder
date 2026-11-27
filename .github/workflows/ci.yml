@@ -29,6 +29,28 @@ jobs:
           HOLIDAYS_CORRECTION: ${{ contains(github.event.pull_request.title, 'holidays-correction') || contains(github.event.head_commit.message, 'holidays-correction') }}
         run: node scripts/check-holidays.mjs
 
+  # 共享模型 crate 与云端单体服务检查（crates/core + server）。
+  server:
+    name: server & core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt (workspace)
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy (workspace)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test (workspace)
+        run: cargo test --workspace
+
   check:
     name: check (${{ matrix.os }})
     strategy:

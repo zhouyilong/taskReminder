@@ -1270,3 +1270,59 @@ fn todo_sticky_state_defaults_and_roundtrips() {
     assert_eq!(closed.color, "green", "颜色随其他状态保留");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn v2_2_6_upgrades_losslessly_to_v3_0_0_local_mode_and_clears_webdav_secrets() {
+    let dir = std::env::temp_dir().join(format!("taskreminder-v3-upgrade-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("taskreminder.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        create_schema_up_to(&conn, "2.2.6").unwrap();
+        conn.execute(
+            "UPDATE settings
+             SET webdav_enabled = 1, webdav_url = 'https://dav.example.com',
+                 webdav_username = 'olduser', webdav_password = 'secret-pw',
+                 webdav_root_path = '/tasks', webdav_sync_interval_minutes = 60,
+                 webdav_device_id = 'dev-keep-me', sync_passphrase = 'secret-passphrase'
+             WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tasks (id, description, type, status, created_at, updated_at)
+             VALUES ('legacy-task-1', '升级前待办', 'ONE_TIME', 'PENDING', '2026-11-26T09:00:00', '2026-11-26T09:00:00')",
+            [],
+        )
+        .unwrap();
+    }
+
+    let db = DbManager::new(path.clone()).unwrap();
+    let settings = db.load_settings().unwrap();
+    assert_eq!(
+        settings.app_mode,
+        AppMode::Local,
+        "老版本升级后默认进入本地模式"
+    );
+    assert_eq!(settings.device_id, "dev-keep-me", "保留原设备 ID");
+
+    let tasks = db.list_active_tasks().unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].id, "legacy-task-1");
+
+    // 确认敏感 WebDAV 字段已在升级迁移中清空
+    let conn = Connection::open(&path).unwrap();
+    let (enabled, pw, pp): (i64, String, String) = conn
+        .query_row(
+            "SELECT webdav_enabled, COALESCE(webdav_password, ''), COALESCE(sync_passphrase, '') FROM settings WHERE id = 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(enabled, 0);
+    assert!(pw.is_empty());
+    assert!(pp.is_empty());
+
+    drop(db);
+    let _ = std::fs::remove_dir_all(dir);
+}

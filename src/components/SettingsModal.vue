@@ -1,5 +1,120 @@
 <template>
   <Modal :open="settingsOpen" title="应用设置" @close="settingsOpen = false" @confirm="saveSettings">
+    <!-- 运行模式与云端服务（v3.0.0） -->
+    <div class="modal-section">
+      <div class="cloud-section-header">
+        <span class="cell-title">运行模式</span>
+        <span class="field-hint">随时可在本地与云端模式间安全切换与双向合并</span>
+      </div>
+      <div class="mode-selector-grid">
+        <button
+          type="button"
+          class="mode-card"
+          :class="{ active: !isCloudMode }"
+          :disabled="modeSwitching"
+          @click="handleSelectMode('local')"
+        >
+          <div class="mode-card-title">本地模式</div>
+          <div class="mode-card-desc">数据仅保存在当前设备，无需登录，随时离线使用。</div>
+        </button>
+        <button
+          type="button"
+          class="mode-card"
+          :class="{ active: isCloudMode }"
+          :disabled="modeSwitching"
+          @click="handleSelectMode('cloud')"
+        >
+          <div class="mode-card-title">云端模式</div>
+          <div class="mode-card-desc">登录账号后数据存储在云端服务，支持多设备实时同步。</div>
+        </button>
+      </div>
+
+      <!-- 云端账号信息条 -->
+      <div class="cloud-account-box">
+        <template v-if="cloudStatus?.loggedIn">
+          <div class="cloud-account-meta">
+            <div class="cloud-account-name">
+              <strong>{{ cloudStatus.nickname || cloudStatus.username }}</strong>
+              <span class="cell-muted">(@{{ cloudStatus.username }})</span>
+              <span class="chip" :class="cloudStatus.role === 'admin' ? 'is-recurring' : 'is-task'">
+                {{ cloudStatus.role === "admin" ? "管理员" : "普通用户" }}
+              </span>
+            </div>
+            <div class="field-hint">
+              状态：{{ syncStateLabel(cloudStatus.state) }}
+              <span v-if="cloudStatus.pendingCount > 0"> · {{ cloudStatus.pendingCount }} 条待同步</span>
+              <span v-if="cloudStatus.lastSyncTime"> · 最近同步 {{ formatDateTime(cloudStatus.lastSyncTime) }}</span>
+            </div>
+          </div>
+          <div class="cloud-account-actions">
+            <button
+              v-if="isCloudMode"
+              type="button"
+              class="button secondary compact-btn"
+              :disabled="cloudSyncing"
+              @click="handleManualSync"
+            >
+              {{ cloudSyncing ? "同步中..." : "立即同步" }}
+            </button>
+            <button type="button" class="button secondary compact-btn" @click="openProfileModal">
+              资料与改密
+            </button>
+            <button
+              v-if="isAdmin"
+              type="button"
+              class="button secondary compact-btn"
+              @click="openAdminUsers"
+            >
+              账号管理
+            </button>
+            <button type="button" class="button danger compact-btn" @click="handleLogout">
+              退出登录
+            </button>
+          </div>
+        </template>
+        <template v-else>
+          <div class="cloud-account-meta">
+            <div class="cell-title">尚未登录云端账号</div>
+            <div class="field-hint">登录后可一键切换至云端模式，或在多台设备间同步待办与便签。</div>
+          </div>
+          <button type="button" class="button compact-btn" @click="openLoginModal(false)">
+            登录云端账号
+          </button>
+        </template>
+      </div>
+
+      <!-- 服务端地址配置 -->
+      <div class="form-row compact" style="margin-top: 8px;">
+        <label>云端服务地址</label>
+        <input
+          class="input"
+          v-model="serverUrlInput"
+          :placeholder="defaultServerUrl"
+          style="flex: 1"
+        />
+        <button type="button" class="button secondary" :disabled="serverTesting" @click="handleTestServerUrl">
+          {{ serverTesting ? "测试中..." : "测试连接" }}
+        </button>
+        <button type="button" class="button secondary" :disabled="serverSaving" @click="handleSaveServerUrl">
+          应用地址
+        </button>
+        <button
+          v-if="serverUrlInput"
+          type="button"
+          class="button secondary"
+          @click="handleRestoreDefaultServer"
+        >
+          恢复默认
+        </button>
+      </div>
+      <div v-if="insecureServerWarning" class="cloud-banner is-warning" style="margin-top: 6px;">
+        当前填写的是非加密 HTTP 公网地址，账号与业务数据将以明文传输，建议配置 HTTPS。
+      </div>
+      <div v-if="serverHint" class="form-row compact" style="margin-top: 4px;">
+        <span class="field-hint" :class="{ 'is-error': serverHintError }">{{ serverHint }}</span>
+      </div>
+    </div>
+
     <div class="modal-section">
       <div class="form-row compact">
         <label>
@@ -137,7 +252,7 @@
         <select class="select" v-model.number="settingsDraft.completedRetentionDays">
           <option v-for="item in COMPLETED_RETENTION_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
         </select>
-        <span class="field-hint">{{ completedRetentionHint(settingsDraft.completedRetentionDays, settingsDraft.webdavEnabled) }}</span>
+        <span class="field-hint">{{ completedRetentionHint(settingsDraft.completedRetentionDays, isCloudMode) }}</span>
       </div>
       <div class="form-row compact">
         <label>自动备份保留</label>
@@ -339,9 +454,12 @@ import { formatQuietHoursHint } from "../quietHours";
 import { acceleratorFromEvent, formatAccelerator } from "../shortcut";
 import { formatVersionLabel, normalizeUpdateProxyUrl } from "../update";
 import { useAppData } from "../composables/useAppData";
+import { useCloud } from "../composables/useCloud";
 import { useSettings } from "../composables/useSettings";
 import { useUiPrefs } from "../composables/useUiPrefs";
 import { useUpdater } from "../composables/useUpdater";
+import { isInsecureRemoteUrl } from "../cloudMode";
+import { syncStateLabel } from "../syncStatus";
 import { playChime } from "../notificationSound";
 import { SHORTCUT_HELP } from "../keyboard";
 import { AUTO_BACKUP_KEEP_OPTIONS, COMPLETED_RETENTION_OPTIONS, completedRetentionHint } from "../retention";
@@ -366,9 +484,117 @@ const {
   settingsDraft,
   quickAddShortcutError,
   applyQuickAddShortcut,
-  refreshSyncStatus,
   openData
 } = useSettings();
+const {
+  cloudStatus,
+  cloudSyncing,
+  isCloudMode,
+  isAdmin,
+  modeSwitching,
+  refreshCloudStatus,
+  syncCloudNow,
+  openLoginModal,
+  startSwitchToCloud,
+  startSwitchToLocal,
+  logoutCloud,
+  openAdminUsers,
+  openProfileModal
+} = useCloud();
+
+const serverUrlInput = ref("");
+const serverTesting = ref(false);
+const serverSaving = ref(false);
+const serverHint = ref("");
+const serverHintError = ref(false);
+
+const defaultServerUrl = computed(
+  () => cloudStatus.value?.defaultServerUrl || "http://104.168.101.151:8080"
+);
+const insecureServerWarning = computed(() =>
+  isInsecureRemoteUrl(serverUrlInput.value.trim() || defaultServerUrl.value)
+);
+
+watch(settingsOpen, open => {
+  if (open) {
+    serverUrlInput.value = settingsDraft.cloudServerUrl || "";
+    serverHint.value = "";
+    serverHintError.value = false;
+  }
+});
+
+const handleSelectMode = async (target: "local" | "cloud") => {
+  if (target === "cloud" && !isCloudMode.value) {
+    settingsOpen.value = false;
+    await startSwitchToCloud();
+  } else if (target === "local" && isCloudMode.value) {
+    settingsOpen.value = false;
+    await startSwitchToLocal();
+  }
+};
+
+const handleManualSync = async () => {
+  serverHint.value = "";
+  serverHintError.value = false;
+  try {
+    await syncCloudNow();
+    serverHint.value = "同步完成";
+  } catch (error) {
+    serverHintError.value = true;
+    serverHint.value = `同步失败：${errorMessage(error)}`;
+  }
+};
+
+const handleLogout = async () => {
+  if (!confirm("退出登录将吊销当前会话并清理本机账号缓存，确认退出？")) {
+    return;
+  }
+  try {
+    await logoutCloud();
+    serverHint.value = "已退出云端账号";
+    serverHintError.value = false;
+  } catch (error) {
+    serverHintError.value = true;
+    serverHint.value = `退出失败：${errorMessage(error)}`;
+  }
+};
+
+const handleTestServerUrl = async () => {
+  serverTesting.value = true;
+  serverHint.value = "";
+  serverHintError.value = false;
+  try {
+    const res = await api.cloudTestConnection(serverUrlInput.value.trim());
+    serverHint.value = `连接成功（服务端 v${res.version}，Schema ${res.schemaVersion}）`;
+  } catch (error) {
+    serverHintError.value = true;
+    serverHint.value = errorMessage(error);
+  } finally {
+    serverTesting.value = false;
+  }
+};
+
+const handleSaveServerUrl = async () => {
+  serverSaving.value = true;
+  serverHint.value = "";
+  serverHintError.value = false;
+  try {
+    const status = await api.cloudSetServerUrl(serverUrlInput.value.trim());
+    cloudStatus.value = status;
+    settingsDraft.cloudServerUrl = serverUrlInput.value.trim();
+    serverHint.value = "服务端地址已更新";
+  } catch (error) {
+    serverHintError.value = true;
+    serverHint.value = errorMessage(error);
+  } finally {
+    serverSaving.value = false;
+  }
+};
+
+const handleRestoreDefaultServer = async () => {
+  serverUrlInput.value = "";
+  await handleSaveServerUrl();
+};
 const { uiScale, windowOpacity } = useUiPrefs();
 const {
   updatePreferences,
@@ -507,7 +733,7 @@ const saveSettings = async () => {
   updatePreferences.proxyUrl = normalizeUpdateProxyUrl(updatePreferencesDraft.proxyUrl);
   persistUpdatePreferencesState();
   settingsOpen.value = false;
-  await refreshSyncStatus();
+  await refreshCloudStatus();
 };
 </script>
 

@@ -31,8 +31,7 @@ pub struct PurgeTrashPayload {
 }
 
 fn current_retention_days(state: &AppState) -> Result<i64, AppError> {
-    let settings = state.db.load_settings()?;
-    Ok(db::tombstone_retention_days(settings.webdav_enabled))
+    Ok(db::tombstone_retention_days(state.db.is_cloud_active()))
 }
 
 #[tauri::command]
@@ -93,8 +92,7 @@ pub fn purge_trash(state: State<AppState>, payload: PurgeTrashPayload) -> ApiRes
             .db
             .expire_tombstones(db::TrashTable::RecurringTasks, &payload.recurring_ids),
     )?;
-    let settings = into_api(state.db.load_settings())?;
-    if !settings.webdav_enabled {
+    if !state.db.is_cloud_active() {
         into_api(
             state
                 .db

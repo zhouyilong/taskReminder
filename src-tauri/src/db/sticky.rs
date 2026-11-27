@@ -126,6 +126,7 @@ impl DbManager {
              WHERE id = ? AND deleted_at IS NULL",
             params![resolved_title, x, y, width, height, now, note_id],
         )?;
+        self.mark_pending(&conn, "tasks", note_id)?;
         if let Some(note) = existing {
             return Ok(StickyNote {
                 title: resolved_title,
@@ -182,6 +183,7 @@ impl DbManager {
              VALUES (?, ?, 'ONE_TIME', 'PENDING', ?, NULL, NULL, ?, NULL, ?, ?, ?, ?, ?, 1)",
             params![id, resolved_title, now, now, resolved_content, x, y, width, height],
         )?;
+        self.mark_pending(&conn, "tasks", &id)?;
         Ok(StickyNote {
             task_id: id,
             title: resolved_title,
@@ -208,6 +210,9 @@ impl DbManager {
              WHERE id = ?3 AND deleted_at IS NULL AND sticky_color IS NOT ?1",
             params![color, now_string(), task_id],
         )?;
+        if changed > 0 {
+            self.mark_pending(&conn, "tasks", task_id)?;
+        }
         Ok(changed > 0)
     }
 
@@ -222,6 +227,7 @@ impl DbManager {
              WHERE id = ?",
             params![content, now, task_id],
         )?;
+        self.mark_pending(&conn, "tasks", task_id)?;
         Ok(())
     }
 
@@ -244,19 +250,23 @@ impl DbManager {
              WHERE id = ?",
             params![resolved_title, resolved_title, now, task_id],
         )?;
+        self.mark_pending(&conn, "tasks", task_id)?;
         Ok(())
     }
 
     pub fn move_sticky_note(&self, task_id: &str, x: f64, y: f64) -> Result<(), AppError> {
         let conn = self.get_conn()?;
         let now = now_string();
-        conn.execute(
+        let changed = conn.execute(
             "UPDATE tasks
              SET sticky_pos_x = ?1, sticky_pos_y = ?2, sticky_is_open = 1, updated_at = ?3
              WHERE id = ?4
                AND (ABS(sticky_pos_x - ?1) >= 0.5 OR ABS(sticky_pos_y - ?2) >= 0.5 OR sticky_is_open != 1)",
             params![x, y, now, task_id],
         )?;
+        if changed > 0 {
+            self.mark_pending(&conn, "tasks", task_id)?;
+        }
         Ok(())
     }
 
@@ -268,7 +278,7 @@ impl DbManager {
     ) -> Result<(), AppError> {
         let conn = self.get_conn()?;
         let now = now_string();
-        conn.execute(
+        let changed = conn.execute(
             "UPDATE tasks
              SET sticky_width = ?1, sticky_height = ?2, sticky_is_open = 1, updated_at = ?3
              WHERE id = ?4
@@ -280,6 +290,9 @@ impl DbManager {
                 task_id
             ],
         )?;
+        if changed > 0 {
+            self.mark_pending(&conn, "tasks", task_id)?;
+        }
         Ok(())
     }
 
@@ -292,6 +305,7 @@ impl DbManager {
              WHERE id = ?",
             params![if pinned { 1 } else { 0 }, now, task_id],
         )?;
+        self.mark_pending(&conn, "tasks", task_id)?;
         Ok(())
     }
 
@@ -317,6 +331,7 @@ impl DbManager {
             "UPDATE tasks SET sticky_is_open = 0, updated_at = ? WHERE id = ?",
             params![now, task_id],
         )?;
+        self.mark_pending(&conn, "tasks", task_id)?;
         Ok(())
     }
 }

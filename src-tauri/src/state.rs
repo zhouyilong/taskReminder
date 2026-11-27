@@ -1,9 +1,9 @@
 use std::sync::{Arc, Mutex};
 
+use crate::cloud::CloudSyncService;
 use crate::db::DbManager;
 use crate::models::UiStatePayload;
 use crate::scheduler::ReminderScheduler;
-use crate::sync::CloudSyncService;
 
 #[derive(Clone)]
 pub struct AppState {

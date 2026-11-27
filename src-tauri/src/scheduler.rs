@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tokio::time::sleep;
 
 use crate::attention::{self, AttentionPayload, Screen};
+use crate::cloud::CloudSyncService;
 use crate::db::DbManager;
 use crate::errors::AppError;
 use crate::kinds::{ReminderAction, ReminderKind, TaskStatus};
@@ -18,7 +19,6 @@ use crate::recurrence::{
     has_ended, next_is_replaced, refreshed_workday_trigger, sanitize_recurring_task,
     should_trigger_now,
 };
-use crate::sync::CloudSyncService;
 use crate::time::{self, parse_datetime_any};
 use crate::tray;
 
@@ -145,6 +145,34 @@ impl ReminderScheduler {
 
     pub fn queue(&self) -> &NotificationQueue {
         &self.queue
+    }
+
+    /// 切换活动业务库（本地 ↔ 云端）或同步拉取后彻底重置计时器与待处理队列，再按当前库重新调度。
+    pub fn reset_and_reschedule(&self) -> Result<(), AppError> {
+        {
+            let mut jobs = self.task_jobs.lock().unwrap_or_else(|e| e.into_inner());
+            for (_, handle) in jobs.drain() {
+                handle.abort();
+            }
+        }
+        {
+            let mut jobs = self
+                .recurring_jobs
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            for (_, handle) in jobs.drain() {
+                handle.abort();
+            }
+        }
+        {
+            let mut jobs = self.temp_jobs.lock().unwrap_or_else(|e| e.into_inner());
+            for (_, handle) in jobs.drain() {
+                handle.abort();
+            }
+        }
+        let _ = self.queue.drain();
+        publish_queue(&self.app, &[]);
+        self.schedule_existing()
     }
 
     /// 勿扰时段已结束（或被关闭）时，弹出勿扰期间积压的提醒。

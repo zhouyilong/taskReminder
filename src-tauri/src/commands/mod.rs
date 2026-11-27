@@ -1,5 +1,6 @@
-//! 前端通过 `invoke` 调用的 Tauri 命令，按业务拆分到各子模块；注册见 `main.rs`。
+//! Tauri 命令模块，按业务域拆分。
 
+pub mod cloud;
 pub mod data;
 pub mod notification;
 pub mod recurring;
@@ -13,6 +14,6 @@ use crate::errors::AppError;
 
 pub type ApiResult<T> = Result<T, String>;
 
-pub fn into_api<T>(result: Result<T, AppError>) -> ApiResult<T> {
-    result.map_err(|e| e.to_string())
+pub(crate) fn into_api<T>(result: Result<T, AppError>) -> ApiResult<T> {
+    result.map_err(|err| err.to_string())
 }

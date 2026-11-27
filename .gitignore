@@ -7,12 +7,14 @@ dist/
 *.local
 
 # Tauri / Rust
+target/
 src-tauri/target/
 src-tauri/Cargo.lock
 
 # Environment
 .env
 .env.*
+!deploy/.env.example
 
 # Local toolchains (project-local Rust)
 .dev/

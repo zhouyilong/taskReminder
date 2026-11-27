@@ -17,7 +17,10 @@ impl DbManager {
         );
         let tx = conn.transaction()?;
         for id in ids {
-            tx.execute(&sql, params![EXPIRED_TOMBSTONE_TIME, now, id])?;
+            let n = tx.execute(&sql, params![EXPIRED_TOMBSTONE_TIME, now, id])?;
+            if n > 0 {
+                self.mark_pending(&tx, table.name(), id)?;
+            }
         }
         tx.commit()?;
         Ok(())
@@ -42,29 +45,56 @@ impl DbManager {
     }
 
     fn tombstone_old_completed_tasks(&self, retention_days: i64) -> Result<(), AppError> {
-        let conn = self.get_conn()?;
+        let mut conn = self.get_conn()?;
         let now = time::now();
         let now_text = format_datetime(&now);
         let completed_cutoff = format_datetime(&(now - chrono::Duration::days(retention_days)));
+        let tx = conn.transaction()?;
 
-        conn.execute(
+        let mut affected: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT id FROM tasks
+                 WHERE status = 'COMPLETED' AND deleted_at IS NULL
+                   AND completed_at IS NOT NULL AND completed_at < ?1",
+            )?;
+            let rows = stmt.query_map([completed_cutoff.as_str()], |r| r.get::<_, String>(0))?;
+            rows.filter_map(Result::ok).collect()
+        };
+
+        tx.execute(
             "UPDATE tasks SET deleted_at = ?1, updated_at = ?1
              WHERE status = 'COMPLETED' AND deleted_at IS NULL
                AND completed_at IS NOT NULL AND completed_at < ?2",
             params![now_text, completed_cutoff],
         )?;
-        if retention_days != DEFAULT_COMPLETED_RETENTION_DAYS {
-            return Ok(());
+        if retention_days == DEFAULT_COMPLETED_RETENTION_DAYS {
+            let overflow: Vec<String> = {
+                let mut stmt = tx.prepare(
+                    "SELECT id FROM tasks
+                     WHERE status = 'COMPLETED' AND deleted_at IS NULL
+                     ORDER BY completed_at DESC
+                     LIMIT -1 OFFSET 100",
+                )?;
+                let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+                rows.filter_map(Result::ok).collect()
+            };
+            if !overflow.is_empty() {
+                tx.execute(
+                    "UPDATE tasks SET deleted_at = ?1, updated_at = ?1 WHERE id IN (
+                        SELECT id FROM tasks
+                        WHERE status = 'COMPLETED' AND deleted_at IS NULL
+                        ORDER BY completed_at DESC
+                        LIMIT -1 OFFSET 100
+                    )",
+                    params![now_text],
+                )?;
+                affected.extend(overflow);
+            }
         }
-        conn.execute(
-            "UPDATE tasks SET deleted_at = ?1, updated_at = ?1 WHERE id IN (
-                SELECT id FROM tasks
-                WHERE status = 'COMPLETED' AND deleted_at IS NULL
-                ORDER BY completed_at DESC
-                LIMIT -1 OFFSET 100
-            )",
-            params![now_text],
-        )?;
+        for id in &affected {
+            self.mark_pending(&tx, "tasks", id)?;
+        }
+        tx.commit()?;
         Ok(())
     }
 

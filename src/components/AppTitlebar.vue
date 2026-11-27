@@ -10,9 +10,15 @@
       </span>
       <span class="app-title">任务提醒<span v-if="isDevMode" class="dev-tag"> [开发]</span></span>
       <span v-if="appVersion" class="app-version">v{{ appVersion }}</span>
-      <span class="tag sync-tag" :class="`is-${syncStatusTone}`" :title="syncStatusTitle">
-        <span class="sync-dot" aria-hidden="true"></span>{{ syncStatusLabel }}
-      </span>
+      <button
+        type="button"
+        class="tag tag-button mode-badge"
+        :class="`is-${modeBadge.tone}`"
+        :title="modeBadge.title"
+        @click="handleModeBadgeClick"
+      >
+        <span class="sync-dot" aria-hidden="true"></span>{{ modeBadge.label }}
+      </button>
       <button
         v-if="updateTagLabel"
         class="tag tag-button update-tag"
@@ -44,9 +50,7 @@
             <path d="M5.45 18.55L7.1 16.9" />
           </svg>
           <svg v-else key="moon" viewBox="0 0 24 24" aria-hidden="true" class="theme-icon">
-            <path
-              d="M20 15.2a8.2 8.2 0 0 1-10.2-10 9 9 0 1 0 10.2 10z"
-            />
+            <path d="M20 15.2a8.2 8.2 0 0 1-10.2-10 9 9 0 1 0 10.2 10z" />
           </svg>
         </transition>
       </button>
@@ -63,16 +67,23 @@
           <path d="M8.5 9h7M8.5 12.5h4" />
         </svg>
       </button>
+      <button
+        v-if="isCloudMode"
+        class="icon-button"
+        type="button"
+        :title="cloudSyncing ? '正在同步...' : '立即与云端同步'"
+        :disabled="cloudSyncing"
+        @click="handleCloudSync"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true" class="stroke-icon">
+          <path d="M7.5 18.5a4.5 4.5 0 0 1-.4-8.98 5.5 5.5 0 0 1 10.66 1.2A3.9 3.9 0 0 1 17 18.5H7.5z" />
+          <path d="M12 10.5v5M9.8 13.4l2.2 2.2 2.2-2.2" />
+        </svg>
+      </button>
       <button class="icon-button" type="button" title="设置" @click="openSettings">
         <svg viewBox="0 0 24 24" aria-hidden="true" class="stroke-icon">
           <circle cx="12" cy="12" r="3" />
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-        </svg>
-      </button>
-      <button class="icon-button" type="button" title="云同步" @click="openWebdav">
-        <svg viewBox="0 0 24 24" aria-hidden="true" class="stroke-icon">
-          <path d="M7.5 18.5a4.5 4.5 0 0 1-.4-8.98 5.5 5.5 0 0 1 10.66 1.2A3.9 3.9 0 0 1 17 18.5H7.5z" />
-          <path d="M12 10.5v5M9.8 13.4l2.2 2.2 2.2-2.2" />
         </svg>
       </button>
     </div>
@@ -104,6 +115,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
+import { useCloud } from "../composables/useCloud";
 import { useSettings } from "../composables/useSettings";
 import { useUiPrefs } from "../composables/useUiPrefs";
 import { useUpdater } from "../composables/useUpdater";
@@ -117,7 +129,8 @@ defineProps<{
 
 const emit = defineEmits<{ (e: "create-sticky-note"): void }>();
 
-const { syncStatusLabel, syncStatusTone, syncStatusTitle, openSettings, openWebdav } = useSettings();
+const { openSettings } = useSettings();
+const { cloudStatus, isCloudMode, cloudSyncing, modeBadge, startSwitchToLocal, syncCloudNow } = useCloud();
 const { isLightTheme, toggleTheme } = useUiPrefs();
 const { updateTagLabel } = useUpdater();
 const { openSearch } = useSearchPalette();
@@ -129,6 +142,22 @@ const getAppWindow = (): TauriWindow | null => {
     return getCurrentWindow();
   } catch {
     return null;
+  }
+};
+
+const handleModeBadgeClick = async () => {
+  if (cloudStatus.value?.mode === "cloud" && cloudStatus.value.state === "offline") {
+    await startSwitchToLocal();
+    return;
+  }
+  await openSettings();
+};
+
+const handleCloudSync = async () => {
+  try {
+    await syncCloudNow();
+  } catch (error) {
+    console.error("[cloud] 手动同步失败", error);
   }
 };
 
@@ -157,7 +186,6 @@ const toggleMaximize = async () => {
 };
 
 const handleClose = async () => {
-  // 默认“关闭”改为最小化到托盘：隐藏主窗口，保留后台运行（托盘可重新打开/退出）。
   await getAppWindow()?.hide();
 };
 

@@ -46,7 +46,7 @@ impl DbManager {
                     task.id,
                     task.description.trim(),
                     task.sticky_content.clone().unwrap_or_default(),
-                    task.status,
+                    task.status.as_str(),
                     task.created_at,
                     task.completed_at,
                     task.reminder_time,
@@ -61,6 +61,7 @@ impl DbManager {
                     i64::from(task.urgent),
                 ],
             )?;
+            self.mark_pending(&tx, "tasks", &task.id)?;
             summary.count(outcome);
         }
 
@@ -113,7 +114,7 @@ impl DbManager {
                     if task.is_paused { 1 } else { 0 },
                     task.start_time,
                     task.end_time,
-                    task.repeat_mode,
+                    task.repeat_mode.as_str(),
                     task.schedule_time,
                     task.schedule_weekday,
                     task.schedule_day,
@@ -128,6 +129,7 @@ impl DbManager {
                     task.temp_replaces,
                 ],
             )?;
+            self.mark_pending(&tx, "recurring_tasks", &task.id)?;
             summary.count(outcome);
         }
 
@@ -162,14 +164,15 @@ impl DbManager {
                     record.id,
                     record.reminder_id,
                     record.description,
-                    record.reminder_type,
+                    record.reminder_type.as_str(),
                     record.trigger_time,
                     record.close_time,
-                    record.action,
+                    record.action.as_str(),
                     record.updated_at.clone().unwrap_or_else(|| record.trigger_time.clone()),
                     record.deleted_at,
                 ],
             )?;
+            self.mark_pending(&tx, "reminder_records", &record.id)?;
             summary.count(outcome);
         }
 

@@ -10,15 +10,12 @@ pub fn start_maintenance(db: DbManager) {
     tauri::async_runtime::spawn(async move {
         loop {
             sleep(std::time::Duration::from_secs(3600)).await;
-            let sync_enabled = db_cleanup
-                .load_settings()
-                .map(|settings| settings.webdav_enabled)
-                .unwrap_or(true);
+            let cloud_mode = db_cleanup.is_cloud_active();
             let completed_retention = db_cleanup
                 .completed_retention_days()
                 .unwrap_or(DEFAULT_COMPLETED_RETENTION_DAYS);
-            let _ = db_cleanup
-                .cleanup_data(tombstone_retention_days(sync_enabled), completed_retention);
+            let _ =
+                db_cleanup.cleanup_data(tombstone_retention_days(cloud_mode), completed_retention);
         }
     });
 
@@ -28,7 +25,8 @@ pub fn start_maintenance(db: DbManager) {
         sleep(std::time::Duration::from_secs(60)).await;
         loop {
             let keep = backup::keep_count(&db_backup);
-            if let Err(err) = backup::ensure_daily_backup(&db_backup.db_path(), &time::now(), keep)
+            if let Err(err) =
+                backup::ensure_daily_backup(&db_backup.local_db_path(), &time::now(), keep)
             {
                 eprintln!("[backup] 自动备份失败: {}", err);
             }

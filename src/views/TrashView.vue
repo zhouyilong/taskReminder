@@ -73,7 +73,7 @@ import { useAppData } from "../composables/useAppData";
 import { useContextMenu } from "../composables/useContextMenu";
 import { useDialogs } from "../composables/useDialogs";
 import { usePagination } from "../composables/usePagination";
-import { useSettings } from "../composables/useSettings";
+import { useCloud } from "../composables/useCloud";
 
 type TrashItem = {
   key: string;
@@ -90,7 +90,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const { dataVersion, refreshAll } = useAppData();
 const { showContextMenu } = useContextMenu();
 const { confirmAction } = useDialogs();
-const { settingsDraft } = useSettings();
+const { isCloudMode } = useCloud();
 
 const deletedTasks = ref<Task[]>([]);
 const deletedRecurring = ref<RecurringTask[]>([]);
@@ -98,7 +98,7 @@ const retentionDays = ref(7);
 const keyword = ref("");
 const busy = ref(false);
 
-const syncHint = computed(() => (settingsDraft.webdavEnabled ? "（已开启云同步）" : ""));
+const syncHint = computed(() => (isCloudMode.value ? "（云端模式）" : ""));
 
 const remainingDays = (deletedAt: string) => {
   const deleted = new Date(deletedAt).getTime();

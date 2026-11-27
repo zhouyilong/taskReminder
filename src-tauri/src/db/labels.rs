@@ -59,10 +59,14 @@ impl DbManager {
                 if raw.as_deref() == Some(value.as_str()) {
                     continue;
                 }
-                changed += tx.execute(
+                let n = tx.execute(
                     &format!("UPDATE {table} SET tags = ?1, updated_at = ?2 WHERE id = ?3"),
                     params![value, now, id],
                 )?;
+                if n > 0 {
+                    self.mark_pending(&tx, table, &id)?;
+                    changed += n;
+                }
             }
         }
         tx.commit()?;
@@ -92,10 +96,14 @@ impl DbManager {
             if !same_name(&project, &old) || project == new {
                 continue;
             }
-            changed += tx.execute(
+            let n = tx.execute(
                 "UPDATE tasks SET project = ?1, updated_at = ?2 WHERE id = ?3",
                 params![new, now, id],
             )?;
+            if n > 0 {
+                self.mark_pending(&tx, "tasks", &id)?;
+                changed += n;
+            }
         }
         tx.commit()?;
         Ok(changed)

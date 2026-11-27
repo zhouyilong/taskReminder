@@ -3,6 +3,7 @@
 mod attention;
 mod autostart;
 mod backup;
+mod cloud;
 mod commands;
 mod db;
 mod errors;
@@ -23,7 +24,6 @@ mod shortcuts;
 mod single_instance;
 mod state;
 mod sync;
-mod sync_crypto;
 mod sync_schema;
 mod time;
 mod tray;
@@ -33,14 +33,16 @@ use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
 
-use crate::commands::{data, notification, recurring, settings, sticky, system, tasks, trash};
+use crate::cloud::CloudSyncService;
+use crate::commands::{
+    cloud as cloud_cmd, data, notification, recurring, settings, sticky, system, tasks, trash,
+};
 use crate::db::DbManager;
 use crate::errors::AppError;
 use crate::notification_queue::NotificationQueue;
 use crate::scheduler::ReminderScheduler;
 use crate::single_instance::InstanceLock;
 use crate::state::AppState;
-use crate::sync::CloudSyncService;
 
 fn main() {
     tauri::Builder::default()
@@ -105,9 +107,6 @@ fn main() {
             sticky::close_todo_sticky,
             sticky::set_todo_sticky_pinned,
             sticky::set_todo_sticky_color,
-            settings::test_webdav,
-            settings::sync_now,
-            settings::change_sync_passphrase,
             settings::set_autostart,
             notification::ack_notification,
             notification::ack_all_notifications,
@@ -117,7 +116,6 @@ fn main() {
             settings::apply_quick_add_shortcut,
             recurring::get_holiday_years,
             notification::snooze_notification,
-            settings::get_sync_status,
             notification::get_notification_queue,
             system::get_current_theme,
             system::get_debug_info,
@@ -129,7 +127,24 @@ fn main() {
             data::list_backups,
             data::create_backup_now,
             data::open_backup_dir,
-            data::restore_backup
+            data::restore_backup,
+            cloud_cmd::get_cloud_status,
+            cloud_cmd::cloud_test_connection,
+            cloud_cmd::cloud_set_server_url,
+            cloud_cmd::cloud_login,
+            cloud_cmd::cloud_logout,
+            cloud_cmd::cloud_sync_now,
+            cloud_cmd::cloud_update_profile,
+            cloud_cmd::cloud_change_password,
+            cloud_cmd::preview_switch_to_cloud,
+            cloud_cmd::switch_to_cloud,
+            cloud_cmd::preview_switch_to_local,
+            cloud_cmd::switch_to_local,
+            cloud_cmd::admin_list_users,
+            cloud_cmd::admin_create_user,
+            cloud_cmd::admin_update_user,
+            cloud_cmd::admin_reset_password,
+            cloud_cmd::admin_delete_user
         ])
         .setup(|app| {
             let result: Result<(), AppError> = (|| {
@@ -174,6 +189,8 @@ fn main() {
                 let is_first_launch = !db_path.exists();
                 let db = DbManager::new(db_path)?;
                 let sync = CloudSyncService::new(app_handle.clone(), db.clone());
+                // 先按持久化模式切换活动库（云端模式切到 accounts/<user_id>.db），再建立调度与恢复便签。
+                sync.start()?;
                 let scheduler = ReminderScheduler::new(
                     app_handle.clone(),
                     db.clone(),
@@ -182,7 +199,6 @@ fn main() {
                 );
                 scheduler.schedule_existing()?;
                 scheduler.start_watchdog();
-                sync.start()?;
                 maintenance::start_maintenance(db.clone());
 
                 let mut settings = db.load_settings()?;

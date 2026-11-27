@@ -101,6 +101,7 @@ impl DbManager {
              VALUES (?, ?, 'ONE_TIME', 'PENDING', ?, NULL, NULL, ?, ?, NULL, ?, ?, ?)",
             params![id, description, now, note, now, tags, priority, project],
         )?;
+        self.mark_pending(&conn, "tasks", &id)?;
         Ok(Task {
             id,
             description: description.to_string(),
@@ -154,6 +155,7 @@ impl DbManager {
                 task_id
             ],
         )?;
+        self.mark_pending(&conn, "tasks", task_id)?;
         Ok(())
     }
 
@@ -165,6 +167,7 @@ impl DbManager {
             "UPDATE tasks SET status = 'COMPLETED', completed_at = ?, sticky_is_open = 0, updated_at = ? WHERE id = ?",
             params![now, now, task_id],
         )?;
+        self.mark_pending(&conn, "tasks", task_id)?;
         Ok(())
     }
 
@@ -175,6 +178,7 @@ impl DbManager {
             "UPDATE tasks SET status = 'PENDING', completed_at = NULL, updated_at = ? WHERE id = ?",
             params![now, task_id],
         )?;
+        self.mark_pending(&conn, "tasks", task_id)?;
         Ok(())
     }
 
@@ -186,6 +190,7 @@ impl DbManager {
             "UPDATE tasks SET deleted_at = ?, sticky_is_open = 0, updated_at = ? WHERE id = ?",
             params![now, now, task_id],
         )?;
+        self.mark_pending(&conn, "tasks", task_id)?;
         Ok(())
     }
 
@@ -213,6 +218,7 @@ impl DbManager {
             "UPDATE tasks SET deleted_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL",
             params![now, task_id],
         )?;
+        self.mark_pending(&conn, "tasks", task_id)?;
         Ok(())
     }
 
@@ -227,6 +233,7 @@ impl DbManager {
             "UPDATE tasks SET reminder_time = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
             params![reminder_time, now, task_id],
         )?;
+        self.mark_pending(&conn, "tasks", task_id)?;
         Ok(())
     }
 
@@ -238,6 +245,9 @@ impl DbManager {
              WHERE id = ?3 AND deleted_at IS NULL AND due_at IS NOT ?1",
             params![due_at, now_string(), task_id],
         )?;
+        if changed > 0 {
+            self.mark_pending(&conn, "tasks", task_id)?;
+        }
         Ok(changed > 0)
     }
 
@@ -249,6 +259,9 @@ impl DbManager {
              WHERE id = ?3 AND deleted_at IS NULL AND project IS NOT ?1",
             params![normalize_project(project), now_string(), task_id],
         )?;
+        if changed > 0 {
+            self.mark_pending(&conn, "tasks", task_id)?;
+        }
         Ok(changed > 0)
     }
 
@@ -260,6 +273,9 @@ impl DbManager {
              WHERE id = ?3 AND deleted_at IS NULL AND urgent IS NOT ?1",
             params![i64::from(urgent), now_string(), task_id],
         )?;
+        if changed > 0 {
+            self.mark_pending(&conn, "tasks", task_id)?;
+        }
         Ok(changed > 0)
     }
 
@@ -273,11 +289,15 @@ impl DbManager {
             if !order.is_finite() {
                 return Err(AppError::Invalid("排序位置无效".to_string()));
             }
-            changed += tx.execute(
+            let n = tx.execute(
                 "UPDATE tasks SET sort_order = ?1, updated_at = ?2
                  WHERE id = ?3 AND deleted_at IS NULL AND sort_order IS NOT ?1",
                 params![order, now, id],
             )?;
+            if n > 0 {
+                self.mark_pending(&tx, "tasks", id)?;
+                changed += n;
+            }
         }
         tx.commit()?;
         Ok(changed)
@@ -345,6 +365,7 @@ impl DbManager {
                 )?,
             };
             if rows > 0 {
+                self.mark_pending(&tx, "tasks", id)?;
                 changed.push(id.clone());
             }
         }
@@ -358,8 +379,8 @@ pub(super) fn task_from_row(row: &rusqlite::Row<'_>) -> Result<Task, rusqlite::E
         id: row.get(0)?,
         description: row.get(1)?,
         sticky_content: row.get::<_, Option<String>>(2)?,
-        task_type: row.get(3)?,
-        status: row.get(4)?,
+        task_type: TaskType::parse(&row.get::<_, Option<String>>(3)?.unwrap_or_default()),
+        status: TaskStatus::parse(&row.get::<_, Option<String>>(4)?.unwrap_or_default()),
         created_at: row.get(5)?,
         completed_at: row.get(6)?,
         reminder_time: row.get(7)?,

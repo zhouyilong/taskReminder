@@ -1,56 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { parseSyncState, syncStateLabel, syncStateTone } from "./syncStatus";
 
-describe("parseSyncState", () => {
-  it("识别状态码", () => {
-    expect(parseSyncState("success")).toBe("success");
-    expect(parseSyncState("first_sync")).toBe("first_sync");
-    expect(parseSyncState("lock_busy")).toBe("lock_busy");
-    expect(parseSyncState("passphrase_mismatch")).toBe("passphrase_mismatch");
-  });
+describe("syncStatus (v3.0.0 cloud states)", () => {
+  it("maps known cloud states to labels and tones", () => {
+    expect(parseSyncState("")).toBe("local");
+    expect(syncStateLabel("local")).toBe("本地模式");
+    expect(syncStateLabel("connected")).toBe("已连接");
+    expect(syncStateLabel("syncing")).toBe("同步中");
+    expect(syncStateLabel("offline")).toBe("已离线");
+    expect(syncStateLabel("auth_required")).toBe("请重新登录");
 
-  it("兼容旧版中文文案", () => {
-    expect(parseSyncState("同步成功")).toBe("success");
-    expect(parseSyncState("首次同步完成")).toBe("first_sync");
-    expect(parseSyncState("同步失败")).toBe("failed");
-    expect(parseSyncState("同步中")).toBe("syncing");
-  });
-
-  it("空值视为未同步，未知值返回 null", () => {
-    expect(parseSyncState(null)).toBe("never");
-    expect(parseSyncState("")).toBe("never");
-    expect(parseSyncState("something")).toBeNull();
-  });
-});
-
-describe("syncStateLabel", () => {
-  it("状态码映射为文案，未知值原样显示", () => {
-    expect(syncStateLabel("success")).toBe("同步成功");
-    expect(syncStateLabel("passphrase_mismatch")).toBe("同步密码不匹配");
-    expect(syncStateLabel("never")).toBe("未同步");
-    expect(syncStateLabel(undefined)).toBe("未同步");
-    expect(syncStateLabel("同步成功")).toBe("同步成功");
-    expect(syncStateLabel("something")).toBe("something");
-  });
-});
-
-describe("syncStateTone", () => {
-  it("按状态码判断色调", () => {
-    expect(syncStateTone("success")).toBe("success");
-    expect(syncStateTone("first_sync")).toBe("success");
+    expect(syncStateTone("local")).toBe("idle");
+    expect(syncStateTone("connected")).toBe("success");
     expect(syncStateTone("syncing")).toBe("syncing");
-    expect(syncStateTone("failed")).toBe("error");
-    expect(syncStateTone("passphrase_mismatch")).toBe("error");
-    expect(syncStateTone("lock_busy")).toBe("idle");
-    expect(syncStateTone("never")).toBe("idle");
+    expect(syncStateTone("offline")).toBe("error");
+    expect(syncStateTone("auth_required")).toBe("error");
+    expect(syncStateTone("connected", "连接超时")).toBe("error");
   });
 
-  it("带错误信息时为 error", () => {
-    expect(syncStateTone("success", "网络错误")).toBe("error");
-  });
-
-  it("兼容旧版中文文案", () => {
-    expect(syncStateTone("同步成功")).toBe("success");
-    expect(syncStateTone("同步失败")).toBe("error");
+  it("keeps unknown status strings verbatim", () => {
+    expect(parseSyncState("custom_state")).toBeNull();
+    expect(syncStateLabel("custom_state")).toBe("custom_state");
   });
 });
