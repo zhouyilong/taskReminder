@@ -106,34 +106,74 @@
         variant="ghost"
         :theme="editorTheme"
         placeholder="在这里写下便签内容..."
+        move-struck-lines
         @update:modelValue="handleContentInput"
+        @text-selection-change="hasTextSelection = $event"
       />
       <footer class="paper-note-footer">
         <div v-if="checklist" class="paper-note-progress" aria-hidden="true">
           <span class="paper-note-progress-fill" :style="{ width: `${(checklist.done / checklist.total) * 100}%` }"></span>
         </div>
-        <div class="paper-note-color">
-          <button
-            class="paper-note-color-trigger"
-            type="button"
-            title="便签颜色"
-            @mousedown.stop
-            @click.stop="colorMenuOpen = !colorMenuOpen"
-          >
-            <span class="sticky-color-dot" :class="dotClass(note.color)"></span>
-          </button>
-          <div v-if="colorMenuOpen" class="paper-note-color-menu" role="menu" @mousedown.stop>
+        <div class="paper-note-format-actions">
+          <div class="paper-note-color">
             <button
-              v-for="option in STICKY_COLOR_OPTIONS"
-              :key="option.value"
-              class="paper-note-color-option"
-              :class="{ active: resolveStickyColor(note.color) === option.value }"
+              class="paper-note-color-trigger"
               type="button"
-              :title="option.label"
-              @click.stop="chooseColor(option.value)"
+              title="便签颜色"
+              @mousedown.stop
+              @click.stop="togglePaperColorMenu"
             >
-              <span class="sticky-color-dot" :class="dotClass(option.value)"></span>
+              <span class="sticky-color-dot" :class="dotClass(note.color)"></span>
             </button>
+            <div v-if="colorMenuOpen" class="paper-note-color-menu" role="menu" @mousedown.stop>
+              <button
+                v-for="option in STICKY_COLOR_OPTIONS"
+                :key="option.value"
+                class="paper-note-color-option"
+                :class="{ active: resolveStickyColor(note.color) === option.value }"
+                type="button"
+                :title="option.label"
+                @click.stop="chooseColor(option.value)"
+              >
+                <span class="sticky-color-dot" :class="dotClass(option.value)"></span>
+              </button>
+            </div>
+          </div>
+          <div @keydown.esc.stop="closeTextColorMenu">
+            <button
+              ref="textColorTrigger"
+              class="paper-note-color-trigger paper-note-text-color-trigger"
+              type="button"
+              title="文字颜色"
+              aria-label="文字颜色"
+              :aria-expanded="textColorMenuOpen"
+              :disabled="!hasTextSelection"
+              @mousedown.stop.prevent
+              @click.stop="toggleTextColorMenu"
+            >A</button>
+            <div
+              v-if="textColorMenuOpen"
+              ref="textColorPalette"
+              class="paper-note-color-menu"
+              role="group"
+              aria-label="文字颜色选项"
+              @mousedown.stop.prevent
+            >
+              <button class="paper-note-color-option" type="button" title="默认文字颜色" aria-label="默认文字颜色" @click="chooseTextColor(null)">
+                <span class="paper-note-text-color-swatch" aria-hidden="true">A</span>
+              </button>
+              <button
+                v-for="option in NOTE_TEXT_COLORS"
+                :key="option.value"
+                class="paper-note-color-option"
+                type="button"
+                :title="option.label"
+                :aria-label="option.label"
+                @click="chooseTextColor(option.value)"
+              >
+                <span class="paper-note-text-color-swatch" :data-note-color="option.value" aria-hidden="true">A</span>
+              </button>
+            </div>
           </div>
         </div>
         <!-- 全部勾完时页脚放“标记完成”，创建时间让出位置。 -->
@@ -211,13 +251,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import MarkdownNoteEditor from "./components/MarkdownNoteEditor.vue";
 import { safeStorage } from "./safeStorage";
 import { api } from "./api";
 import { checklistProgress, markdownToCopyText } from "./markdown";
+import { NOTE_TEXT_COLORS, type NoteTextColor } from "./noteTextColor";
 import { copyText } from "./clipboard";
 import type { AppSettings, StickyNote, UiStatePayload } from "./types";
 import { STICKY_COLOR_OPTIONS, resolveStickyColor, stickyColorClass, stickyDotClass as dotClass } from "./stickies";
@@ -293,6 +334,39 @@ let unlistenColorUpdated: UnlistenFn | null = null;
 
 // 便签颜色（v2.1）：在 html/body 上加 sticky-color-<颜色>，覆盖纸面颜色令牌（Linux 不透明窗口的底色也随之改变）。
 const colorMenuOpen = ref(false);
+const hasTextSelection = ref(false);
+const textColorMenuOpen = ref(false);
+const textColorTrigger = ref<HTMLButtonElement | null>(null);
+const textColorPalette = ref<HTMLDivElement | null>(null);
+
+const togglePaperColorMenu = () => {
+  textColorMenuOpen.value = false;
+  colorMenuOpen.value = !colorMenuOpen.value;
+};
+
+const toggleTextColorMenu = async (event: MouseEvent) => {
+  colorMenuOpen.value = false;
+  textColorMenuOpen.value = !textColorMenuOpen.value;
+  if (event.detail === 0 && textColorMenuOpen.value) {
+    await nextTick();
+    textColorPalette.value?.querySelector("button")?.focus();
+  }
+};
+
+const closeTextColorMenu = () => {
+  if (!textColorMenuOpen.value) return;
+  textColorMenuOpen.value = false;
+  textColorTrigger.value?.focus();
+};
+
+const chooseTextColor = (color: NoteTextColor | null) => {
+  textColorMenuOpen.value = false;
+  editorRef.value?.setTextColor(color);
+};
+
+watch(hasTextSelection, value => {
+  if (!value) textColorMenuOpen.value = false;
+});
 const applyColorClass = (color?: string | null) => {
   for (const element of [document.documentElement, document.body]) {
     for (const option of STICKY_COLOR_OPTIONS) {
@@ -320,6 +394,7 @@ const chooseColor = async (color: string) => {
 
 const closeColorMenu = () => {
   colorMenuOpen.value = false;
+  textColorMenuOpen.value = false;
 };
 
 // 一键复制（v2.2.5）：复制正文（保留 Markdown 的列表与勾选项），正文为空时复制标题。

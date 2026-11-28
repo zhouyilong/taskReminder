@@ -5796,6 +5796,12 @@ button.task-tag:disabled {
 }
 
 /* 便签窗口页脚：颜色选择 */
+.paper-note-format-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 .paper-note-color {
   position: relative;
   display: inline-flex;
@@ -5820,6 +5826,26 @@ button.task-tag:disabled {
 .paper-note-color-trigger:hover {
   background: var(--sticky-control-hover);
 }
+
+.paper-note-text-color-trigger,
+.paper-note-text-color-swatch {
+  color: var(--sticky-text);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.paper-note-text-color-trigger:disabled {
+  color: var(--sticky-text-faint);
+  cursor: default;
+  background: transparent;
+}
+
+[data-note-color="red"] { color: var(--danger-text); }
+[data-note-color="amber"] { color: var(--warning-text); }
+[data-note-color="green"] { color: var(--success-text); }
+[data-note-color="blue"] { color: var(--primary-text); }
+[data-note-color="violet"] { color: var(--violet-text); }
 
 .paper-note-color-menu {
   position: absolute;

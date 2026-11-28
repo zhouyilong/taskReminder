@@ -1,4 +1,5 @@
 import { test as base, expect, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const MOCK_PATH = fileURLToPath(new URL("./tauri-mock.js", import.meta.url));
@@ -32,8 +33,13 @@ export const test = base.extend<{ app: Page; todoSticky: Page }>({
 });
 
 /** 打开单张便签窗口（`sticky-note-item.html?noteId=...`，v2.2.6），等编辑器就绪。 */
-export const openStickyNote = async (page: Page, noteId: string) => {
-  await page.addInitScript({ path: MOCK_PATH });
+export const openStickyNote = async (page: Page, noteId: string, stickyContent?: string) => {
+  if (stickyContent === undefined) {
+    await page.addInitScript({ path: MOCK_PATH });
+  } else {
+    const seed = { tasks: [{ id: noteId, description: "测试便签", status: "PENDING", stickyContent }] };
+    await page.addInitScript({ content: `window.__TAURI_MOCK_SEED__ = ${JSON.stringify(seed)};\n${readFileSync(MOCK_PATH, "utf8")}` });
+  }
   await page.goto(`/sticky-note-item.html?noteId=${encodeURIComponent(noteId)}`);
   await expect(page.locator(".paper-note-window .ProseMirror")).toBeVisible();
 };
