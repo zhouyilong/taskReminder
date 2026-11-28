@@ -10,9 +10,12 @@
 
 <script setup lang="ts">
 import { Crepe } from "@milkdown/crepe";
+import { editorViewCtx } from "@milkdown/kit/core";
 import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import "@milkdown/crepe/theme/common/style.css";
 import { isUserMarkdownChange, type MarkdownBaselineState } from "../markdownBaseline";
+import { noteTextColorSchema, remarkNoteTextColor, type NoteTextColor } from "../noteTextColor";
+import { stickyStrikeThrough } from "../stickyStrikeThrough";
 
 const props = withDefaults(defineProps<{
   modelValue: string;
@@ -20,6 +23,7 @@ const props = withDefaults(defineProps<{
   readonly?: boolean;
   theme?: "light" | "dark";
   variant?: "card" | "ghost";
+  moveStruckLines?: boolean;
 }>(), {
   placeholder: "",
   readonly: false,
@@ -29,6 +33,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   "update:modelValue": [value: string];
+  "text-selection-change": [hasText: boolean];
 }>();
 
 const editorRoot = ref<HTMLDivElement | null>(null);
@@ -42,6 +47,7 @@ let activeBaseline: MarkdownBaselineState | null = null;
 const destroyEditor = async () => {
   const instance = crepe.value;
   crepe.value = null;
+  emit("text-selection-change", false);
   if (instance) {
     await instance.destroy();
   }
@@ -77,11 +83,19 @@ const buildEditor = async (markdown: string) => {
       }
     }
   });
+  instance.editor.use(remarkNoteTextColor).use(noteTextColorSchema);
+  if (props.moveStruckLines) instance.editor.use(stickyStrikeThrough);
 
   // 载入内容的重新序列化不算修改（见 markdownBaseline.ts），否则打开便签就会自动保存一次。
   const baselineState: MarkdownBaselineState = { ready: false, baseline: null, userEdited: false };
   activeBaseline = baselineState;
   instance.on(listener => {
+    listener.selectionUpdated((ctx, selection) => {
+      if (!baselineState.ready || token !== buildToken) return;
+      const { from, to } = selection;
+      const { doc } = ctx.get(editorViewCtx).state;
+      emit("text-selection-change", from !== to && !!doc.textBetween(from, to).trim());
+    });
     listener.markdownUpdated((_ctx, nextMarkdown) => {
       currentMarkdown.value = nextMarkdown;
       if (!isUserMarkdownChange(baselineState, nextMarkdown)) {
@@ -146,7 +160,24 @@ const focus = async () => {
   }
 };
 
-defineExpose({ flush, focus });
+const setTextColor = (color: NoteTextColor | null) => {
+  if (props.readonly) return;
+  crepe.value?.editor.action(ctx => {
+    const view = ctx.get(editorViewCtx);
+    const { selection: { from, to }, tr } = view.state;
+    if (from === to) return;
+    const type = noteTextColorSchema.type(ctx);
+    if (color) {
+      tr.addMark(from, to, type.create({ color }));
+    } else {
+      tr.removeMark(from, to, type);
+    }
+    if (tr.docChanged) view.dispatch(tr);
+    view.focus();
+  });
+};
+
+defineExpose({ flush, focus, setTextColor });
 
 onBeforeUnmount(() => {
   buildToken += 1;
