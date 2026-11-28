@@ -144,7 +144,7 @@ const createGroups = () => {
           if ((a.name === "") !== (b.name === "")) {
             return a.name === "" ? 1 : -1;
           }
-          return b.total - a.total || a.name.localeCompare(b.name);
+          return b.total - a.total || a.name.localeCompare(b.name, "zh-CN");
         });
     }
   };

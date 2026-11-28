@@ -178,8 +178,8 @@ describe("computeStats", () => {
     expect(stats.projects[0].handledRate).toBe(1);
     // 按标签的结果不受影响。
     expect(stats.tags.map(item => [item.tag, item.total])).toEqual([
-      ["健康", 1],
       ["工作", 1],
+      ["健康", 1],
       ["", 4],
     ]);
   });
